@@ -22,6 +22,12 @@ Contrainte transverse : les données de santé relèvent de l'article 9 du RGPD.
 **Aucune donnée identifiante n'entre dans l'entrepôt** — l'identité est remplacée par un
 pseudonyme au moment même de la copie depuis le dépôt du CHU.
 
+![Tableau de bord de pilotage hospitalier](docs/img/dashboard-pilotage.jpg)
+
+*Les deux tableaux de bord sont recréés par le code à chaque provisionnement — aucun clic
+n'est nécessaire après un clone. Chaque chiffre affiché est retrouvable en une requête SQL
+sur l'entrepôt.*
+
 ---
 
 ## Démarrage rapide
@@ -187,14 +193,38 @@ uv run eds --help
 │   ├── test_dashboards.py  mise en page : chevauchements, titres, tables visées
 │   └── test_e2e.py         invariants de l'entrepôt (nécessite Docker)
 ├── docs/
-│   ├── RAPPORT.md          dossier d'analyse et de conception
-│   ├── EXPLOITATION.md     lancement, maintenance, reprise sur incident
-│   └── data-model.puml     modèle de données
+│   ├── RAPPORT.md          dossier d'analyse et de conception (Partie 1)
+│   ├── EXPLOITATION.md     lancement, maintenance, reprise sur incident (Partie 2)
+│   ├── data-model.puml     modèle de données (source PlantUML)
+│   └── img/                diagramme rendu et captures des tableaux de bord
 ├── .github/workflows/    Intégration continue (style, tests, invariants)
 ├── benchmarks/           Banc d'essai de tenue en charge (20 M de relevés)
 ├── scheduling/           Exemple de planification cron
 └── PLAN.md               Plan d'implémentation détaillé
 ```
+
+---
+
+## Qualité et vérification
+
+Rien de ce qui suit n'est déclaratif : chaque affirmation du dossier est adossée à une
+commande que vous pouvez rejouer.
+
+| Vérification | Commande | Ce qu'elle établit |
+|---|---|---|
+| Style | `make lint` | ruff, sur `src/` et `tests/` |
+| Tests unitaires | `make test` | 64 tests, sans Docker : pseudonymisation, collecte, incrémentalité, découpage SQL, mise en page des dashboards |
+| Invariants de l'entrepôt | `make test-e2e` | 63 tests : volumétries exactes, règles qualité, k-anonymat, cloisonnement, lignage |
+| Cloisonnement | `uv run eds check-cloisonnement` | 9 scénarios réels, aux deux niveaux (moteur et interface) |
+| Rapport qualité | `make quality` | les 18 règles du dernier traitement, chiffrées |
+| Tenue en charge | `uv run benchmarks/charge_monitoring.py` | 20 M de relevés chargés par le chemin réel du pipeline |
+
+**Ce que la CI couvre, et ce qu'elle ne couvre pas.** Le workflow exécute le style et les
+**64 tests unitaires** à chaque poussée. Les **63 tests d'intégration** ne s'y exécutent que
+si un jeu de données est mis à disposition du runner (`vars.EDS_SOURCE_AVAILABLE`) : le
+dépôt du CHU contient l'identité réelle des patients et n'est pas versionné. C'est un
+arbitrage assumé — nous préférons une CI partielle à un dépôt qui contiendrait des données
+de santé. Localement, `make test-e2e` les exécute tous.
 
 ---
 
@@ -205,7 +235,8 @@ uv run eds --help
 | **Pseudonymisation** | `HMAC-SHA256(sel, IPP)` appliqué à la copie vers le lake. Stable — les jointures tiennent — et non réversible sans le sel, qui n'est ni versionné ni journalisé. |
 | **Minimisation** | NIR, nom et prénom ne sont jamais copiés ; la date de naissance est réduite à l'année ; la table des constantes ne porte même pas de pseudonyme, aucun indicateur n'en ayant besoin. |
 | **Cloisonnement** | Deux comptes SQL ClickHouse en lecture seule sur leur seule base gold, deux connexions et deux collections Metabase. Une requête écrite à la main ne franchit pas la frontière : c'est le moteur qui refuse. Chaque utilisateur ne voit qu'un tableau de bord et qu'une base — l'autre usage n'existe pas de son point de vue. |
-| **Petits effectifs** | `HAVING uniqExact(patient_pseudo) >= 5` sur chaque cellule diffusée en recherche ; âges en tranches de dix ans. L'effet est mesuré et affiché : 4 cellules retirées sur 1 600 au grain le plus fin. |
+| **Petits effectifs** | `HAVING uniqExact(patient_pseudo) >= 5` sur chaque cellule diffusée en recherche ; âges en tranches de dix ans. Le seuil seul ne suffit pas : publier une marge **et** sa décomposition laisse retrouver la cellule cachée par soustraction, d'où une **suppression complémentaire** (une marge n'est diffusée que si toute sa décomposition l'est). L'effet est mesuré et affiché : 4 cellules retirées sur 1 600 au grain fin, 3 marges sur 200. Un test rejoue l'attaque et exige qu'elle ne rende rien. |
+| **Disponibilité** | Les deux comptes autorisent le SQL libre : un profil de réglages (`readonly = 2`, temps et mémoire bornés) et un quota horaire empêchent une requête maladroite de priver l'autre usage de son tableau de bord. |
 | **Traçabilité** | Chaque ligne de bronze et de silver porte son fichier d'origine, son jour de dépôt et son horodatage de traitement. Les tables gold sont des agrégats : elles se rattachent à leur run via `ops.quality_report`. Chaque exécution est journalisée, chaque règle qualité chiffrée. |
 
 ---

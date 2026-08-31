@@ -13,8 +13,8 @@ Le plan d'implémentation complet et autosuffisant est dans **`PLAN.md`** — le
 3. **`source-filestorage/` est en lecture seule.** Ne jamais le modifier, le déplacer ou y écrire. Il est gitignoré (il contient l'identité en clair), tout comme `data/` (lake + volumes) et `.env`.
 4. **Idempotence obligatoire.** Bronze est partitionné par jour d'ingestion ; rejouer un jour = `DROP PARTITION` puis rechargement. Relancer le pipeline deux fois ne doit jamais dupliquer une ligne. L'état d'ingestion vit dans `ops.ingest_log` (checksum des fichiers).
 5. **On écarte, on ne corrige pas.** Les lignes en anomalie (séjour avec `discharge_ts < admission_ts`, constantes hors plage physiologique) partent dans des tables `*_rejets` avec une colonne `reject_reason` — jamais supprimées silencieusement. Exception métier : `discharge_ts` vide = séjour en cours, **légitime**, à conserver. Les patients rejoués chaque jour (fichiers cumulatifs) se dédupliquent par `argMax` sur le jour d'ingestion dans `dim_patient`.
-6. **Cloisonnement au niveau du warehouse.** Deux users ClickHouse (`chu_pilotage`, `chu_recherche`) avec des GRANT SELECT distincts sur `eds_gold_pilotage` / `eds_gold_recherche` ; Metabase a deux connexions séparées (une par user SQL) et deux groupes. Jamais un seul user SQL partagé.
-7. **Petits effectifs : k ≥ 5.** Toute table/vue de la base recherche applique `HAVING uniqExact(patient_pseudo) >= 5` (y compris par cellule de croisement pathologie × sexe × tranche d'âge). Les âges sont diffusés en tranches, jamais en valeur exacte.
+6. **Cloisonnement au niveau du warehouse.** Deux users ClickHouse (`chu_pilotage`, `chu_recherche`) avec des GRANT SELECT distincts sur `eds_gold_pilotage` / `eds_gold_recherche` ; Metabase a deux connexions séparées (une par user SQL) et deux groupes. Jamais un seul user SQL partagé. Les deux comptes héritent du profil `restitution` (`readonly = 2`, temps/mémoire bornés) et d'un quota horaire : le GRANT protège la confidentialité, ces bornes la **disponibilité** face au SQL libre de Metabase.
+7. **Petits effectifs : k ≥ 5, et suppression complémentaire.** Toute table/vue de la base recherche applique `HAVING uniqExact(patient_pseudo) >= 5` (y compris par cellule de croisement pathologie × sexe × tranche d'âge). **Le seuil seul ne suffit pas** : publier une marge ET sa décomposition laisse retrouver la cellule cachée par soustraction (`marge − somme des cellules diffusées`). Une marge n'est donc diffusée que si TOUTE sa décomposition l'est. La table de travail qui porte les effectifs sous le seuil (`cellules_demographie`) vit en `eds_silver`, hors de portée des comptes de restitution. Les âges sont diffusés en tranches, jamais en valeur exacte.
 8. **Traçabilité systématique.** Chaque ligne bronze/silver porte `_source_file`, `_ingest_date`, `_loaded_at`. Chaque run écrit dans `ops.pipeline_runs` et produit un rapport qualité chiffré dans `ops.quality_report` : lignes **lues / conservées / écartées / signalées** par règle. Ne jamais confondre écartées (retirées, dans une table `*_rejets`) et signalées (conservées mais marquées) — c'est ce qui rend le rapport lisible.
 
 ## Pièges connus des données (issus du profilage — détail dans PLAN.md §2)
@@ -54,13 +54,40 @@ Le plan d'implémentation complet et autosuffisant est dans **`PLAN.md`** — le
 - **Format des nombres** : `custom-formatting` (`type/Number.number_separators = ", "`) est posé au provisionnement, sinon l'interface française affiche « 14,864 ». Inutile d'y ajouter `date_style` : Metabase ne l'applique pas aux colonnes des requêtes SQL natives.
 - **Le refus doit être un vrai refus** : `check-cloisonnement` ne compte comme preuve qu'un échec portant `ACCESS_DENIED` ou `NOT_ENOUGH_PRIVILEGES`. Un `except Exception` nu ferait passer au vert une base absente ou un moteur arrêté.
 
+## État livré — chiffres de référence
+
+Le projet est **complet et fonctionnel**. Ces valeurs sont ancrées par `make test-e2e` : si
+l'une d'elles change, c'est qu'une règle a été modifiée, et cela doit être délibéré.
+
+| Couche | Valeurs attendues |
+|---|---|
+| bronze | patients 16 200 · sejours 15 000 · diagnostics 37 380 · monitoring 66 677 |
+| silver | dim_patient 6 000 · fact_sejour 14 864 (rejets 136) · fact_diagnostic 37 040 (cascade 340) · fact_monitoring 64 799 (rejets 1 878) |
+| flags | post_mortem 192 · after_discharge **0** (contrôle) · is_alert 3 053 · is_ongoing 1 190 |
+| KPI | DMS 6,08 j (6,01 → 6,23 par service) · patients 5 358 · réadmission **687 / 1 421 observables = 48,3 %** (couverture 12,2 %) |
+| RGPD | k-anonymat 4 cellules retirées / 1 600 · marges 3 / 200 · 0 cellule reconstructible |
+| qualité | **18 règles** = 14 silver + 4 gold |
+| tests | **127** = 64 unitaires + 63 d'intégration |
+
+⚠ **Le taux de réadmission ne se lit jamais sur les 11 678 sorties éligibles** : seules
+1 421 ont une fenêtre d'observation non vide. Le rapport aux 11 678 donnerait 5,9 %, exact
+et trompeur (cf. `docs/RAPPORT.md` §5.3).
+
 ## Commandes de référence
 
 ```bash
-make demo        # démo complète de zéro (up + pipeline + provision)
+make demo        # démo complète de zéro (up + pipeline + provision) — ~30 s
 make pipeline    # pipeline incrémental (jours non encore ingérés)
-make test        # tests unitaires ; make test-e2e pour les invariants de l'entrepôt
+make quality     # les 18 contrôles qualité du dernier traitement
+make test        # 64 tests unitaires ; make test-e2e pour les 63 invariants
+make provision   # recrée connexions, permissions et dashboards Metabase
 uv run eds run --rebuild          # reconstruit silver+gold après modification du SQL
 uv run eds run --date 2026-08-27  # rejeu forcé d'un jour (reprise sur incident)
-uv run eds check-cloisonnement    # vérifie les droits d'accès ClickHouse
+uv run eds check-cloisonnement    # prouve le cloisonnement aux deux niveaux
 ```
+
+**Après toute modification** : `uv run ruff check src tests && uv run ruff format src tests`,
+puis `uv run eds run --rebuild` (si le SQL a changé) ou `uv run eds provision-metabase` (si
+les dashboards ont changé), puis `uv run pytest -q`. Une modification du provisionnement
+Metabase se valide sur une instance **neuve** (`make reset && make demo`) : plusieurs
+défauts ne se voient que là (cf. `width` ci-dessus).
