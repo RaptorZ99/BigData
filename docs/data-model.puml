@@ -1,0 +1,332 @@
+@startuml eds-data-model
+title <b>EDS CHU — Modèle de données ClickHouse</b>\n<size:12>Médaillon : bronze (typé) → silver (constellation : 3 étoiles — 1 par fait — sur dimensions conformées) → gold (KPI par usage)</size>
+
+hide circle
+hide empty members
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+skinparam titleFontSize 16
+skinparam nodesep 25
+skinparam ranksep 40
+skinparam entity {
+  BackgroundColor White
+  BorderColor #37474F
+  FontSize 11
+}
+skinparam package {
+  BorderColor #78909C
+  FontStyle bold
+  FontSize 13
+}
+skinparam note {
+  BackgroundColor #FFF8E1
+  BorderColor #F9A825
+  FontSize 10
+}
+skinparam legend {
+  BackgroundColor #FFF8E1
+  BorderColor #F9A825
+  FontSize 11
+}
+skinparam ArrowColor #37474F
+
+' ══════════════════════════ BRONZE ══════════════════════════
+package "eds_bronze — tables typées, append-only, PARTITION BY _ingest_date" as bronze #ECEFF1 {
+
+  entity "**patients**" as b_patients {
+    patient_pseudo : String
+    birth_year : UInt16
+    sex : LowCardinality(String)
+    region_code : LowCardinality(String)
+  }
+
+  entity "**sejours**" as b_sejours {
+    stay_id : String
+    patient_pseudo : String
+    service_code : LowCardinality(String)
+    admission_ts : DateTime
+    discharge_ts : Nullable(DateTime)
+    admission_mode : LowCardinality(String)
+    discharge_mode : LowCardinality(Nullable(String))
+  }
+
+  entity "**diagnostics**" as b_diagnostics {
+    stay_id : String
+    code_cim10 : LowCardinality(String)
+    diag_type : LowCardinality(String)
+  }
+
+  entity "**monitoring**" as b_monitoring {
+    stay_id : String
+    ts : DateTime
+    heart_rate : Int32
+    spo2 : Int32
+    temp_c : Float32
+  }
+
+  entity "**services** (réf.)" as b_services {
+    service_code : String
+    service_label : String
+  }
+
+  entity "**cim10** (réf.)" as b_cim10 {
+    code_cim10 : String
+    libelle : String
+  }
+}
+
+' ═══ SILVER — CONSTELLATION : 3 ÉTOILES, DIMENSIONS CONFORMÉES ═══
+package "eds_silver — constellation : 3 étoiles (1 par fait) sur dimensions conformées (rebuild complet à chaque run)" as silver #E8F5E9 {
+
+  entity "**dim_service**\n<i>dimension conformée</i>" as dim_service #FFFDE7 {
+    * **service_code** : String <<PK>>
+    --
+    service_label : String
+  }
+
+  entity "**dim_patient**\n<i>dimension conformée</i>" as dim_patient #FFFDE7 {
+    * **patient_pseudo** : String <<PK>>
+    --
+    birth_year : UInt16
+    sex : String (M/F)
+    region_code : String
+    last_seen_ingest_date : Date
+  }
+
+  entity "**dim_cim10**\n<i>dimension</i>" as dim_cim10 #FFFDE7 {
+    * **code_cim10** : String <<PK>>
+    --
+    libelle : String
+  }
+
+  entity "**fact_monitoring**\n<i>grain : 1 relevé de constantes</i>" as fact_monitoring {
+    # service_code <<FK dim_service>>
+    stay_id <<DD>> · ts : DateTime
+    --
+    <i>mesures</i>
+    heart_rate · spo2 · temp_c
+    --
+    <i>flags</i>
+    alert_hr / alert_spo2 / alert_temp
+    is_alert · is_after_discharge : Bool
+  }
+
+  entity "**fact_sejour**\n<i>grain : 1 séjour hospitalier</i>" as fact_sejour {
+    * **stay_id** : String <<PK, DD>>
+    --
+    # patient_pseudo <<FK dim_patient>>
+    # service_code <<FK dim_service>>
+    admission_ts : DateTime
+    discharge_ts : Nullable(DateTime)
+    admission_mode · discharge_mode
+    --
+    <i>mesure & flags</i>
+    duree_jours : Nullable(Float32)
+    is_ongoing · is_deces : Bool
+    is_post_mortem_anomaly : Bool
+  }
+
+  entity "**fact_diagnostic**\n<i>grain : 1 diagnostic posé sur 1 séjour</i>" as fact_diagnostic {
+    # patient_pseudo <<FK dim_patient>>
+    # code_cim10 <<FK dim_cim10>>
+    stay_id <<DD>>
+    diag_type : principal | associe
+    --
+    <i>fait sans mesure (factless)</i>
+    <i>→ comptages de cohortes</i>
+  }
+
+  entity "**sejours_rejets**" as s_sejours_rejets #FFEBEE {
+    reject_reason : String
+    ..colonnes d'origine + lignage..
+  }
+
+  entity "**monitoring_rejets**" as s_monitoring_rejets #FFEBEE {
+    reject_reason : String
+    ..colonnes d'origine + lignage..
+  }
+
+  note "<b>stay_id = dimension dégénérée (DD)</b> portée par les 3 faits :\nelle relie logiquement les étoiles (drill-across)\n<b>sans aucune jointure fact-to-fact</b>.\nFK propagées au build silver depuis le séjour\n(patient_pseudo → fact_diagnostic, service_code → fact_monitoring)." as n_dd
+}
+
+' Étoile 1 — fact_sejour (DMS, urgences, réadmissions, activité)
+dim_patient ||--o{ fact_sejour : patient_pseudo
+dim_service ||--o{ fact_sejour : service_code
+' Étoile 2 — fact_monitoring (alertes constantes / jour / service)
+dim_service ||--o{ fact_monitoring : service_code
+' Étoile 3 — fact_diagnostic (prévalence, cohortes, démographie)
+dim_patient ||--o{ fact_diagnostic : patient_pseudo
+dim_cim10 ||--o{ fact_diagnostic : code_cim10
+
+' ══════════════════════ GOLD PILOTAGE ═══════════════════════
+package "eds_gold_pilotage — user SQL : chu_pilotage (SELECT only)" as gold_p #E3F2FD {
+
+  entity "**kpi_dms_service**" as g_dms {
+    grain : service × jour de sortie
+    --
+    nb_sorties · dms_jours
+  }
+
+  entity "**kpi_urgences_jour**" as g_urg {
+    grain : jour
+    --
+    nb_passages_service_urgences
+    nb_admissions_mode_urgence
+  }
+
+  entity "**kpi_readmissions_30j**" as g_readm {
+    grain : service × jour de sortie
+    --
+    sorties_eligibles
+    readmissions_30j · taux
+  }
+
+  entity "**kpi_alertes_monitoring**" as g_alert {
+    grain : jour × service
+    --
+    nb_releves · pct_alertes
+    nb_alertes (FC / SpO2 / T°)
+  }
+
+  entity "**kpi_activite_service**" as g_act {
+    grain : jour × service
+    --
+    admissions · sorties
+    deces · en_cours
+  }
+
+  entity "**kpi_flux**" as g_flux {
+    grain : jour × mode
+    --
+    répartition admission_mode
+    et discharge_mode
+  }
+
+  entity "**kpi_qualite_pipeline**" as g_qual {
+    grain : run × règle
+    --
+    rows_in · rows_kept
+    rows_rejected
+  }
+}
+
+' ══════════════════════ GOLD RECHERCHE ══════════════════════
+package "eds_gold_recherche — user SQL : chu_recherche (SELECT only)" as gold_r #F3E5F5 {
+
+  entity "**cohorte_pathologie**" as g_cohorte {
+    grain : code CIM-10
+    --
+    libelle · diag_type
+    nb_patients · nb_sejours
+  }
+
+  entity "**prevalence_pathologie**" as g_preval {
+    grain : code CIM-10
+    --
+    nb_patients · pct_patients
+  }
+
+  entity "**cohorte_demographie**" as g_demo {
+    grain : CIM-10 × sexe
+    ....... × tranche d'âge (10 ans)
+    --
+    nb_patients
+  }
+
+  entity "**cohorte_demographie_region**" as g_demo_reg {
+    grain : CIM-10 × sexe × tranche
+    ....... × département
+    --
+    nb_patients
+    <i>preuve k ≥ 5 : 4 cellules/1 600 supprimées</i>
+  }
+}
+
+' ══════════════════════════ OPS ═════════════════════════════
+package "ops — traçabilité & exploitation (chu_etl uniquement)" as ops #FFF3E0 {
+
+  entity "**ingest_log**" as o_ingest {
+    domain · ingest_date
+    source_file · sha256
+    rows_source · rows_loaded
+    status · error
+    started_at · finished_at
+  }
+
+  entity "**pipeline_runs**" as o_runs {
+    run_id : UUID
+    started_at · finished_at
+    status · days_processed
+    error
+  }
+
+  entity "**quality_report**" as o_quality {
+    run_id · layer · table · rule
+    rows_in · rows_kept
+    rows_rejected · details · at
+  }
+}
+
+' ══════════════════ FLUX ENTRE COUCHES ══════════════════════
+bronze -[#37474F,bold]down-> silver : <b>SQL in-engine</b> : dédup argMax\nrègles qualité Q1→Q8 · rejets tracés
+silver -[#1565C0,bold]down-> gold_p : agrégation KPI
+silver -[#6A1B9A,bold]down-> gold_r : agrégation cohortes\n<b>filtre k ≥ 5</b>
+silver .[#EF6C00]down.> ops : comptages par règle
+
+' ═══════════════ AIDES AU PLACEMENT (invisibles) ═════════════
+' bronze : grille 3 × 2 alignée par colonnes
+b_patients -[hidden]right- b_sejours
+b_sejours -[hidden]right- b_monitoring
+b_patients -[hidden]down- b_diagnostics
+b_diagnostics -[hidden]right- b_services
+b_services -[hidden]right- b_cim10
+b_sejours -[hidden]down- b_services
+b_monitoring -[hidden]down- b_cim10
+
+' silver : dimensions en haut (service | patient | cim10), faits au centre, rejets + note en bas
+dim_service -[hidden]right- dim_patient
+dim_patient -[hidden]right- dim_cim10
+fact_monitoring -[hidden]right- fact_sejour
+fact_sejour -[hidden]right- fact_diagnostic
+fact_monitoring -[hidden]down- s_monitoring_rejets
+s_monitoring_rejets -[hidden]right- s_sejours_rejets
+s_sejours_rejets -[hidden]right- n_dd
+fact_diagnostic -[hidden]down- n_dd
+
+' forcer la rangée gold/ops SOUS la couche silver
+s_monitoring_rejets -[hidden]down- g_cohorte
+s_sejours_rejets -[hidden]down- g_dms
+
+' gold recherche : grille 2 × 2 (alignée sur les rangées de gold_pilotage)
+g_cohorte -[hidden]right- g_preval
+g_cohorte -[hidden]down- g_demo
+g_demo -[hidden]right- g_demo_reg
+
+' gold pilotage : grille 4 + 3
+g_dms -[hidden]right- g_urg
+g_urg -[hidden]right- g_readm
+g_readm -[hidden]right- g_alert
+g_dms -[hidden]down- g_act
+g_act -[hidden]right- g_flux
+g_flux -[hidden]right- g_qual
+
+' ops : colonne
+o_ingest -[hidden]down- o_runs
+o_runs -[hidden]down- o_quality
+
+' rang du bas : recherche | pilotage | ops côte à côte
+gold_r -[hidden]right- gold_p
+gold_p -[hidden]right- ops
+
+legend bottom
+  <b>Modélisation</b> — silver en constellation (Kimball) : 3 étoiles, une par fait, sur dimensions conformées — chaque besoin métier = 1 fait × ses dimensions,
+  sans jointure fact-to-fact : DMS, urgences, réadmissions → fact_sejour ⋆ (dim_patient, dim_service) ·
+  alertes constantes → fact_monitoring ⋆ (dim_service) · prévalence, cohortes & démographie → fact_diagnostic ⋆ (dim_patient, dim_cim10).
+  Pas de dim_date physique : les fonctions temporelles ClickHouse (toDate, tranches) jouent ce rôle — choix documenté au rapport.
+  <b>Lignage</b> — toutes les tables bronze & silver portent : _source_file · _ingest_date · _loaded_at.
+  <b>Idempotence</b> — bronze : MergeTree partitionné par _ingest_date → rejeu d'un jour = DROP PARTITION + INSERT.
+  <b>RGPD</b> — gold recherche : agrégats uniquement, HAVING uniqExact(patient_pseudo) >= 5 par cellule, âges en tranches ;
+  patient_pseudo = HMAC-SHA256(sel secret, IPP) calculé à l'entrée du lake — nir/nom/prénom n'existent nulle part ici.
+end legend
+
+@enduml

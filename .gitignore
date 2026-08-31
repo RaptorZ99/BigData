@@ -1,0 +1,23 @@
+# Données de santé — ne jamais versionner
+source-filestorage/
+data/
+*.parquet
+
+# Secrets
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Logs & artefacts locaux
+logs/
+*.log
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
