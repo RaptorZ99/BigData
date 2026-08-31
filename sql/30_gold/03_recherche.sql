@@ -190,13 +190,18 @@ ENGINE = MergeTree
 ORDER BY table_cible
 COMMENT 'Effet du seuil k >= 5 : cellules calculées, diffusées, supprimées, et suppressions complémentaires'
 AS
+-- Les compteurs sont typés explicitement en Int64 dans les DEUX branches.
+-- Sans cela, ClickHouse réconcilie `countIf` (UInt64) et une soustraction
+-- (Int64) en un `Variant(Int64, UInt64)` : un type exotique sur lequel un
+-- simple `sum()` échoue avec ILLEGAL_TYPE_OF_ARGUMENT. La table est diffusée
+-- aux chercheurs, elle doit se manipuler comme n'importe quelle autre.
 SELECT
-    'cohorte_demographie_region' AS table_cible,
-    'seuil k >= 5'               AS motif,
-    count()                      AS cellules_calculees,
-    countIf(diffusable)          AS cellules_diffusees,
-    countIf(NOT diffusable)      AS cellules_supprimees,
-    5                            AS seuil_k
+    'cohorte_demographie_region'   AS table_cible,
+    'seuil k >= 5'                 AS motif,
+    toInt64(count())               AS cellules_calculees,
+    toInt64(countIf(diffusable))   AS cellules_diffusees,
+    toInt64(countIf(NOT diffusable)) AS cellules_supprimees,
+    toUInt8(5)                     AS seuil_k
 FROM eds_silver.cellules_demographie
 
 UNION ALL
@@ -204,9 +209,12 @@ UNION ALL
 SELECT
     'cohorte_demographie',
     'suppression complémentaire (décomposition incomplète)',
-    uniqExact((code_cim10, sexe, tranche_age_debut)),
-    (SELECT count() FROM eds_gold_recherche.cohorte_demographie),
-    uniqExact((code_cim10, sexe, tranche_age_debut))
-        - (SELECT count() FROM eds_gold_recherche.cohorte_demographie),
-    5
+    toInt64(uniqExact((code_cim10, sexe, tranche_age_debut))),
+    -- `ifNull` : une sous-requête scalaire est Nullable par construction, et un
+    -- compteur qui peut valoir NULL n'a pas de sens ici — la table source est
+    -- bâtie juste au-dessus, elle ne peut pas manquer.
+    ifNull(toInt64((SELECT count() FROM eds_gold_recherche.cohorte_demographie)), 0),
+    toInt64(uniqExact((code_cim10, sexe, tranche_age_debut)))
+        - ifNull(toInt64((SELECT count() FROM eds_gold_recherche.cohorte_demographie)), 0),
+    toUInt8(5)
 FROM eds_silver.cellules_demographie;

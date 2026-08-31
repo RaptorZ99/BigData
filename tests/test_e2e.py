@@ -307,6 +307,22 @@ def test_le_k_anonymat_supprime_effectivement_des_cellules(client):
 
 
 @pytest.mark.parametrize("base", ["eds_gold_recherche", "eds_gold_pilotage"])
+def test_les_bases_de_restitution_n_exposent_que_des_types_manipulables(client, base):
+    """Une colonne diffusée doit pouvoir être agrégée sans erreur de type.
+
+    Un `UNION ALL` réconciliant `countIf` (UInt64) et une soustraction (Int64)
+    produit un `Variant(Int64, UInt64)` : un simple `sum()` sur une telle
+    colonne échoue avec ILLEGAL_TYPE_OF_ARGUMENT. Invisible tant qu'on se
+    contente de lire la table, bloquant dès qu'un chercheur l'agrège.
+    """
+    exotiques = client.query(
+        "SELECT table, name, type FROM system.columns "
+        f"WHERE database = '{base}' AND (type LIKE '%Variant%' OR type LIKE '%Dynamic%')"
+    ).result_rows
+    assert not exotiques, f"{base} expose des colonnes non agrégeables : {exotiques}"
+
+
+@pytest.mark.parametrize("base", ["eds_gold_recherche", "eds_gold_pilotage"])
 def test_aucune_base_de_restitution_n_expose_de_pseudonyme(client, base):
     """Minimisation à l'intérieur même de l'entrepôt.
 
