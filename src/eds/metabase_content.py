@@ -92,6 +92,9 @@ _PILOTAGE_CARDS = [
         "visualization_settings": {
             "graph.dimensions": ["service"],
             "graph.metrics": ["dms_jours"],
+            # Les DMS se tiennent dans un mouchoir (6,01 à 6,23 j) : sans les
+            # valeurs affichées, le graphique ne dit rien de lisible.
+            "graph.show_values": True,
             "graph.x_axis.title_text": "Service",
             "graph.y_axis.title_text": "Jours",
         },
@@ -141,6 +144,7 @@ _PILOTAGE_CARDS = [
         "visualization_settings": {
             "graph.dimensions": ["service"],
             "graph.metrics": ["taux_pct"],
+            "graph.show_values": True,
             "graph.x_axis.title_text": "Service",
             "graph.y_axis.title_text": "Taux de réadmission (%)",
         },
@@ -201,7 +205,7 @@ _PILOTAGE_CARDS = [
     {
         "name": "Modes d'admission et de sortie",
         "description": "Répartition quotidienne des flux d'entrée et de sortie.",
-        "display": "bar",
+        "display": "row",
         "sql": (
             "SELECT concat(sens, ' — ', mode) AS flux, sum(nb_sejours) AS nb_sejours\n"
             "FROM kpi_flux\n"
@@ -211,8 +215,9 @@ _PILOTAGE_CARDS = [
         "visualization_settings": {
             "graph.dimensions": ["flux"],
             "graph.metrics": ["nb_sejours"],
-            "graph.x_axis.title_text": "Flux",
-            "graph.y_axis.title_text": "Nombre de séjours",
+            "graph.show_values": True,
+            "graph.x_axis.title_text": "Nombre de séjours",
+            "graph.y_axis.title_text": "Flux",
         },
         "row": 17,
         "col": 12,
@@ -306,7 +311,9 @@ _RECHERCHE_CARDS = [
     {
         "name": "Taille des cohortes par pathologie",
         "description": "Nombre de patients distincts concernés par chaque diagnostic CIM-10.",
-        "display": "bar",
+        # Barres horizontales : les libellés CIM-10 dépassent 40 caractères et
+        # deviendraient illisibles en abscisse.
+        "display": "row",
         "sql": (
             "SELECT libelle AS pathologie, nb_patients\n"
             "FROM cohorte_pathologie\n"
@@ -315,8 +322,9 @@ _RECHERCHE_CARDS = [
         "visualization_settings": {
             "graph.dimensions": ["pathologie"],
             "graph.metrics": ["nb_patients"],
-            "graph.x_axis.title_text": "Pathologie (CIM-10)",
-            "graph.y_axis.title_text": "Patients",
+            "graph.show_values": True,
+            "graph.x_axis.title_text": "Patients",
+            "graph.y_axis.title_text": "Pathologie (CIM-10)",
         },
         "row": 4,
         "col": 0,
@@ -326,7 +334,7 @@ _RECHERCHE_CARDS = [
     {
         "name": "Prévalence par pathologie",
         "description": "Part des patients de l'entrepôt concernés par chaque pathologie.",
-        "display": "bar",
+        "display": "row",
         "sql": (
             "SELECT libelle AS pathologie, prevalence_pct AS `prévalence (%)`\n"
             "FROM prevalence_pathologie\n"
@@ -335,8 +343,9 @@ _RECHERCHE_CARDS = [
         "visualization_settings": {
             "graph.dimensions": ["pathologie"],
             "graph.metrics": ["prévalence (%)"],
-            "graph.x_axis.title_text": "Pathologie (CIM-10)",
-            "graph.y_axis.title_text": "Prévalence (%)",
+            "graph.show_values": True,
+            "graph.x_axis.title_text": "Prévalence (%)",
+            "graph.y_axis.title_text": "Pathologie (CIM-10)",
         },
         "row": 4,
         "col": 12,
@@ -375,7 +384,7 @@ _RECHERCHE_CARDS = [
     {
         "name": "Répartition par sexe et pathologie",
         "description": "Composition des cohortes par sexe.",
-        "display": "bar",
+        "display": "row",
         "sql": (
             "SELECT libelle AS pathologie,\n"
             "       sumIf(nb_patients, sexe = 'F') AS Femmes,\n"
@@ -388,8 +397,8 @@ _RECHERCHE_CARDS = [
             "graph.dimensions": ["pathologie"],
             "graph.metrics": ["Femmes", "Hommes"],
             "stackable.stack_type": "stacked",
-            "graph.x_axis.title_text": "Pathologie",
-            "graph.y_axis.title_text": "Patients",
+            "graph.x_axis.title_text": "Patients",
+            "graph.y_axis.title_text": "Pathologie",
         },
         "row": 11,
         "col": 12,
