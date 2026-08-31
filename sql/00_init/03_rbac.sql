@@ -13,10 +13,27 @@
 -- Le provisionnement doit rendre l'entrepôt conforme à sa configuration, pas
 -- seulement l'initialiser.
 
+-- ── Garde-fous communs aux deux comptes de restitution ──────────────────────
+-- Le GRANT interdit déjà toute écriture : ces bornes ne visent pas
+-- l'exfiltration mais la **disponibilité**. Metabase laisse écrire du SQL libre ;
+-- une requête maladroite pourrait sinon saturer la mémoire du moteur et priver
+-- l'autre usage de son tableau de bord.
+--
+-- `readonly = 2` et non `1` : le niveau 1 interdirait aussi de changer un
+-- paramètre de session, ce que le pilote JDBC de Metabase fait à la connexion.
+CREATE SETTINGS PROFILE OR REPLACE restitution SETTINGS
+    readonly            = 2,
+    max_execution_time  = 60,
+    max_memory_usage    = 4000000000,
+    max_result_rows     = 1000000,
+    max_result_bytes    = 200000000,
+    result_overflow_mode = 'throw';
+
 -- ── Pilotage hospitalier ────────────────────────────────────────────────────
 CREATE USER OR REPLACE chu_pilotage
     IDENTIFIED WITH sha256_password BY '{pilotage_password}'
-    DEFAULT DATABASE eds_gold_pilotage;
+    DEFAULT DATABASE eds_gold_pilotage
+    SETTINGS PROFILE restitution;
 
 GRANT SELECT ON eds_gold_pilotage.* TO chu_pilotage;
 REVOKE ALL ON eds_bronze.*         FROM chu_pilotage;
@@ -27,10 +44,20 @@ REVOKE ALL ON ops.*                FROM chu_pilotage;
 -- ── Recherche clinique ──────────────────────────────────────────────────────
 CREATE USER OR REPLACE chu_recherche
     IDENTIFIED WITH sha256_password BY '{recherche_password}'
-    DEFAULT DATABASE eds_gold_recherche;
+    DEFAULT DATABASE eds_gold_recherche
+    SETTINGS PROFILE restitution;
 
 GRANT SELECT ON eds_gold_recherche.* TO chu_recherche;
 REVOKE ALL ON eds_bronze.*        FROM chu_recherche;
 REVOKE ALL ON eds_silver.*        FROM chu_recherche;
 REVOKE ALL ON eds_gold_pilotage.* FROM chu_recherche;
 REVOKE ALL ON ops.*               FROM chu_recherche;
+
+-- ── Quota : borne la consommation sur une heure glissante ───────────────────
+-- Créé après les comptes, qu'il référence. Largement au-dessus d'un usage
+-- normal de tableau de bord (quelques dizaines de requêtes par heure) : il ne
+-- gêne personne et arrête une boucle emballée.
+CREATE QUOTA OR REPLACE restitution
+    KEYED BY user_name
+    FOR INTERVAL 1 HOUR MAX queries = 3000, execution_time = 1800
+    TO chu_pilotage, chu_recherche;

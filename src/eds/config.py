@@ -23,6 +23,13 @@ MIN_SALT_LENGTH = 32
 # fichier ; ce garde-fou couvre le cas d'un .env recopié à la main.
 PLACEHOLDER_SALT = "remplace-moi-par-openssl-rand-hex-32"
 
+# Marque commune à tous les mots de passe d'exemple de .env.example. `make env`
+# les remplace par des valeurs aléatoires à la création du fichier ; ce garde-fou
+# couvre le cas d'un .env recopié à la main. Le marqueur est unique **pour que la
+# détection ne puisse pas rater un secret** : un mot de passe d'exemple qui aurait
+# l'air d'un vrai (« AdminChu2026! ») passerait inaperçu et finirait en production.
+PLACEHOLDER_PASSWORD_MARKER = "change_me"
+
 
 class ConfigError(RuntimeError):
     """Configuration absente ou invalide."""
@@ -52,16 +59,31 @@ class Config:
     metabase_recherche_password: str
 
     @property
+    def weak_password_settings(self) -> tuple[str, ...]:
+        """Variables dont le mot de passe est encore celui de l'exemple.
+
+        Les six secrets sont couverts, y compris ceux de Metabase : un compte
+        d'administration laissé à sa valeur d'exemple ouvre l'accès à toutes les
+        données de restitution.
+        """
+        secrets = {
+            "CLICKHOUSE_ETL_PASSWORD": self.clickhouse_password,
+            "CLICKHOUSE_PILOTAGE_PASSWORD": self.pilotage_password,
+            "CLICKHOUSE_RECHERCHE_PASSWORD": self.recherche_password,
+            "MB_ADMIN_PASSWORD": self.admin_password,
+            "MB_PILOTAGE_PASSWORD": self.metabase_pilotage_password,
+            "MB_RECHERCHE_PASSWORD": self.metabase_recherche_password,
+        }
+        return tuple(
+            nom
+            for nom, valeur in secrets.items()
+            if PLACEHOLDER_PASSWORD_MARKER in valeur.casefold()
+        )
+
+    @property
     def uses_weak_passwords(self) -> bool:
         """Vrai si des mots de passe d'exemple subsistent dans la configuration."""
-        return any(
-            "change_me" in mot_de_passe
-            for mot_de_passe in (
-                self.clickhouse_password,
-                self.pilotage_password,
-                self.recherche_password,
-            )
-        )
+        return bool(self.weak_password_settings)
 
 
 def load_dotenv(path: Path | None = None) -> None:

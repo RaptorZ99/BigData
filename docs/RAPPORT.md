@@ -21,12 +21,19 @@
 
 ### 1.1 Le problème posé
 
-Le CHU dispose de données réparties dans quatre systèmes distincts — dossier patient,
-urgences, laboratoire, monitoring des chambres — qui n'exportent ni dans le même format ni
-avec les mêmes conventions. Chaque jour, ces systèmes déposent leurs fichiers dans un
-espace commun. En l'état, répondre à une question aussi simple que « quelle est notre durée
-moyenne de séjour en cardiologie ? » suppose d'ouvrir plusieurs fichiers, de les rapprocher
-à la main et d'espérer que personne n'a introduit d'incohérence.
+Le CHU dispose de données réparties dans plusieurs systèmes — dossier patient, urgences,
+laboratoire, monitoring des chambres — qui n'exportent ni dans le même format ni avec les
+mêmes conventions. Chaque jour, ces systèmes déposent leurs fichiers dans un espace commun.
+En l'état, répondre à une question aussi simple que « quelle est notre durée moyenne de
+séjour en cardiologie ? » suppose d'ouvrir plusieurs fichiers, de les rapprocher à la main
+et d'espérer que personne n'a introduit d'incohérence.
+
+> **Le laboratoire ne dépose pas encore.** Le dépôt fourni contient les patients, les
+> séjours, les diagnostics, le monitoring et les référentiels — pas de résultats
+> d'analyses. Aucun indicateur de ce dossier n'en dépend donc, et nous ne prétendons pas
+> couvrir ce système. L'architecture l'accueillerait sans réécriture : un nouveau domaine
+> se déclare dans `src/eds/collect.py` et dans `sql/15_bronze_load/`, et alimenterait une
+> quatrième étoile (`fact_resultat_labo`, au grain « un résultat d'analyse »).
 
 La direction veut deux choses de cet entrepôt, et elles ne se ressemblent pas :
 
@@ -204,6 +211,11 @@ c'est-à-dire `INSERT … SELECT FROM file()`.
 | 5 000 000 relevés | 83 Mo | 1,1 s | 4,4 M lignes/s |
 | **20 000 000 relevés** | **330 Mo** | **4,6 s** | **4,4 M lignes/s** |
 
+**Ce que le banc mesure, et ce qu'il ne mesure pas.** Il couvre le chargement bronze et des
+agrégations sur la table chargée. Il ne rejoue pas la reconstruction complète de silver et
+gold sur ces volumes : les conclusions ci-dessous portent donc sur le maillon qui domine le
+temps de traitement, pas sur la chaîne entière.
+
 Trois enseignements, qui sont autant de validations de choix d'architecture :
 
 **Le débit est stable et le temps croît linéairement.** Charger vingt fois plus de données
@@ -213,14 +225,21 @@ lui-même, sans que rien ne remonte côté client. Un pipeline qui rapatrierait 
 de lignes en mémoire Python aurait, lui, un mur.
 
 **Les agrégations restent instantanées.** Sur ces 20 millions de relevés, compter les
-alertes prend 0,04 seconde, et l'agrégation quotidienne autant. La construction de silver et
-gold — qui n'est qu'une suite d'agrégations de cette nature — reste donc réalisable en
-reconstruction complète bien au-delà des volumes du CHU.
+alertes prend 0,04 seconde, et l'agrégation quotidienne autant. Ce sont exactement les deux
+formes de calcul dont sont faites nos couches silver et gold — un filtre conditionnel et un
+`GROUP BY` par jour et par service. La reconstruction complète à chaque run reste donc
+soutenable bien au-delà des volumes du CHU ; c'est une extrapolation raisonnée à partir de
+ces mesures, non un chronométrage direct de la reconstruction.
 
-**La compression colonne fait son travail.** 20 millions de relevés occupent 280 Mo sur
-disque, soit environ 14 octets par ligne pour cinq colonnes. Les constantes vitales variant
-peu d'un relevé au suivant, elles se compressent très bien — c'est précisément ce pour quoi
-une base orientée colonnes est le bon choix ici.
+**La compression colonne fait son travail — et le chiffre est un plancher.** 20 millions de
+relevés occupent 280 Mo sur disque, soit environ 14 octets par ligne pour cinq colonnes. Il
+faut préciser d'où vient ce gain, sous peine de l'attribuer à la mauvaise cause : le jeu de
+test tire ses constantes **au hasard et indépendamment** d'un relevé au suivant, ce qui est
+le **pire cas** pour un compresseur. L'essentiel du gain vient donc de la clé de tri
+(`stay_id`, `ts`), qui regroupe les valeurs identiques, et du typage entier compact — pas
+d'une régularité du signal. Des constantes réelles, qui dérivent lentement, se
+compresseraient **mieux** que cela. C'est précisément ce pour quoi une base orientée
+colonnes est le bon choix ici.
 
 Pour situer : **20 millions de relevés représentent 300 fois le volume des trois jours
 fournis**, soit, au rythme observé d'un relevé toutes les trente minutes, environ **420 lits
@@ -313,9 +332,10 @@ Trois natures de règles cohabitent, et les confondre rendrait le rapport illisi
 - **Contrôle** — vérification attendue à zéro, dont le passage au vert est l'information.
 
 Les chiffres ci-dessous sont ceux de la dernière exécution. Le tableau regroupe les cinq
-contrôles Q6 sur une ligne et laisse de côté les trois contrôles RGPD de la couche gold
-(§7.2) : la table `ops.quality_report` en compte donc **dix-sept**, recalculés à chaque run
-et consultables depuis le tableau de bord de pilotage.
+contrôles Q6 sur une ligne et laisse de côté les quatre contrôles RGPD de la couche gold
+(§7.2) : la table `ops.quality_report` compte donc **dix-huit règles** — quatorze en silver,
+quatre en gold — recalculées à chaque run et consultables depuis le tableau de bord de
+pilotage.
 
 | Règle | Nature | Lues | Conservées | Écartées | Signalées |
 |---|---|---:|---:|---:|---:|
@@ -542,7 +562,7 @@ requête dans la console ClickHouse (`http://localhost:8123/play`).
 Trois vérifications que le jury peut faire lui-même en une commande :
 
 ```bash
-make quality              # les 17 contrôles qualité du dernier traitement
+make quality              # les 18 contrôles qualité du dernier traitement
 make test-e2e             # les invariants, dont chacun de ces chiffres
 uv run eds check-cloisonnement   # les deux barrières de cloisonnement
 ```
@@ -556,15 +576,24 @@ La suite d'intégration **ancre ces valeurs** : modifier une règle sans le voul
 
 ### 6.1 Deux tableaux de bord, deux publics
 
-**🏥 Pilotage hospitalier** ouvre sur cinq chiffres clés — séjours pris en charge, DMS, taux
-de réadmission, part de relevés en alerte, séjours en cours — puis décline l'activité :
-DMS par service, activité des urgences dans ses deux acceptions, réadmissions par service,
-alertes de constantes dans le temps et par nature, flux d'entrée et de sortie, charge
-quotidienne par service.
+**🏥 Pilotage hospitalier** se lit de haut en bas, par bandes qui répondent chacune à une
+question :
 
-Deux blocs le distinguent d'un tableau de bord ordinaire : le **rapport qualité** du dernier
-traitement et le **journal d'ingestion**. Un utilisateur qui doute d'un chiffre peut voir,
-sans quitter l'interface, combien de lignes ont été écartées et par quelle règle.
+| Bande | Contenu | Question à laquelle elle répond |
+|---|---|---|
+| Chiffres clés | Séjours · DMS · réadmission 30 j · alertes (%) · séjours en cours | Où en est-on ? |
+| Activité | DMS par service · activité des urgences (deux acceptions) | L'activité est-elle normale ? |
+| Surveillance | Alertes de constantes par jour · nature des alertes par service | Faut-il s'inquiéter d'un patient ? |
+| Réadmissions | Encart de portée, **puis** taux par service et couverture | Combien de patients reviennent — et sur quelle base ? |
+| Flux et charge | Modes d'admission et de sortie · activité quotidienne par service | Comment les patients circulent-ils ? |
+| Fiabilité | Rapport qualité du dernier traitement · journal d'ingestion | D'où sortent ces chiffres ? |
+
+Deux points de conception méritent d'être signalés. D'abord, l'**encart sur la portée du
+taux de réadmission précède les graphiques qu'il qualifie** : un avertissement placé sous le
+chiffre qu'il corrige n'est pas lu. Ensuite, la dernière bande — rapport qualité et journal
+d'ingestion — est ce qui distingue ce tableau de bord d'un tableau de bord ordinaire : un
+utilisateur qui doute d'un chiffre voit, sans quitter l'interface et sans accès à la base
+d'exploitation, combien de lignes ont été écartées et par quelle règle.
 
 ![Tableau de bord de pilotage](img/dashboard-pilotage.jpg)
 
@@ -575,7 +604,9 @@ sans accès à la base d'exploitation :
 
 **🔬 Recherche clinique** présente les tailles de cohortes, la prévalence par pathologie, la
 distribution par âge et sexe, et le détail par département. Un encart explique le seuil de
-diffusion, et un compteur affiche son effet réel.
+diffusion, et un compteur affiche son effet réel. L'en-tête porte deux avertissements
+d'égale importance : le seuil de cinq patients, et le fait que ces cohortes proviennent d'un
+jeu synthétique dont les prévalences n'ont aucune valeur clinique (§8.1).
 
 ![Tableau de bord de recherche](img/dashboard-recherche.jpg)
 
@@ -589,6 +620,19 @@ diffusion, et un compteur affiche son effet réel.
 
 Le niveau qui compte est le premier. Les deux autres organisent l'interface ; celui-là
 oppose un refus même à une requête SQL écrite à la main.
+
+Le résultat se constate directement : interrogée avec le compte `pilotage`, l'interface ne
+liste **qu'un** tableau de bord, **une** collection et **une** base de données — celle de
+son usage. Il n'y a pas de contenu grisé ni de connexion inaccessible : l'autre usage
+n'existe simplement pas de son point de vue.
+
+**Une précaution qui ne relève pas de la confidentialité mais de la disponibilité.** Les
+deux comptes autorisent le SQL libre depuis Metabase. Le `GRANT SELECT` empêche toute
+écriture, mais rien n'empêcherait une requête maladroite de saturer la mémoire du moteur et
+de priver l'autre usage de son tableau de bord. Un profil de réglages (`readonly = 2`,
+temps d'exécution et mémoire bornés) et un quota horaire sont donc attachés aux deux
+comptes. Les seuils sont très au-dessus d'un usage normal : ils n'interdisent rien, ils
+arrêtent une boucle emballée.
 
 **Démonstration.** Plutôt qu'une capture d'écran — qui montre un refus sans prouver *qui*
 s'est vu refuser *quoi* — la démonstration est **rejouable en une commande**.
@@ -697,14 +741,20 @@ exige qu'elle ne rende rien.
 
 ### 7.3 Contrôles automatiques
 
-Trois vérifications tournent à chaque run et échoueraient bruyamment en cas de régression :
+Quatre règles RGPD tournent à chaque run, au même titre que les contrôles de qualité, et
+sont chiffrées dans `ops.quality_report` :
 
-- aucune colonne nommée `nir`, `nom`, `prenom`, `birth_date` ou `patient_id` dans une base
-  de l'entrepôt ;
-- aucun pseudonyme individuel exposé dans la base de recherche ;
-- aucune cellule diffusée sous le seuil de cinq patients.
+| Règle | Ce qu'elle mesure | Attendu |
+|---|---|---|
+| `RGPD_k_anonymat` | Cellules retirées par le seuil k ≥ 5, au grain le plus fin | 4 sur 1 600 |
+| `RGPD_suppression_complementaire` | Marges retirées parce que leur décomposition est incomplète | 3 sur 200 |
+| `RGPD_cohortes_diffusees` | Cohortes par pathologie effectivement diffusées | 10 sur 10 |
+| `RGPD_minimisation` | Colonnes identifiantes **ou pseudonyme** présentes dans la base de recherche | **0** |
 
-Ces contrôles sont doublés de tests d'intégration exécutables par `make test-e2e`.
+Ces contrôles sont doublés de tests d'intégration exécutables par `make test-e2e`, qui
+vérifient en outre qu'aucune colonne nommée `nir`, `nom`, `prenom`, `birth_date` ou
+`patient_id` n'existe dans **aucune** base de l'entrepôt, et rejouent l'attaque par
+différenciation décrite en §7.2.
 
 ### 7.4 Registre des hypothèses
 
@@ -731,6 +781,18 @@ certains indicateurs peu interprétables cliniquement. Le taux de réadmission, 
 particulier, est correct au sens de sa définition mais reposerait sur des données
 incohérentes en production.
 
+**Les prévalences ne veulent rien dire, et il faut le dire.** Les dix pathologies du
+référentiel affichent chacune une prévalence comprise entre 50,2 % et 51,6 %, soit une somme
+de **508,9 %**. Autrement dit, chaque patient porte en moyenne cinq diagnostics distincts,
+répartis de façon uniforme : les codes CIM-10 ont manifestement été tirés au hasard, sans
+corrélation avec le service, l'âge ni le sexe. Aucune conclusion épidémiologique n'est donc
+tirable de ces cohortes — ni sur le poids relatif des pathologies, ni sur leur profil
+démographique. C'est précisément pourquoi le tableau de bord de recherche porte cet
+avertissement en tête, plutôt qu'en note de bas de page : un graphique où dix barres sont
+égales invite à conclure qu'elles se valent, alors qu'il indique en réalité que la donnée
+est artificielle. Ce que ces cohortes valident, c'est la **chaîne de traitement** —
+déduplication, k-anonymat, suppression complémentaire — et cela, elles le valident bien.
+
 **Trois jours de profondeur, pour un indicateur à trente jours.** C'est la limite la plus
 lourde du projet, et il faut la nommer sans l'atténuer : le taux de réadmission à 30 jours
 **n'est pas calculable** sur ces données. Aucune sortie ne dispose de sa fenêtre complète,
@@ -751,7 +813,8 @@ structurellement partiel, ce que les tableaux de bord signalent explicitement.
 | Point | État actuel | Recommandation |
 |---|---|---|
 | Base applicative de Metabase | H2 embarqué | PostgreSQL en production : H2 ne supporte ni la sauvegarde à chaud ni la montée en charge |
-| Secrets | Fichier `.env` local | Coffre-fort (Vault, gestionnaire de secrets du cloud), avec rotation tracée |
+| Secrets | Fichier `.env` local, tiré au hasard à l'installation | Coffre-fort (Vault, gestionnaire de secrets du cloud), avec rotation tracée |
+| Durée de conservation | Un an sur `ops.quality_report` (TTL) ; aucune sur les données | À arrêter avec le délégué à la protection des données (§8.3), puis à appliquer par partition |
 | Ordonnancement | cron | Airflow ou Dagster dès que les dépendances entre traitements se complexifient : reprise fine, historique, alerting intégré |
 | Reconstruction silver et gold | Intégrale à chaque run | Traitement incrémental (moteur `ReplacingMergeTree`) si le volume devient conséquent |
 | Blocage des données dans Metabase | Restriction du droit de requête | Le blocage complet est réservé aux éditions payantes ; ici c'est ClickHouse qui porte l'interdiction réelle, ce qui suffit |
@@ -767,7 +830,11 @@ exceptionnelle.
 
 **Prévoir une durée de conservation.** Le sujet ne l'aborde pas, mais un entrepôt de santé
 doit définir une durée au-delà de laquelle les données sont purgées ou archivées. Le
-partitionnement par jour rend cette purge triviale à mettre en œuvre.
+mécanisme est déjà en place là où la décision nous appartenait : `ops.quality_report` porte
+un TTL d'un an, largement suffisant pour auditer un exercice. Sur les données de santé
+elles-mêmes, la durée relève d'une décision de gouvernance et non d'un choix technique —
+elle reste donc à arrêter. Le partitionnement par jour rend la purge triviale le moment venu
+(cf. document d'exploitation, §6.5).
 
 **Associer le délégué à la protection des données.** La pseudonymisation ne rend pas les
 données anonymes au sens du RGPD : elles restent des données personnelles, et leur

@@ -37,10 +37,11 @@ git clone <url-du-depot> && cd eds-chu
 make demo
 ```
 
-`make demo` crée au passage le fichier `.env` et **y génère un sel de pseudonymisation
-aléatoire** : les pseudonymes de votre installation ne sont donc dérivables par personne
-d'autre. Pensez seulement à remplacer les mots de passe `…_change_me` avant tout usage réel
-— le pipeline vous le rappelle à chaque exécution tant que c'est le cas.
+`make demo` crée au passage le fichier `.env` et **y tire au hasard tous les secrets** : le
+sel de pseudonymisation et les six mots de passe. Les pseudonymes de votre installation ne
+sont donc dérivables par personne d'autre, et aucune valeur d'exemple ne subsiste. Si vous
+aviez copié `.env.example` à la main, le pipeline vous nomme à chaque exécution les
+variables restées à leur valeur d'exemple.
 
 `make demo` démarre ClickHouse et Metabase, provisionne l'entrepôt, ingère les trois jours
 de dépôt, construit les indicateurs et crée les deux dashboards. Comptez deux à trois
@@ -175,11 +176,14 @@ uv run eds --help
 │   ├── 15_bronze_load/     chargements paramétrés par jour
 │   ├── 20_silver/          constellation, règles qualité, rapport
 │   └── 30_gold/            indicateurs par usage
-├── tests/                102 tests
+├── tests/                122 tests (62 unitaires, 60 d'intégration)
 │   ├── test_pseudo.py      pseudonymisation : stabilité, non-réversibilité
 │   ├── test_collect.py     aucune donnée identifiante ne sort de la source
+│   ├── test_config.py      détection des secrets d'exemple
 │   ├── test_state.py       décision d'ingestion : les 4 branches de l'incrémentalité
 │   ├── test_warehouse.py   découpage des scripts SQL
+│   ├── test_pipeline.py    dépôt incomplet, échec partiel, couche en retard
+│   ├── test_dashboards.py  mise en page : chevauchements, titres, tables visées
 │   └── test_e2e.py         invariants de l'entrepôt (nécessite Docker)
 ├── docs/
 │   ├── RAPPORT.md          dossier d'analyse et de conception
@@ -199,7 +203,7 @@ uv run eds --help
 |---|---|
 | **Pseudonymisation** | `HMAC-SHA256(sel, IPP)` appliqué à la copie vers le lake. Stable — les jointures tiennent — et non réversible sans le sel, qui n'est ni versionné ni journalisé. |
 | **Minimisation** | NIR, nom et prénom ne sont jamais copiés ; la date de naissance est réduite à l'année ; la table des constantes ne porte même pas de pseudonyme, aucun indicateur n'en ayant besoin. |
-| **Cloisonnement** | Deux comptes SQL ClickHouse en lecture seule sur leur seule base gold, deux connexions et deux collections Metabase. Une requête écrite à la main ne franchit pas la frontière : c'est le moteur qui refuse. |
+| **Cloisonnement** | Deux comptes SQL ClickHouse en lecture seule sur leur seule base gold, deux connexions et deux collections Metabase. Une requête écrite à la main ne franchit pas la frontière : c'est le moteur qui refuse. Chaque utilisateur ne voit qu'un tableau de bord et qu'une base — l'autre usage n'existe pas de son point de vue. |
 | **Petits effectifs** | `HAVING uniqExact(patient_pseudo) >= 5` sur chaque cellule diffusée en recherche ; âges en tranches de dix ans. L'effet est mesuré et affiché : 4 cellules retirées sur 1 600 au grain le plus fin. |
 | **Traçabilité** | Chaque ligne de bronze et de silver porte son fichier d'origine, son jour de dépôt et son horodatage de traitement. Les tables gold sont des agrégats : elles se rattachent à leur run via `ops.quality_report`. Chaque exécution est journalisée, chaque règle qualité chiffrée. |
 

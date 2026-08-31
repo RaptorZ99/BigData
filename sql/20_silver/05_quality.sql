@@ -42,7 +42,9 @@ UNION ALL
 SELECT
     '{run_id}', 'silver', 'fact_monitoring', 'Q4_plages_physiologiques',
     'Relevés écartés : FC hors 20-250 bpm, SpO2 hors 50-100 %, température hors 30-45 °C',
-    (SELECT count() FROM eds_bronze.monitoring),
+    -- Lues au grain du fait (séjour, horodatage), qui est aussi celui de la
+    -- déduplication : sinon un relevé redéposé gonflerait le dénominateur.
+    (SELECT uniqExact((stay_id, ts)) FROM eds_bronze.monitoring),
     (SELECT count() FROM eds_silver.fact_monitoring),
     (SELECT countIf(reject_reason LIKE '%out_of_range%') FROM eds_silver.monitoring_rejets),
     0,
@@ -53,7 +55,7 @@ UNION ALL
 SELECT
     '{run_id}', 'silver', 'fact_monitoring', 'C1_cascade_monitoring',
     'Relevés écartés en cascade : séjour parent invalide ou inconnu',
-    (SELECT count() FROM eds_bronze.monitoring),
+    (SELECT uniqExact((stay_id, ts)) FROM eds_bronze.monitoring),
     (SELECT count() FROM eds_silver.fact_monitoring),
     (SELECT countIf(reject_reason LIKE '%parent_stay_rejected%') FROM eds_silver.monitoring_rejets),
     0,

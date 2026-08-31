@@ -1,6 +1,11 @@
 # PLAN.md — Entrepôt de Données de Santé (EDS) du CHU
 
 > **Plan d'implémentation autosuffisant.** Ce document contient tout le contexte nécessaire : le besoin, le profilage complet des données sources (déjà réalisé — ne pas le refaire), les décisions d'architecture justifiées, les résultats des recherches techniques (versions, API, pièges), les spécifications détaillées de chaque composant, l'ordre d'implémentation et les critères d'acceptation. Le sujet officiel est dans `FICHE-SUJET.md`, les règles impératives dans `CLAUDE.md`.
+>
+> **Statut : plan exécuté.** Le projet est livré. Ce document reste la référence pour le *profilage* des sources (§2) et pour les *décisions* d'architecture (§3) — deux choses que l'implémentation n'a pas remises en cause. En revanche, **les chiffres publiés font foi dans [`docs/RAPPORT.md`](docs/RAPPORT.md)** : l'implémentation a corrigé deux points que ce plan n'avait pas anticipés, signalés ci-dessous à chaque occurrence.
+>
+> 1. **Le taux de réadmission ne se lit pas sans sa fenêtre d'observation.** Le plan prévoyait « 687 / 11 678 = 5,9 % ». Ce ratio est arithmétiquement exact et métier faux : 88 % du dénominateur est constitué de sorties postérieures à la dernière admission connue, qui ne peuvent structurellement rien constater. Le chiffre publié est **687 / 1 421 sorties observables = 48,3 %**, assorti de sa couverture de 12,2 % (rapport §5.3).
+> 2. **Le k-anonymat appelait une suppression complémentaire.** Appliquer le seuil séparément à une marge et à sa décomposition laisse retrouver la cellule cachée par soustraction (rapport §7.2).
 
 ---
 
@@ -77,7 +82,7 @@ Deux usages, **cloisonnés** : pilotage hospitalier et recherche clinique.
 | Q7 | *(bonus)* Admission après décès antérieur | **Flag** `is_post_mortem_anomaly`, signalé au rapport qualité | 220 brut → **192** après nettoyage |
 | Q8 | *(bonus)* Relevés monitoring après la sortie | **Flag** `is_after_discharge` (contrôle actif) | 520 brut → **0** après cascade |
 
-> **Découverte à valoriser au rapport** : les 520 relevés « post-sortie » sont exactement les relevés des 136 séjours invalides (Q2) — une sortie antérieure à l'admission rend tout relevé « postérieur à la sortie ». Q8 est donc un **symptôme** de Q2 : après rejet en cascade des relevés de ces séjours, il reste **0** relevé post-sortie. Le flag est conservé comme contrôle actif (attendu 0 à chaque run). Chiffres définitifs post-nettoyage (recalculés, à utiliser comme invariants de test) : `fact_sejour` = **14 864** · `fact_diagnostic` = **37 040** (cascade : 340) · `fact_monitoring` = **64 799** (rejets : 1 878 = 1 369 hors plage + 520 cascade, dont 11 cumulant les deux raisons) · réadmissions ≤ 30 j = **687** sur **11 678** sorties éligibles (5,9 %) · relevés en alerte = **3 053** (4,7 %).
+> **Découverte à valoriser au rapport** : les 520 relevés « post-sortie » sont exactement les relevés des 136 séjours invalides (Q2) — une sortie antérieure à l'admission rend tout relevé « postérieur à la sortie ». Q8 est donc un **symptôme** de Q2 : après rejet en cascade des relevés de ces séjours, il reste **0** relevé post-sortie. Le flag est conservé comme contrôle actif (attendu 0 à chaque run). Chiffres définitifs post-nettoyage (recalculés, à utiliser comme invariants de test) : `fact_sejour` = **14 864** · `fact_diagnostic` = **37 040** (cascade : 340) · `fact_monitoring` = **64 799** (rejets : 1 878 = 1 369 hors plage + 520 cascade, dont 11 cumulant les deux raisons) · réadmissions ≤ 30 j = **687** (sur 11 678 sorties éligibles, dont **1 421 seulement sont observables** → 48,3 % ; voir l'avertissement en tête de ce document) · relevés en alerte = **3 053** (4,7 %).
 
 ---
 
@@ -185,7 +190,7 @@ Le modèle de données complet (bronze typé, **silver en constellation** — 3 
 
 ```dotenv
 # Pseudonymisation — SECRET, ne jamais committer le .env réel. Générer : openssl rand -hex 32
-EDS_SALT=change-me-64-hex-chars
+EDS_SALT=remplace-moi-par-openssl-rand-hex-32
 
 # ClickHouse
 CLICKHOUSE_HOST=localhost
@@ -198,11 +203,11 @@ CLICKHOUSE_RECHERCHE_PASSWORD=recherche_change_me
 # Metabase (provisioning)
 MB_URL=http://localhost:3000
 MB_ADMIN_EMAIL=admin@chu.local
-MB_ADMIN_PASSWORD=AdminChu2026!
+MB_ADMIN_PASSWORD=Admin_change_me_2026
 MB_PILOTAGE_EMAIL=pilotage@chu.local
-MB_PILOTAGE_PASSWORD=PilotageChu2026!
+MB_PILOTAGE_PASSWORD=Pilotage_change_me_2026
 MB_RECHERCHE_EMAIL=recherche@chu.local
-MB_RECHERCHE_PASSWORD=RechercheChu2026!
+MB_RECHERCHE_PASSWORD=Recherche_change_me_2026
 
 # Chemins
 EDS_SOURCE_DIR=./source-filestorage
@@ -413,9 +418,9 @@ FROM eds_bronze.patients GROUP BY patient_pseudo
 |-------|-------|------------|
 | `kpi_dms_service` | service × jour de sortie | DMS = `avg(duree_heures)/24` sur séjours **terminés et valides** ; + `nb_sorties`. |
 | `kpi_urgences_jour` | jour | `nb_passages_service_urgences` (admissions `service_code='URGENCES'`) et `nb_admissions_mode_urgence` (tous services, `admission_mode='urgence'`) — les deux lectures existent, les afficher côte à côte. |
-| `kpi_readmissions_30j` | service × jour de sortie | Dénominateur : sorties vivantes (`discharge_ts` non NULL, `discharge_mode != 'deces'`). Numérateur : les séjours pour lesquels il existe **une** admission du même patient postérieure à la sortie et située dans les 30 jours — `arrayExists` sur `groupArray(admission_ts) OVER (PARTITION BY patient_pseudo)`. ⚠ **Ne pas** utiliser `leadInFrame` (admission chronologiquement suivante) : avec les nombreux séjours qui se chevauchent, l'admission « suivante » est souvent un séjour concurrent antérieur à la sortie, qui masque la réadmission réelle (370 au lieu de 687). Attendu global (sur fact_sejour nettoyé) : **687 réadmissions / 11 678 sorties éligibles = 5,9 %**. |
+| `kpi_readmissions_30j` | service × jour de sortie | Dénominateur : sorties vivantes (`discharge_ts` non NULL, `discharge_mode != 'deces'`). Numérateur : les séjours pour lesquels il existe **une** admission du même patient postérieure à la sortie et située dans les 30 jours — `arrayExists` sur `groupArray(admission_ts) OVER (PARTITION BY patient_pseudo)`. ⚠ **Ne pas** utiliser `leadInFrame` (admission chronologiquement suivante) : avec les nombreux séjours qui se chevauchent, l'admission « suivante » est souvent un séjour concurrent antérieur à la sortie, qui masque la réadmission réelle (370 au lieu de 687). Attendu (sur fact_sejour nettoyé) : **687 réadmissions**. ⚠ Ne pas les rapporter aux 11 678 sorties éligibles : seules **1 421** ont une fenêtre d'observation non vide, d'où le taux publié de **48,3 %** et la colonne `jours_observables` (rapport §5.3). |
 | `kpi_alertes_monitoring` | jour × service | `nb_releves`, `nb_alertes` (+ détail FC/SpO2/temp), `pct_alertes`. Seulement REA/CARDIO par construction. |
-| `kpi_activite_service` | jour × service | admissions, sorties, décès, séjours en cours en fin de journée. |
+| `kpi_activite_service` | jour × service | admissions, sorties, décès, séjours en cours en fin de journée. ⚠ Les séjours ouverts se calculent par **cumul** (`sum(...) OVER` sur le calendrier : +1 à l'admission, −1 à la sortie), et non par produit croisé jour × séjour — ce dernier coûte O(jours × séjours) et devient quadratique avec l'historique. |
 | `kpi_flux` | jour × mode | répartition admission_mode et discharge_mode. |
 | `kpi_qualite_pipeline` | run × règle | copie exposable de `ops.quality_report` → le dashboard pilotage montre la fiabilité des chiffres. |
 
@@ -433,11 +438,27 @@ Règle absolue : **chaque table applique `HAVING uniqExact(patient_pseudo) >= 5`
 ### 9.3 Sécurité (fin de `sql/00_init/`, rejoué à chaque `provision-warehouse`, idempotent)
 
 ```sql
-CREATE USER IF NOT EXISTS chu_pilotage IDENTIFIED WITH sha256_password BY '{pwd}';
+-- Profil commun : le GRANT protège la confidentialité, ces bornes la disponibilité
+-- (SQL libre autorisé depuis Metabase). readonly = 2 et non 1 : le niveau 1
+-- interdirait au pilote JDBC de poser ses paramètres de session.
+CREATE SETTINGS PROFILE OR REPLACE restitution SETTINGS
+    readonly = 2, max_execution_time = 60, max_memory_usage = 4000000000,
+    max_result_rows = 1000000, max_result_bytes = 200000000,
+    result_overflow_mode = 'throw';
+
+-- `OR REPLACE` et non `IF NOT EXISTS` : ce dernier ne réaligne pas le mot de
+-- passe d'un compte déjà créé, donc changer .env n'aurait aucun effet.
+CREATE USER OR REPLACE chu_pilotage IDENTIFIED WITH sha256_password BY '{pwd}'
+    DEFAULT DATABASE eds_gold_pilotage SETTINGS PROFILE restitution;
 GRANT SELECT ON eds_gold_pilotage.* TO chu_pilotage;
-CREATE USER IF NOT EXISTS chu_recherche IDENTIFIED WITH sha256_password BY '{pwd}';
+CREATE USER OR REPLACE chu_recherche IDENTIFIED WITH sha256_password BY '{pwd}'
+    DEFAULT DATABASE eds_gold_recherche SETTINGS PROFILE restitution;
 GRANT SELECT ON eds_gold_recherche.* TO chu_recherche;
 -- et rien d'autre : ni bronze, ni silver, ni ops, ni l'autre gold.
+
+CREATE QUOTA OR REPLACE restitution KEYED BY user_name
+    FOR INTERVAL 1 HOUR MAX queries = 3000, execution_time = 1800
+    TO chu_pilotage, chu_recherche;
 ```
 
 (Vérifié : les GRANT par base/table persistent après `CREATE OR REPLACE TABLE`. `chu_etl` a les droits d'admin via `CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1`.)
@@ -520,7 +541,7 @@ Documenter dans EXPLOITATION.md : installation (`crontab -e`), supervision (exit
 
 - `test_pseudo.py` : même entrée+sel → même pseudo (déterminisme) ; sels différents → pseudos différents ; format `P[0-9a-f]{16}` ; `birth_year` correct ; sel absent/court → exception explicite.
 - `test_collect.py` : sur un mini-fixture CSV (3 lignes inventées, dans `tests/fixtures/`) → le fichier lake ne contient ni `nir` ni `nom` ni `prenom` ni motif `IPP\d+` ; recollecte → contenu identique (déterminisme).
-- `test_e2e.py` (`@pytest.mark.integration`, requiert `make up` + pipeline exécuté) : vérifie les invariants recalculés (§2.6, note) — dim_patient = 6 000 ; fact_sejour = 14 864 (rejets 136) ; fact_diagnostic = 37 040 (cascade 340) ; fact_monitoring = 64 799 (rejets 1 878) ; flags : post-mortem 192, after_discharge 0 ; réadmissions 687 / 11 678 ; alertes 3 053 ; `cohorte_demographie_region` = 1 596 cellules diffusées (4 supprimées) ; aucune table recherche avec `nb_patients < 5` ; `SELECT` sur `eds_gold_pilotage` avec le user `chu_recherche` → `ACCESS_DENIED`.
+- `test_e2e.py` (`@pytest.mark.integration`, requiert `make up` + pipeline exécuté) : vérifie les invariants recalculés (§2.6, note) — dim_patient = 6 000 ; fact_sejour = 14 864 (rejets 136) ; fact_diagnostic = 37 040 (cascade 340) ; fact_monitoring = 64 799 (rejets 1 878) ; flags : post-mortem 192, after_discharge 0 ; réadmissions 687 sur 1 421 sorties observables (48,3 %) ; alertes 3 053 ; `cohorte_demographie_region` = 1 596 cellules diffusées (4 supprimées) ; aucune table recherche avec `nb_patients < 5` ; `SELECT` sur `eds_gold_pilotage` avec le user `chu_recherche` → `ACCESS_DENIED`.
 - Lint : `ruff check` + `ruff format --check` dans `make test`.
 
 ---
@@ -533,7 +554,7 @@ Documenter dans EXPLOITATION.md : installation (`crontab -e`), supervision (exit
 | **P2 Collecte** | pseudo.py, collect.py + tests unitaires | `uv run pytest` vert ; lake produit ; zéro donnée identifiante dedans (test automatisé). |
 | **P3 Bronze** | 00_init (databases+ops), 10_bronze, warehouse.py, load_bronze.py, state.py | `eds run` charge les 3 jours ; relancer → « rien à faire » ; comptages bronze = totaux §2 ; `eds run --date` rejoue sans doublon. |
 | **P4 Silver** | 20_silver (constellation : 3 dims + 3 faits, ordre de build §8) + quality_report | Comptages exacts (§2.6, note) : dim_patient 6 000, fact_sejour 14 864, fact_diagnostic 37 040, fact_monitoring 64 799, rejets 136/340 en cascade/1 878, flags 192/0 ; `eds quality` les affiche. |
-| **P5 Gold + RBAC** | 30_gold, users/GRANTs | KPI cohérents (réadmissions 687/11 678 = 5,9 % ; alertes 3 053) ; `chu_recherche` ne lit pas pilotage (testé) ; aucune cohorte < 5 diffusée (4 cellules supprimées sur la vue fine par département). |
+| **P5 Gold + RBAC** | 30_gold, users/GRANTs | KPI cohérents (réadmissions 687 sur 1 421 sorties observables = 48,3 % ; alertes 3 053) ; `chu_recherche` ne lit pas pilotage (testé) ; aucune cohorte < 5 diffusée (4 cellules supprimées sur la vue fine par département). |
 | **P6 Metabase** | metabase.py + les 2 dashboards | `make demo` de zéro → URLs affichées ; login pilotage/recherche → chacun ne voit que son univers ; les 2 dashboards remplis. |
 | **P7 Docs** | README, docs/RAPPORT.md, docs/EXPLOITATION.md, crontab.example | Cf. spec §14 ; un lecteur qui clone et suit le README arrive au même résultat. |
 | **P8 Finitions** | test_e2e, ruff, relecture, screenshots dans docs/img/ | `make test` vert ; `make reset && make demo` repasse de bout en bout. |

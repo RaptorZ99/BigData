@@ -36,10 +36,13 @@ def _bootstrap(verbose: bool = False):
         console.print(f"[bold red]Configuration invalide[/] : {exc}")
         raise typer.Exit(code=2) from exc
 
-    if config.uses_weak_passwords:
+    # On nomme les variables concernées : « remplacez les mots de passe » sans
+    # dire lesquels se traduit en pratique par « on en oublie un ».
+    if faibles := config.weak_password_settings:
         console.print(
-            "[yellow]⚠ Mots de passe d'exemple encore en place.[/] "
-            "Remplacez les valeurs « …_change_me » de .env avant tout usage réel."
+            "[yellow]⚠ Mots de passe d'exemple encore en place :[/] "
+            f"{', '.join(faibles)}. Remplacez-les dans .env avant tout usage réel "
+            "(ou supprimez .env et relancez `make env`, qui en génère d'aléatoires)."
         )
     return config
 
@@ -263,22 +266,16 @@ def check_cloisonnement_command() -> None:
 
     all_ok = True
     for user, password, database, should_read in scenarios:
-        client = connect(config, user=user, password=password)
-        try:
-            client.query(f"SELECT count() FROM {database}.{_first_table(config, database)} LIMIT 1")
-            granted = True
-        except Exception:
-            granted = False
+        granted, anomalie = _tester_acces(config, user, password, database)
 
-        ok = granted == should_read
+        ok = granted == should_read and anomalie is None
         all_ok &= ok
+        constate = "lecture" if granted else "refusé"
         table.add_row(
             user,
             database,
             "lecture" if should_read else "refus",
-            f"[green]✓ {'lecture' if granted else 'refusé'}[/]"
-            if ok
-            else f"[bold red]✗ {'lecture' if granted else 'refusé'}[/]",
+            f"[green]✓ {constate}[/]" if ok else f"[bold red]✗ {anomalie or constate}[/]",
         )
 
     console.print(table)
@@ -326,14 +323,42 @@ def _check_cloisonnement_metabase(config) -> bool:
     return all(controle.conforme for controle in resultats)
 
 
-def _first_table(config, database: str) -> str:
+# Motifs de refus qui prouvent effectivement le cloisonnement. Tout autre échec
+# — base absente, moteur arrêté, table vide — donnerait le même « refusé » sans
+# rien démontrer : le contrôle passerait au vert pour une mauvaise raison.
+MOTIFS_DE_REFUS = ("ACCESS_DENIED", "NOT_ENOUGH_PRIVILEGES")
+
+
+def _tester_acces(config, user: str, password: str, database: str) -> tuple[bool, str | None]:
+    """Teste une lecture réelle. Renvoie (lecture obtenue, anomalie éventuelle).
+
+    L'anomalie est renseignée quand l'échec ne prouve pas le cloisonnement : la
+    distinguer d'un refus de droits est ce qui empêche ce contrôle d'être
+    faussement rassurant.
+    """
+    table = _first_table(config, database)
+    if table is None:
+        return False, f"{database} ne contient aucune table"
+
+    client = connect(config, user=user, password=password)
+    try:
+        client.query(f"SELECT count() FROM {database}.{table} LIMIT 1")
+    except Exception as exc:
+        message = str(exc)
+        if not any(motif in message for motif in MOTIFS_DE_REFUS):
+            return False, f"échec non lié aux droits : {message.splitlines()[0][:80]}"
+        return False, None
+    return True, None
+
+
+def _first_table(config, database: str) -> str | None:
     """Première table d'une base, pour tester un accès en lecture."""
     client = connect(config)
     rows = client.query(
         "SELECT name FROM system.tables WHERE database = %(db)s ORDER BY name LIMIT 1",
         parameters={"db": database},
     ).result_rows
-    return rows[0][0] if rows else "unknown"
+    return rows[0][0] if rows else None
 
 
 @app.command("reset")

@@ -72,12 +72,20 @@ CREATE TABLE IF NOT EXISTS ops.quality_report
 )
 ENGINE = MergeTree
 ORDER BY (run_id, layer, table_name, rule)
+-- Le rapport s'écrit à chaque exécution (une vingtaine de lignes) : sans durée
+-- de conservation, la table croîtrait indéfiniment. Un an couvre largement
+-- l'audit d'un exercice, et met en pratique la recommandation de gouvernance du
+-- rapport (§8.3). Les dashboards ne lisent de toute façon que le dernier run.
+TTL checked_at + INTERVAL 1 YEAR
 COMMENT 'Contrôles qualité par run : lignes lues, conservées, écartées, signalées';
 
--- Migration : `CREATE TABLE IF NOT EXISTS` ne fait rien sur une table déjà
--- créée, donc les colonnes ajoutées après coup doivent l'être explicitement.
--- Le provisionnement reste ainsi rejouable sur un entrepôt existant.
+-- Migrations : `CREATE TABLE IF NOT EXISTS` ne fait rien sur une table déjà
+-- créée, donc les évolutions de schéma doivent être rejouées explicitement.
+-- Le provisionnement reste ainsi convergent sur un entrepôt existant.
 ALTER TABLE ops.quality_report
     ADD COLUMN IF NOT EXISTS rows_flagged Int64 DEFAULT 0
     COMMENT 'Lignes conservées mais marquées par un signalement'
     AFTER rows_rejected;
+
+ALTER TABLE ops.quality_report
+    MODIFY TTL checked_at + INTERVAL 1 YEAR;

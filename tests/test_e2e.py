@@ -363,6 +363,40 @@ def test_cloisonnement_du_contenu_dans_metabase(config):
 
 
 @pytest.mark.parametrize(
+    ("usage", "dashboard", "connexion"),
+    [
+        ("pilotage", "🏥 Pilotage hospitalier", "EDS — Pilotage hospitalier"),
+        ("recherche", "🔬 Recherche clinique", "EDS — Recherche clinique"),
+    ],
+)
+def test_un_utilisateur_ne_voit_qu_un_seul_univers(config, usage, dashboard, connexion):
+    """Le cloisonnement ne doit pas se contenter de refuser : il doit masquer.
+
+    Un contenu visible mais grisé indique déjà qu'il existe. Ici, l'autre usage
+    n'apparaît nulle part — ni tableau de bord, ni connexion à la base. Le test
+    interroge l'API avec les identifiants de l'utilisateur, comme le ferait son
+    navigateur.
+    """
+    from eds.metabase import MetabaseClient, MetabaseError
+
+    email = config.pilotage_email if usage == "pilotage" else config.recherche_email
+    mot_de_passe = (
+        config.metabase_pilotage_password
+        if usage == "pilotage"
+        else config.metabase_recherche_password
+    )
+
+    client = MetabaseClient(config.metabase_url)
+    try:
+        client.authenticate(email, mot_de_passe)
+    except MetabaseError as exc:
+        pytest.skip(f"Metabase indisponible : {exc}")
+
+    assert [d["name"] for d in client.get("/api/dashboard")] == [dashboard]
+    assert [b["name"] for b in client.get("/api/database")["data"]] == [connexion]
+
+
+@pytest.mark.parametrize(
     ("user_key", "base_autorisee"),
     [("pilotage", "eds_gold_pilotage"), ("recherche", "eds_gold_recherche")],
 )
@@ -440,8 +474,61 @@ def test_le_rapport_qualite_est_renseigne(client):
     run_id = last_quality_run_id(client)
     assert run_id is not None, "aucun rapport qualité en base"
 
-    regles = scalar(
-        client,
-        f"SELECT uniqExact(rule) FROM ops.quality_report WHERE run_id = '{run_id}'",
+    # Le compte exact est publié dans le rapport (§4.2) et dans le document
+    # d'exploitation : le figer ici empêche les deux de diverger en silence.
+    par_couche = dict(
+        client.query(
+            "SELECT layer, uniqExact(rule) FROM ops.quality_report "
+            f"WHERE run_id = '{run_id}' GROUP BY layer"
+        ).result_rows
     )
-    assert regles >= 14
+    assert par_couche == {"silver": 14, "gold": 4}
+
+
+def test_les_regles_rgpd_de_la_couche_gold_sont_chiffrees(client):
+    """Les quatre contrôles RGPD doivent produire les valeurs publiées au rapport."""
+    from eds.state import last_quality_run_id
+
+    mesures = {
+        rule: (rows_in, rows_kept, rows_rejected)
+        for rule, rows_in, rows_kept, rows_rejected in client.query(
+            "SELECT rule, rows_in, rows_kept, rows_rejected FROM ops.quality_report "
+            f"WHERE run_id = '{last_quality_run_id(client)}' AND layer = 'gold'"
+        ).result_rows
+    }
+
+    assert mesures["RGPD_k_anonymat"] == (1_600, 1_596, 4)
+    assert mesures["RGPD_suppression_complementaire"] == (200, 197, 3)
+    assert mesures["RGPD_cohortes_diffusees"] == (10, 10, 0)
+    # Aucune colonne identifiante ni pseudonyme dans la base des chercheurs.
+    assert mesures["RGPD_minimisation"][2] == 0
+
+
+def test_les_comptes_de_restitution_sont_bornes(client):
+    """Garde-fou de disponibilité : le SQL libre ne doit pas pouvoir saturer le moteur.
+
+    Le GRANT interdit déjà d'écrire ; ces bornes empêchent une requête maladroite
+    de priver l'autre usage de son tableau de bord (cf. rapport, §6.2).
+    """
+    profil = dict(
+        client.query(
+            "SELECT setting_name, value FROM system.settings_profile_elements "
+            "WHERE profile_name = 'restitution'"
+        ).result_rows
+    )
+    assert profil["readonly"] == "2", "readonly = 1 casserait le pilote JDBC de Metabase"
+    assert int(profil["max_execution_time"]) > 0
+    assert int(profil["max_memory_usage"]) > 0
+
+    for compte in ("chu_pilotage", "chu_recherche"):
+        rattache = scalar(
+            client,
+            "SELECT count() FROM system.settings_profile_elements "
+            f"WHERE user_name = '{compte}' AND inherit_profile = 'restitution'",
+        )
+        assert rattache == 1, f"{compte} n'hérite pas du profil de restitution"
+
+    beneficiaires = scalar(
+        client, "SELECT apply_to_list FROM system.quotas WHERE name = 'restitution'"
+    )
+    assert sorted(beneficiaires) == ["chu_pilotage", "chu_recherche"]

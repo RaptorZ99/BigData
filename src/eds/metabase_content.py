@@ -8,7 +8,19 @@ appartient à l'entrepôt, l'outil de restitution ne fait qu'afficher. Un chiffr
 du dashboard est donc toujours retrouvable en SQL, ce qui est exactement ce
 qu'on veut pouvoir démontrer.
 
-La grille Metabase fait 24 colonnes de large.
+La grille Metabase fait 24 colonnes de large. Deux règles de mise en page sont
+suivies partout, parce qu'elles sont ce qui distingue un tableau de bord lisible
+d'un empilement de graphiques :
+
+  * **aucun chevauchement.** Deux cartes qui se recouvrent sont repoussées par
+    Metabase à l'affichage, dans un ordre que le code ne contrôle pas — la
+    disposition versionnée cesse alors de décrire ce que l'utilisateur voit. Les
+    cartes sont donc réparties en bandes horizontales successives, chacune
+    occupant les 24 colonnes ;
+  * **les titres tiennent dans leur carte.** Une tuile de synthèse fait cinq
+    colonnes, soit une quinzaine de caractères lisibles ; au-delà, Metabase
+    tronque et le chiffre perd son sens. Le nom reste court, la définition
+    complète va dans la description, accessible au survol.
 """
 
 from __future__ import annotations
@@ -28,8 +40,10 @@ _PILOTAGE_CARDS = [
         "size_x": 24,
         "size_y": 2,
     },
+    # ── Bande 1 · les cinq chiffres clés ────────────────────────────────────
+    # Cinq tuiles de 5, 5, 5, 5 et 4 colonnes : exactement 24.
     {
-        "name": "Séjours pris en charge",
+        "name": "Séjours",
         "description": "Séjours valides sur la période, après contrôles qualité.",
         "display": "scalar",
         "sql": "SELECT nb_sejours FROM kpi_synthese",
@@ -39,8 +53,11 @@ _PILOTAGE_CARDS = [
         "size_y": 3,
     },
     {
-        "name": "Durée moyenne de séjour (jours)",
-        "description": "DMS globale, calculée sur les seuls séjours terminés.",
+        "name": "DMS (jours)",
+        "description": (
+            "Durée moyenne de séjour, tous services confondus. Calculée sur les seuls "
+            "séjours terminés : une durée partielle tirerait la moyenne vers le bas."
+        ),
         "display": "scalar",
         "sql": "SELECT dms_globale_jours FROM kpi_synthese",
         "row": 2,
@@ -49,11 +66,12 @@ _PILOTAGE_CARDS = [
         "size_y": 3,
     },
     {
-        "name": "Réadmission 30 j (%) — fenêtre observable",
+        "name": "Réadmission 30 j",
         "description": (
-            "Sorties vivantes suivies d'une réadmission dans les 30 jours, calculé sur "
-            "les seules sorties dont la fenêtre d'observation n'est pas vide. Les sorties "
-            "postérieures à la dernière admission connue ne peuvent rien constater."
+            "Part (%) des sorties vivantes suivies d'une réadmission dans les 30 jours. "
+            "Calculée sur les seules sorties dont la fenêtre d'observation n'est pas "
+            "vide — les sorties postérieures à la dernière admission connue ne peuvent "
+            "rien constater. Voir l'encart de couverture plus bas."
         ),
         "display": "scalar",
         "sql": "SELECT taux_readmission_pct FROM kpi_synthese",
@@ -63,13 +81,16 @@ _PILOTAGE_CARDS = [
         "size_y": 3,
     },
     {
-        "name": "Relevés en alerte (%)",
-        "description": "Part des constantes hors seuils cliniques (FC, SpO2, température).",
+        "name": "Alertes (%)",
+        "description": (
+            "Part des relevés de constantes hors seuils cliniques (fréquence cardiaque, "
+            "saturation, température). Réanimation et cardiologie uniquement."
+        ),
         "display": "scalar",
         "sql": "SELECT pct_releves_alerte FROM kpi_synthese",
         "row": 2,
         "col": 15,
-        "size_x": 4,
+        "size_x": 5,
         "size_y": 3,
     },
     {
@@ -78,10 +99,11 @@ _PILOTAGE_CARDS = [
         "display": "scalar",
         "sql": "SELECT nb_sejours_en_cours FROM kpi_synthese",
         "row": 2,
-        "col": 19,
-        "size_x": 5,
+        "col": 20,
+        "size_x": 4,
         "size_y": 3,
     },
+    # ── Bande 2 · activité ──────────────────────────────────────────────────
     {
         "name": "Durée moyenne de séjour par service",
         "description": "DMS pondérée par le nombre de sorties, sur les séjours terminés.",
@@ -132,70 +154,7 @@ _PILOTAGE_CARDS = [
         "size_x": 12,
         "size_y": 6,
     },
-    {
-        "name": "Taux de réadmission par service (fenêtre observable)",
-        "description": (
-            "Indicateur de qualité des soins : plus il est bas, mieux c'est. Restreint aux "
-            "sorties dont la fenêtre d'observation n'est pas vide."
-        ),
-        "display": "bar",
-        "sql": (
-            "SELECT service_label AS service,\n"
-            "       sum(sorties_eligibles) AS sorties,\n"
-            "       sum(readmissions_30j)  AS readmissions,\n"
-            "       round(100.0 * sum(readmissions_30j) / sum(sorties_eligibles), 2) AS taux_pct\n"
-            "FROM kpi_readmissions_30j\n"
-            "WHERE jours_observables > 0\n"
-            "GROUP BY service\n"
-            "ORDER BY taux_pct DESC"
-        ),
-        "visualization_settings": {
-            "graph.dimensions": ["service"],
-            "graph.metrics": ["taux_pct"],
-            "graph.show_values": True,
-            "graph.x_axis.title_text": "Service",
-            "graph.y_axis.title_text": "Taux de réadmission (%)",
-        },
-        "row": 21,
-        "col": 0,
-        "size_x": 12,
-        "size_y": 6,
-    },
-    {
-        "kind": "text",
-        "text": (
-            "⚠️ **Le taux de réadmission ne porte que sur une fraction des sorties.** "
-            "Une réadmission ne peut être constatée que si l'entrepôt couvre la période "
-            "où elle surviendrait. Les admissions s'arrêtent au dernier jour déposé, les "
-            "sorties s'étalent bien au-delà : seules **12 % des sorties** ont une fenêtre "
-            "d'observation non vide, et **aucune** n'a les 30 jours complets. "
-            "Le taux affiché porte sur ces seules sorties ; il n'est pas comparable à un "
-            "taux de réadmission calculé sur un historique complet."
-        ),
-        "row": 11,
-        "col": 0,
-        "size_x": 12,
-        "size_y": 4,
-    },
-    {
-        "name": "Couverture de l'indicateur de réadmission",
-        "description": "Part des sorties sur lesquelles l'indicateur peut se prononcer.",
-        "display": "table",
-        "sql": (
-            "SELECT discharge_date AS `jour de sortie`,\n"
-            "       sum(sorties_eligibles) AS sorties,\n"
-            "       max(jours_observables) AS `jours observables sur 30`,\n"
-            "       if(max(jours_observables) = 0, 'aucune mesure possible', 'partiel')\n"
-            "           AS `portée`\n"
-            "FROM kpi_readmissions_30j\n"
-            "GROUP BY `jour de sortie`\n"
-            "ORDER BY `jour de sortie`"
-        ),
-        "row": 15,
-        "col": 0,
-        "size_x": 12,
-        "size_y": 6,
-    },
+    # ── Bande 3 · surveillance des constantes ───────────────────────────────
     {
         "name": "Relevés de constantes en alerte par jour",
         "description": "Surveillance des patients de réanimation et de cardiologie.",
@@ -212,7 +171,7 @@ _PILOTAGE_CARDS = [
             "graph.y_axis.title_text": "Relevés en alerte",
         },
         "row": 11,
-        "col": 12,
+        "col": 0,
         "size_x": 12,
         "size_y": 6,
     },
@@ -240,11 +199,80 @@ _PILOTAGE_CARDS = [
             "graph.x_axis.title_text": "Service",
             "graph.y_axis.title_text": "Nombre d'alertes",
         },
-        "row": 17,
-        "col": 0,
+        "row": 11,
+        "col": 12,
         "size_x": 12,
         "size_y": 6,
     },
+    # ── Bande 4 · réadmissions, précédées de leur avertissement ─────────────
+    # L'encart passe AVANT les deux cartes : un taux de réadmission lu sans sa
+    # couverture est un chiffre trompeur, et personne ne lit un avertissement
+    # placé sous le graphique qu'il corrige.
+    {
+        "kind": "text",
+        "text": (
+            "### ↩️ Réadmissions à 30 jours\n"
+            "⚠️ **Le taux ne porte que sur une fraction des sorties.** Une réadmission ne "
+            "peut être constatée que si l'entrepôt couvre la période où elle surviendrait. "
+            "Les admissions s'arrêtent au dernier jour déposé, les sorties s'étalent bien "
+            "au-delà : seules **12 % des sorties** ont une fenêtre d'observation non vide, "
+            "et **aucune** n'a les 30 jours complets. Le taux affiché porte sur ces seules "
+            "sorties ; il n'est pas comparable à un taux calculé sur un historique complet."
+        ),
+        "row": 17,
+        "col": 0,
+        "size_x": 24,
+        "size_y": 3,
+    },
+    {
+        "name": "Taux de réadmission par service (fenêtre observable)",
+        "description": (
+            "Indicateur de qualité des soins : plus il est bas, mieux c'est. Restreint aux "
+            "sorties dont la fenêtre d'observation n'est pas vide."
+        ),
+        "display": "bar",
+        "sql": (
+            "SELECT service_label AS service,\n"
+            "       sum(sorties_eligibles) AS sorties,\n"
+            "       sum(readmissions_30j)  AS readmissions,\n"
+            "       round(100.0 * sum(readmissions_30j) / sum(sorties_eligibles), 2) AS taux_pct\n"
+            "FROM kpi_readmissions_30j\n"
+            "WHERE jours_observables > 0\n"
+            "GROUP BY service\n"
+            "ORDER BY taux_pct DESC"
+        ),
+        "visualization_settings": {
+            "graph.dimensions": ["service"],
+            "graph.metrics": ["taux_pct"],
+            "graph.show_values": True,
+            "graph.x_axis.title_text": "Service",
+            "graph.y_axis.title_text": "Taux de réadmission (%)",
+        },
+        "row": 20,
+        "col": 0,
+        "size_x": 12,
+        "size_y": 7,
+    },
+    {
+        "name": "Couverture de l'indicateur de réadmission",
+        "description": "Part des sorties sur lesquelles l'indicateur peut se prononcer.",
+        "display": "table",
+        "sql": (
+            "SELECT discharge_date AS `jour de sortie`,\n"
+            "       sum(sorties_eligibles) AS sorties,\n"
+            "       max(jours_observables) AS `jours observables sur 30`,\n"
+            "       if(max(jours_observables) = 0, 'aucune mesure possible', 'partiel')\n"
+            "           AS `portée`\n"
+            "FROM kpi_readmissions_30j\n"
+            "GROUP BY `jour de sortie`\n"
+            "ORDER BY `jour de sortie`"
+        ),
+        "row": 20,
+        "col": 12,
+        "size_x": 12,
+        "size_y": 7,
+    },
+    # ── Bande 5 · flux et charge des services ──────────────────────────────
     {
         "name": "Modes d'admission et de sortie",
         "description": "Répartition quotidienne des flux d'entrée et de sortie.",
@@ -264,8 +292,8 @@ _PILOTAGE_CARDS = [
             "graph.x_axis.title_text": "Nombre de séjours",
             "graph.y_axis.title_text": "Flux",
         },
-        "row": 17,
-        "col": 12,
+        "row": 27,
+        "col": 0,
         "size_x": 12,
         "size_y": 6,
     },
@@ -279,11 +307,12 @@ _PILOTAGE_CARDS = [
             "FROM kpi_activite_service\n"
             "ORDER BY jour DESC, service"
         ),
-        "row": 23,
-        "col": 0,
-        "size_x": 24,
-        "size_y": 7,
+        "row": 27,
+        "col": 12,
+        "size_x": 12,
+        "size_y": 6,
     },
+    # ── Bande 6 · traçabilité, ce qui distingue ce tableau de bord ──────────
     {
         "kind": "text",
         "text": (
@@ -292,7 +321,7 @@ _PILOTAGE_CARDS = [
             "consultable dans l'entrepôt : aucun chiffre du dashboard n'est le "
             "résultat d'une suppression silencieuse."
         ),
-        "row": 30,
+        "row": 33,
         "col": 0,
         "size_x": 24,
         "size_y": 3,
@@ -313,7 +342,7 @@ _PILOTAGE_CARDS = [
             "FROM kpi_qualite_pipeline\n"
             "ORDER BY `écartées` DESC, `signalées` DESC, controle"
         ),
-        "row": 33,
+        "row": 36,
         "col": 0,
         "size_x": 24,
         "size_y": 8,
@@ -328,7 +357,7 @@ _PILOTAGE_CARDS = [
             "FROM kpi_ingestion\n"
             "ORDER BY `jour de dépôt` DESC, domaine"
         ),
-        "row": 41,
+        "row": 44,
         "col": 0,
         "size_x": 24,
         "size_y": 7,
@@ -346,12 +375,17 @@ _RECHERCHE_CARDS = [
             "Cohortes de patients par pathologie et description démographique.\n\n"
             "**Données pseudonymisées et agrégées.** Aucune information "
             "identifiante n'est accessible depuis cet espace, et toute cellule "
-            "regroupant moins de 5 patients est retirée de la diffusion."
+            "regroupant moins de 5 patients est retirée de la diffusion.\n\n"
+            "⚠️ **Jeu de données synthétique.** Les dix pathologies affichent chacune une "
+            "prévalence voisine de 50 %, soit une somme de l'ordre de 500 % : chaque patient "
+            "porte en moyenne cinq diagnostics, tirés au hasard. Les cohortes sont donc "
+            "exploitables pour valider la chaîne de traitement, **pas** pour conclure quoi "
+            "que ce soit d'épidémiologique."
         ),
         "row": 0,
         "col": 0,
         "size_x": 24,
-        "size_y": 4,
+        "size_y": 5,
     },
     {
         "name": "Taille des cohortes par pathologie",
@@ -373,14 +407,18 @@ _RECHERCHE_CARDS = [
             "graph.x_axis.title_text": "Patients",
             "graph.y_axis.title_text": "Pathologie (CIM-10)",
         },
-        "row": 4,
+        "row": 5,
         "col": 0,
         "size_x": 12,
         "size_y": 7,
     },
     {
         "name": "Prévalence par pathologie",
-        "description": "Part des patients de l'entrepôt concernés par chaque pathologie.",
+        "description": (
+            "Part des patients de l'entrepôt concernés par chaque pathologie. Les valeurs "
+            "voisines de 50 % pour les dix pathologies sont un artefact du jeu synthétique "
+            "(diagnostics tirés au hasard), non une observation clinique."
+        ),
         "display": "row",
         "sql": (
             "SELECT libelle AS pathologie, prevalence_pct AS `prévalence (%)`\n"
@@ -396,7 +434,7 @@ _RECHERCHE_CARDS = [
             "graph.x_axis.title_text": "Prévalence (%)",
             "graph.y_axis.title_text": "Pathologie (CIM-10)",
         },
-        "row": 4,
+        "row": 5,
         "col": 12,
         "size_x": 12,
         "size_y": 7,
@@ -425,7 +463,7 @@ _RECHERCHE_CARDS = [
             "graph.x_axis.title_text": "Tranche d'âge",
             "graph.y_axis.title_text": "Patients",
         },
-        "row": 11,
+        "row": 12,
         "col": 0,
         "size_x": 12,
         "size_y": 7,
@@ -456,7 +494,7 @@ _RECHERCHE_CARDS = [
             "graph.x_axis.title_text": "Part de femmes (%)",
             "graph.y_axis.title_text": "Pathologie",
         },
-        "row": 11,
+        "row": 12,
         "col": 12,
         "size_x": 12,
         "size_y": 7,
@@ -470,10 +508,10 @@ _RECHERCHE_CARDS = [
             "FROM cohorte_demographie\n"
             "ORDER BY pathologie, sexe, tranche_age_debut"
         ),
-        "row": 18,
+        "row": 19,
         "col": 0,
         "size_x": 14,
-        "size_y": 7,
+        "size_y": 9,
     },
     {
         "kind": "text",
@@ -485,7 +523,7 @@ _RECHERCHE_CARDS = [
             "permettre de ré-identifier une personne.\n\n"
             "Le compteur ci-dessous mesure cet effet à chaque traitement."
         ),
-        "row": 18,
+        "row": 19,
         "col": 14,
         "size_x": 10,
         "size_y": 6,
@@ -501,7 +539,7 @@ _RECHERCHE_CARDS = [
             "       seuil_k             AS `seuil k`\n"
             "FROM k_anonymat_controle"
         ),
-        "row": 24,
+        "row": 25,
         "col": 14,
         "size_x": 10,
         "size_y": 3,
@@ -516,7 +554,7 @@ _RECHERCHE_CARDS = [
             "FROM cohorte_demographie_region\n"
             "ORDER BY pathologie, `département`, sexe, tranche_age_debut"
         ),
-        "row": 27,
+        "row": 28,
         "col": 0,
         "size_x": 24,
         "size_y": 7,

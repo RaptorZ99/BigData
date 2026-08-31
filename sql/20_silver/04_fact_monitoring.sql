@@ -12,6 +12,13 @@
 --       (FC 20–250 bpm · SpO2 50–100 % · température 30–45 °C)
 --   --  séjour parent écarté ou inconnu   → REJET en cascade
 --   Q8  relevé postérieur à la sortie     → FLAG (contrôle actif)
+--
+-- Déduplication au grain du fait, comme les deux autres étoiles : les fichiers
+-- quotidiens couvrent J → J+2 et se recouvrent donc dans le temps. Aujourd'hui
+-- aucun couple (séjour, horodatage) n'apparaît deux fois, mais un redépôt
+-- corrigé du CHU arriverait sous un autre `_ingest_date` et doublerait relevés
+-- et alertes sans ce `argMax`. La règle du projet est l'idempotence : on ne la
+-- fait pas dépendre de la propreté du dépôt.
 
 -- ── Relevés écartés, avec leur motif ────────────────────────────────────────
 CREATE OR REPLACE TABLE eds_silver.monitoring_rejets
@@ -19,7 +26,20 @@ ENGINE = MergeTree
 ORDER BY (stay_id, ts)
 COMMENT 'Relevés écartés (hors plage physiologique ou séjour parent invalide), motif conservé'
 AS
-WITH controles AS
+WITH dedup AS
+(
+    SELECT
+        stay_id,
+        ts,
+        argMax(heart_rate, _ingest_date)   AS heart_rate,
+        argMax(spo2, _ingest_date)         AS spo2,
+        argMax(temp_c, _ingest_date)       AS temp_c,
+        argMax(_source_file, _ingest_date) AS source_file,
+        max(_ingest_date)                  AS last_ingest_date
+    FROM eds_bronze.monitoring
+    GROUP BY stay_id, ts
+),
+controles AS
 (
     SELECT
         m.stay_id                                          AS stay_id,
@@ -27,15 +47,15 @@ WITH controles AS
         m.heart_rate                                       AS heart_rate,
         m.spo2                                             AS spo2,
         m.temp_c                                           AS temp_c,
-        m._source_file                                     AS _source_file,
-        m._ingest_date                                     AS _ingest_date,
+        m.source_file                                      AS _source_file,
+        m.last_ingest_date                                 AS _ingest_date,
         arrayFilter(x -> x != '', [
             if(m.heart_rate < 20  OR m.heart_rate > 250, 'hr_out_of_range',      ''),
             if(m.spo2       < 50  OR m.spo2       > 100, 'spo2_out_of_range',    ''),
             if(m.temp_c     < 30  OR m.temp_c     > 45,  'temp_out_of_range',    ''),
             if(s.stay_id = '',                           'parent_stay_rejected', '')
         ])                                                 AS motifs
-    FROM eds_bronze.monitoring AS m
+    FROM dedup AS m
     LEFT JOIN eds_silver.fact_sejour AS s USING (stay_id)
 )
 SELECT
@@ -57,6 +77,19 @@ ENGINE = MergeTree
 ORDER BY (service_code, ts)
 COMMENT 'Fait monitoring (grain : 1 relevé) — étoile sur dim_service, sans identifiant patient'
 AS
+WITH dedup AS
+(
+    SELECT
+        stay_id,
+        ts,
+        argMax(heart_rate, _ingest_date)   AS heart_rate,
+        argMax(spo2, _ingest_date)         AS spo2,
+        argMax(temp_c, _ingest_date)       AS temp_c,
+        argMax(_source_file, _ingest_date) AS source_file,
+        max(_ingest_date)                  AS last_ingest_date
+    FROM eds_bronze.monitoring
+    GROUP BY stay_id, ts
+)
 SELECT
     m.stay_id                                   AS stay_id,
     s.service_code                              AS service_code,
@@ -81,10 +114,10 @@ SELECT
     -- à 0 une fois les séjours incohérents écartés en cascade.
     ifNull(m.ts > s.discharge_ts, false)        AS is_after_discharge,
 
-    m._source_file                              AS _source_file,
-    m._ingest_date                              AS _ingest_date,
+    m.source_file                               AS _source_file,
+    m.last_ingest_date                          AS _ingest_date,
     now()                                       AS _built_at
-FROM eds_bronze.monitoring AS m
+FROM dedup AS m
 INNER JOIN eds_silver.fact_sejour AS s USING (stay_id)
 WHERE m.heart_rate BETWEEN 20 AND 250
   AND m.spo2       BETWEEN 50 AND 100

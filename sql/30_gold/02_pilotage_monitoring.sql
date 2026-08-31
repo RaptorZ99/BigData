@@ -23,6 +23,11 @@ INNER JOIN eds_silver.dim_service AS d USING (service_code)
 GROUP BY releve_date, service_code, service_label;
 
 -- Vue synthétique pour les tuiles de tête du dashboard.
+--
+-- `ifNotFinite(…, 0)` protège les moyennes et les taux : sur un entrepôt vide
+-- — juste après un `make reset`, ou pendant un premier chargement — une division
+-- 0/0 afficherait « nan » dans une tuile de direction. Un zéro explicite est
+-- lisible ; « nan » ne l'est pas.
 CREATE OR REPLACE TABLE eds_gold_pilotage.kpi_synthese
 ENGINE = MergeTree
 ORDER BY tuple()
@@ -32,7 +37,7 @@ SELECT
     (SELECT count() FROM eds_silver.fact_sejour)                            AS nb_sejours,
     (SELECT uniqExact(patient_pseudo) FROM eds_silver.fact_sejour)          AS nb_patients,
     (SELECT countIf(is_ongoing) FROM eds_silver.fact_sejour)                AS nb_sejours_en_cours,
-    (SELECT round(avg(duree_jours), 2) FROM eds_silver.fact_sejour
+    (SELECT ifNotFinite(round(avg(duree_jours), 2), 0) FROM eds_silver.fact_sejour
      WHERE discharge_ts IS NOT NULL)                                        AS dms_globale_jours,
     -- Réadmissions : restreintes aux sorties dont la fenêtre d'observation
     -- n'est pas vide. Les sorties postérieures à la dernière admission connue
@@ -42,16 +47,16 @@ SELECT
      WHERE jours_observables > 0)                                           AS nb_readmissions_30j,
     (SELECT sum(sorties_eligibles) FROM eds_gold_pilotage.kpi_readmissions_30j
      WHERE jours_observables > 0)                                           AS nb_sorties_observables,
-    (SELECT round(100.0 * sum(readmissions_30j) / sum(sorties_eligibles), 1)
+    (SELECT ifNotFinite(round(100.0 * sum(readmissions_30j) / sum(sorties_eligibles), 1), 0)
      FROM eds_gold_pilotage.kpi_readmissions_30j
      WHERE jours_observables > 0)                                           AS taux_readmission_pct,
     -- Part des sorties sur lesquelles l'indicateur peut se prononcer.
-    (SELECT round(100.0 * sumIf(sorties_eligibles, jours_observables > 0)
-                  / sum(sorties_eligibles), 1)
+    (SELECT ifNotFinite(round(100.0 * sumIf(sorties_eligibles, jours_observables > 0)
+                              / sum(sorties_eligibles), 1), 0)
      FROM eds_gold_pilotage.kpi_readmissions_30j)                           AS pct_sorties_observables,
     (SELECT count() FROM eds_silver.fact_monitoring)                        AS nb_releves,
     (SELECT countIf(is_alert) FROM eds_silver.fact_monitoring)              AS nb_releves_alerte,
-    (SELECT round(100.0 * countIf(is_alert) / count(), 1)
+    (SELECT ifNotFinite(round(100.0 * countIf(is_alert) / count(), 1), 0)
      FROM eds_silver.fact_monitoring)                                       AS pct_releves_alerte,
     -- Horodatage de construction de la couche gold. Comparé à celui de silver,
     -- il rend détectable un échec survenu APRÈS la construction de silver :

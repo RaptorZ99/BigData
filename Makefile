@@ -17,19 +17,41 @@ help: ## Affiche cette aide
 
 # Valeur d'exemple du sel, refusée au démarrage car publique.
 PLACEHOLDER_SALT := remplace-moi-par-openssl-rand-hex-32
+# Les six secrets à tirer au hasard à la création du .env.
+SECRET_VARS := CLICKHOUSE_ETL_PASSWORD CLICKHOUSE_PILOTAGE_PASSWORD \
+               CLICKHOUSE_RECHERCHE_PASSWORD MB_ADMIN_PASSWORD \
+               MB_PILOTAGE_PASSWORD MB_RECHERCHE_PASSWORD
 
-env: ## Crée .env si besoin et garantit un sel de pseudonymisation valide
+env: ## Crée .env si besoin, avec sel et mots de passe tirés au hasard
+	@# Le préfixe et le suffixe fixes ne sont pas décoratifs : Metabase exige
+	@# majuscule, minuscule, chiffre et caractère spécial, ce qu'un hexadécimal
+	@# seul ne garantit pas.
 	@if [ ! -f $(ENV_FILE) ]; then \
 	    cp .env.example $(ENV_FILE); \
-	    echo "→ .env créé depuis .env.example."; \
+	    for VAR in $(SECRET_VARS); do \
+	        MDP="Chu-$$(openssl rand -hex 12)-7!"; \
+	        sed -i.bak "s|^$$VAR=.*|$$VAR=$$MDP|" $(ENV_FILE); \
+	    done; \
+	    rm -f $(ENV_FILE).bak; \
+	    echo "→ .env créé depuis .env.example, mots de passe tirés au hasard."; \
 	 fi
-	@# On traite aussi le cas d'un .env recopié à la main : sans cela, le sel
-	@# d'exemple resterait en place et le pipeline refuserait de démarrer.
+	@# On traite aussi le cas d'un .env recopié à la main. Le sel est corrigé
+	@# d'office — sans quoi le pipeline refuserait de démarrer. Les mots de passe,
+	@# eux, sont seulement signalés : celui de ClickHouse est lu par Docker à la
+	@# création du conteneur, le réécrire ici casserait l'authentification d'un
+	@# entrepôt déjà démarré. `eds` nomme les variables restantes à chaque appel.
 	@if grep -q "^EDS_SALT=$(PLACEHOLDER_SALT)$$" $(ENV_FILE); then \
 	    SALT=$$(openssl rand -hex 32); \
 	    sed -i.bak "s|^EDS_SALT=.*|EDS_SALT=$$SALT|" $(ENV_FILE) && rm -f $(ENV_FILE).bak; \
 	    echo "→ Sel de pseudonymisation généré aléatoirement."; \
-	    echo "  ⚠ Remplacez aussi les mots de passe '..._change_me' avant tout usage réel."; \
+	 fi
+	@# Le motif ne vise que les affectations : le mot « change_me » apparaît aussi
+	@# dans les commentaires du modèle, il ne doit pas déclencher l'alerte.
+	@# Guillemets simples autour des messages : entre guillemets doubles, bash
+	@# interpréterait les accents graves comme une substitution de commande.
+	@if grep -qE '^[A-Z_]+=.*change_me' $(ENV_FILE); then \
+	    echo '  ⚠ Des mots de passe d'"'"'exemple subsistent dans .env (marque « change_me »).'; \
+	    echo '    Remplacez-les, ou supprimez .env et relancez `make env`.'; \
 	 fi
 
 up: env ## Démarre ClickHouse + Metabase, puis provisionne l'entrepôt

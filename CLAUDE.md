@@ -22,10 +22,11 @@ Le plan d'implémentation complet et autosuffisant est dans **`PLAN.md`** — le
 - `patients/` est **cumulatif** : chaque jour re-contient tous les patients des jours précédents (4800 → 5400 → 6000) — c'est le test de déduplication.
 - ~2 % du monitoring a FC **et** SpO2 aberrantes sur les mêmes lignes (0/500 bpm, 0/120 %) — panne de capteur ; `temp_c` est toujours valide.
 - Le monitoring ne couvre que les services **REA** et **CARDIO**, et chaque fichier quotidien couvre J → J+2 (sans doublons inter-fichiers).
-- 1992 séjours ont une sortie datée mais `discharge_mode` vide → à conserver (valeur NULL), pas à rejeter.
+- 1 992 séjours (brut) ont une sortie datée mais `discharge_mode` vide → à conserver (valeur NULL), pas à rejeter. Attendu **1 975** sur les séjours conservés — l'écart, ce sont les séjours écartés par Q2.
 - Anomalie « bonus » : 220 séjours (brut) admis après un décès antérieur du patient → flag `is_post_mortem_anomaly` (attendu **192** sur les séjours conservés), signalé au rapport qualité, pas rejeté.
 - Les 520 relevés monitoring « post-sortie » appartiennent **tous** aux 136 séjours invalides (sortie < admission) : ils partent en **cascade** dans `monitoring_rejets` (`parent_stay_rejected`) et le flag `is_after_discharge` vaut **0** après nettoyage (contrôle actif). Invariants post-nettoyage à respecter : fact_sejour 14 864 · fact_diagnostic 37 040 · fact_monitoring 64 799 (cf. PLAN.md §2.6).
 - Les séjours qui se chevauchent pour un même patient (~8 300) sont un artefact des données synthétiques : **ne pas** les rejeter, le documenter en limite.
+- Les diagnostics sont tirés au hasard : les 10 pathologies ont chacune ~51 % de prévalence, somme **508,9 %** (≈ 5 diagnostics par patient, sans corrélation avec le service, l'âge ou le sexe). Les cohortes valident la chaîne de traitement, **pas** une conclusion épidémiologique — l'avertissement figure en tête du dashboard recherche et en §8.1 du rapport.
 
 ## Pièges techniques rencontrés à l'implémentation
 
@@ -39,8 +40,14 @@ Le plan d'implémentation complet et autosuffisant est dans **`PLAN.md`** — le
 - **Découpage SQL** : le découpeur respecte les chaînes — un `;` dans un libellé métier ne sépare pas deux instructions. Ne pas revenir à un `split(";")` naïf.
 - **Ordre du gold** : `05_pilotage_qualite.sql` s'exécute en dernier car il recopie `ops.quality_report`, alimenté par `04_quality.sql`. Le placer plus tôt n'exposerait que les règles silver.
 - **Mesures non additives** : `nb_patients` ne se somme jamais hors de son grain. La pyramide des âges lit `cohorte_demographie_globale` (grain sexe × tranche), pas `cohorte_demographie` (grain CIM-10 × sexe × tranche) — sinon un patient à 5 diagnostics est compté 5 fois.
-- **Provisionnement convergent** : `CREATE USER OR REPLACE` côté ClickHouse et réalignement du mot de passe côté Metabase. `IF NOT EXISTS` ne met pas à jour un compte existant, donc changer `.env` n'aurait aucun effet.
-- **Secrets hors des logs** : ne jamais imprimer un mot de passe sur stdout — la sortie du provisionnement finit dans `logs/cron.log`.
+- **Provisionnement convergent** : `CREATE USER OR REPLACE` côté ClickHouse et réalignement du mot de passe côté Metabase. `IF NOT EXISTS` ne met pas à jour un compte existant, donc changer `.env` n'aurait aucun effet. Même logique pour le schéma : `CREATE TABLE IF NOT EXISTS` ne rejoue pas une évolution, d'où les `ALTER … ADD COLUMN IF NOT EXISTS` / `MODIFY TTL` explicites dans `02_ops.sql`.
+- **Secrets hors des logs** : ne jamais imprimer un mot de passe sur stdout — la sortie du provisionnement finit dans `logs/cron.log`. Corollaire : tout secret d'exemple porte la marque `change_me`, seul motif que `Config.weak_password_settings` sait détecter. Ne jamais mettre dans `.env.example` une valeur qui *ressemble* à un vrai mot de passe : elle passerait le contrôle en silence.
+- **`readonly = 2`, jamais `1`** sur les comptes de restitution : le niveau 1 interdit aussi de changer un paramètre de session, ce que le pilote JDBC de Metabase fait à la connexion.
+- **Pas de produit croisé jour × ligne de fait.** `kpi_activite_service` compte les séjours ouverts par cumul (`sum(...) OVER` sur le calendrier), pas en confrontant chaque jour à chaque séjour : ce dernier coûte O(jours × séjours) et devient quadratique avec l'historique.
+- **Déduplication au grain, dans les trois faits.** `fact_monitoring` déduplique sur `(stay_id, ts)` comme les autres sur leur clé. Aujourd'hui sans effet, mais un redépôt corrigé sous un autre `_ingest_date` doublerait relevés et alertes.
+- **`ifNotFinite(…, 0)`** sur les moyennes et les taux de `kpi_synthese` : sur un entrepôt vide, une division 0/0 afficherait `nan` dans une tuile de direction.
+- **Mise en page des dashboards** : aucune carte ne doit en chevaucher une autre (Metabase les repousse dans un ordre que le code ne décide pas), et un titre de tuile scalaire dépasse rarement 17 caractères sans être tronqué. `tests/test_dashboards.py` vérifie les deux, ainsi que le fait que chaque requête vise une table déclarée dans `EXPECTED_TABLES`.
+- **Le refus doit être un vrai refus** : `check-cloisonnement` ne compte comme preuve qu'un échec portant `ACCESS_DENIED` ou `NOT_ENOUGH_PRIVILEGES`. Un `except Exception` nu ferait passer au vert une base absente ou un moteur arrêté.
 
 ## Commandes de référence
 
