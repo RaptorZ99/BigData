@@ -167,7 +167,12 @@ uv run eds --help
 │   ├── 15_bronze_load/     chargements paramétrés par jour
 │   ├── 20_silver/          constellation, règles qualité, rapport
 │   └── 30_gold/            indicateurs par usage
-├── tests/                Tests unitaires et d'intégration
+├── tests/                76 tests
+│   ├── test_pseudo.py      pseudonymisation : stabilité, non-réversibilité
+│   ├── test_collect.py     aucune donnée identifiante ne sort de la source
+│   ├── test_state.py       décision d'ingestion : les 4 branches de l'incrémentalité
+│   ├── test_warehouse.py   découpage des scripts SQL
+│   └── test_e2e.py         invariants de l'entrepôt (nécessite Docker)
 ├── docs/
 │   ├── RAPPORT.md          dossier d'analyse et de conception
 │   ├── EXPLOITATION.md     lancement, maintenance, reprise sur incident
