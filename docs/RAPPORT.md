@@ -416,6 +416,11 @@ sans quitter l'interface, combien de lignes ont été écartées et par quelle r
 
 ![Tableau de bord de pilotage](img/dashboard-pilotage.jpg)
 
+Le bas du tableau de bord porte cette traçabilité, accessible sans quitter l'interface et
+sans accès à la base d'exploitation :
+
+![Rapport qualité et journal d'ingestion](img/rapport-qualite-dashboard.jpg)
+
 **🔬 Recherche clinique** présente les tailles de cohortes, la prévalence par pathologie, la
 distribution par âge et sexe, et le détail par département. Un encart explique le seuil de
 diffusion, et un compteur affiche son effet réel.

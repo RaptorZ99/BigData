@@ -227,7 +227,7 @@ _PILOTAGE_CARDS = [
         ),
         "row": 23,
         "col": 0,
-        "size_x": 12,
+        "size_x": 24,
         "size_y": 7,
     },
     {
@@ -238,9 +238,9 @@ _PILOTAGE_CARDS = [
             "consultable dans l'entrepôt : aucun chiffre du dashboard n'est le "
             "résultat d'une suppression silencieuse."
         ),
-        "row": 23,
-        "col": 12,
-        "size_x": 12,
+        "row": 30,
+        "col": 0,
+        "size_x": 24,
         "size_y": 3,
     },
     {
@@ -259,10 +259,10 @@ _PILOTAGE_CARDS = [
             "FROM kpi_qualite_pipeline\n"
             "ORDER BY `écartées` DESC, `signalées` DESC, controle"
         ),
-        "row": 26,
-        "col": 12,
-        "size_x": 12,
-        "size_y": 4,
+        "row": 33,
+        "col": 0,
+        "size_x": 24,
+        "size_y": 8,
     },
     {
         "name": "Traçabilité de l'ingestion",
@@ -274,10 +274,10 @@ _PILOTAGE_CARDS = [
             "FROM kpi_ingestion\n"
             "ORDER BY `jour de dépôt` DESC, domaine"
         ),
-        "row": 30,
+        "row": 41,
         "col": 0,
         "size_x": 24,
-        "size_y": 6,
+        "size_y": 7,
     },
 ]
 
