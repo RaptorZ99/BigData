@@ -446,8 +446,43 @@ moitié des réadmissions perdues.
 Nous avons donc changé de logique : plutôt que la seule admission suivante, on teste
 **l'ensemble des admissions du patient**. C'est aussi la définition cliniquement correcte.
 
-**Résultat.** **687 réadmissions sur 11 678 sorties éligibles, soit 5,9 %.** Par service, le
-taux varie de 4,78 % en chirurgie à 6,69 % en neurologie.
+**La limite qui commande tout le reste : la fenêtre d'observation.** C'est le point sur
+lequel cet indicateur mérite d'être défendu, ou concédé.
+
+Une réadmission ne peut être constatée que si l'entrepôt couvre la période où elle
+surviendrait. Or nos admissions s'arrêtent au 28 août — dernier jour déposé — tandis que les
+sorties s'étalent jusqu'au 9 septembre. Une sortie du 3 septembre a donc une probabilité
+**structurellement nulle** d'être suivie d'une réadmission observable :
+
+| Jour de sortie | Sorties | Réadmissions | Taux | Fenêtre observable |
+|---|---:|---:|---:|---:|
+| 26 août | 133 | 115 | 86,5 % | 3 jours sur 30 |
+| 27 août | 474 | 323 | 68,1 % | 2 jours sur 30 |
+| 28 août | 814 | 249 | 30,6 % | 1 jour sur 30 |
+| 29 août → 9 septembre | 10 257 | 0 | 0 % | **aucune** |
+
+Agréger ces lignes ensemble reviendrait à publier un taux de **5,9 %** dont **88 % du
+dénominateur ne mesure rien**. Le chiffre serait arithmétiquement exact et parfaitement
+trompeur — exactement ce que le sujet proscrit en demandant des indicateurs « fiables ».
+
+**Ce que nous publions.** Chaque ligne de `kpi_readmissions_30j` porte désormais
+`jours_observables` : la part de la fenêtre de trente jours réellement couverte. La tuile de
+synthèse ne retient que les sorties dont cette fenêtre n'est pas vide, et le tableau de bord
+affiche la couverture :
+
+- **687 réadmissions sur 1 421 sorties observables, soit 48,3 %** ;
+- ces 1 421 sorties représentent **12,2 % du total** ;
+- **aucune** sortie ne dispose des trente jours complets.
+
+Ce 48,3 % n'est pas non plus un « taux de réadmission à 30 jours » au sens clinique : il
+porte sur une fenêtre de un à trois jours. Il est publié parce qu'il mesure quelque chose de
+réel, accompagné de sa couverture, plutôt que dilué dans un chiffre qui n'en mesure aucun.
+
+**Conséquence pratique.** Le classement des services par ce taux est à manier avec
+précaution : les services diffèrent autant par leur profil de sortie dans la fenêtre
+observable que par leur comportement de réadmission. Un tableau de bord de production
+attendrait au minimum soixante jours d'historique avant de publier cet indicateur — c'est la
+recommandation portée en §8.1.
 
 ### 5.4 Surveillance des constantes
 
@@ -496,7 +531,7 @@ requête dans la console ClickHouse (`http://localhost:8123/play`).
 | DMS par service | 6,01 → 6,23 j | `kpi_dms_service` | `sum(dms_jours * nb_sorties) / sum(nb_sorties)` — moyenne **repondérée**, une moyenne de moyennes serait fausse |
 | Passages aux urgences | 581 → 639 /j | `kpi_urgences_jour` | `countIf(is_service_urgences)` |
 | Admissions en mode urgence | 1 627 → 1 721 /j | `kpi_urgences_jour` | `countIf(is_admission_urgence)` |
-| Réadmissions à 30 jours | 687 / 11 678 | `kpi_readmissions_30j` | `arrayExists(adm -> adm > discharge_ts AND adm <= discharge_ts + INTERVAL 30 DAY, admissions_du_patient)` |
+| Réadmissions à 30 jours | 687 / 1 421 observables | `kpi_readmissions_30j` | `arrayExists(adm -> adm > discharge_ts AND adm <= discharge_ts + INTERVAL 30 DAY, admissions_du_patient)` |
 | Relevés en alerte | 3 053 / 64 799 | `kpi_alertes_monitoring` | `countIf(is_alert)`, soit FC hors [40;130] **ou** SpO2 < 90 **ou** T ≥ 38,5 |
 | Séjours en cours | 1 190 | `kpi_synthese` | `countIf(is_ongoing)`, soit `discharge_ts IS NULL` |
 | Taille des cohortes | 2 689 → 2 764 | `cohorte_pathologie` | `uniqExact(patient_pseudo)` **par code CIM-10**, `HAVING >= 5` |
@@ -696,10 +731,17 @@ certains indicateurs peu interprétables cliniquement. Le taux de réadmission, 
 particulier, est correct au sens de sa définition mais reposerait sur des données
 incohérentes en production.
 
-**Trois jours de profondeur, pour un indicateur à trente jours.** Le taux de réadmission à
-30 jours ne peut pas être complet sur une fenêtre de trois jours : les réadmissions
-survenant après la fin de la période ne sont pas observables. Le chiffre publié est donc
-une borne inférieure.
+**Trois jours de profondeur, pour un indicateur à trente jours.** C'est la limite la plus
+lourde du projet, et il faut la nommer sans l'atténuer : le taux de réadmission à 30 jours
+**n'est pas calculable** sur ces données. Aucune sortie ne dispose de sa fenêtre complète,
+et 88 % d'entre elles n'en ont aucune (cf. §5.3). Nous publions un taux restreint aux
+sorties observables, assorti de sa couverture, plutôt qu'un chiffre agrégé qui serait exact
+au sens arithmétique et faux au sens métier.
+
+En production, cet indicateur ne devrait être publié qu'après **au moins soixante jours
+d'historique** : trente pour la fenêtre, trente pour disposer d'un échantillon de sorties
+dont la fenêtre est complète. Le marqueur `fenetre_complete` déjà présent dans la table
+permettra ce basculement sans changer une ligne de code — il suffira de filtrer dessus.
 
 **Le monitoring ne couvre que deux services.** Tout indicateur bâti dessus est
 structurellement partiel, ce que les tableaux de bord signalent explicitement.

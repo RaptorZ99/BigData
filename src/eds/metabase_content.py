@@ -49,8 +49,12 @@ _PILOTAGE_CARDS = [
         "size_y": 3,
     },
     {
-        "name": "Taux de réadmission à 30 jours (%)",
-        "description": "Sorties vivantes suivies d'une réadmission dans les 30 jours.",
+        "name": "Réadmission 30 j (%) — fenêtre observable",
+        "description": (
+            "Sorties vivantes suivies d'une réadmission dans les 30 jours, calculé sur "
+            "les seules sorties dont la fenêtre d'observation n'est pas vide. Les sorties "
+            "postérieures à la dernière admission connue ne peuvent rien constater."
+        ),
         "display": "scalar",
         "sql": "SELECT taux_readmission_pct FROM kpi_synthese",
         "row": 2,
@@ -129,8 +133,11 @@ _PILOTAGE_CARDS = [
         "size_y": 6,
     },
     {
-        "name": "Taux de réadmission à 30 jours par service",
-        "description": "Indicateur de qualité des soins : plus il est bas, mieux c'est.",
+        "name": "Taux de réadmission par service (fenêtre observable)",
+        "description": (
+            "Indicateur de qualité des soins : plus il est bas, mieux c'est. Restreint aux "
+            "sorties dont la fenêtre d'observation n'est pas vide."
+        ),
         "display": "bar",
         "sql": (
             "SELECT service_label AS service,\n"
@@ -138,6 +145,7 @@ _PILOTAGE_CARDS = [
             "       sum(readmissions_30j)  AS readmissions,\n"
             "       round(100.0 * sum(readmissions_30j) / sum(sorties_eligibles), 2) AS taux_pct\n"
             "FROM kpi_readmissions_30j\n"
+            "WHERE jours_observables > 0\n"
             "GROUP BY service\n"
             "ORDER BY taux_pct DESC"
         ),
@@ -148,7 +156,42 @@ _PILOTAGE_CARDS = [
             "graph.x_axis.title_text": "Service",
             "graph.y_axis.title_text": "Taux de réadmission (%)",
         },
+        "row": 19,
+        "col": 0,
+        "size_x": 12,
+        "size_y": 6,
+    },
+    {
+        "kind": "text",
+        "text": (
+            "⚠️ **Le taux de réadmission ne porte que sur une fraction des sorties.** "
+            "Une réadmission ne peut être constatée que si l'entrepôt couvre la période "
+            "où elle surviendrait. Les admissions s'arrêtent au dernier jour déposé, les "
+            "sorties s'étalent bien au-delà : seules **12 % des sorties** ont une fenêtre "
+            "d'observation non vide, et **aucune** n'a les 30 jours complets. "
+            "Le taux affiché porte sur ces seules sorties ; il n'est pas comparable à un "
+            "taux de réadmission calculé sur un historique complet."
+        ),
         "row": 11,
+        "col": 0,
+        "size_x": 12,
+        "size_y": 2,
+    },
+    {
+        "name": "Couverture de l'indicateur de réadmission",
+        "description": "Part des sorties sur lesquelles l'indicateur peut se prononcer.",
+        "display": "table",
+        "sql": (
+            "SELECT discharge_date AS `jour de sortie`,\n"
+            "       sum(sorties_eligibles) AS sorties,\n"
+            "       max(jours_observables) AS `jours observables sur 30`,\n"
+            "       if(max(jours_observables) = 0, 'aucune mesure possible', 'partiel')\n"
+            "           AS `portée`\n"
+            "FROM kpi_readmissions_30j\n"
+            "GROUP BY `jour de sortie`\n"
+            "ORDER BY `jour de sortie`"
+        ),
+        "row": 13,
         "col": 0,
         "size_x": 12,
         "size_y": 6,

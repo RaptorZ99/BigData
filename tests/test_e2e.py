@@ -154,6 +154,35 @@ def test_readmissions_30_jours(client):
     assert readmissions == 687
 
 
+def test_la_fenetre_d_observation_des_readmissions_est_explicite(client):
+    """Une sortie postérieure à la dernière admission ne peut rien constater.
+
+    Sans ce marquage, 96 des 120 lignes afficheraient un 0 % qui ne mesure rien,
+    et le taux publié serait dilué d'un facteur 8. L'indicateur doit dire sur
+    quelle part des sorties il se prononce.
+    """
+    muettes, total, completes = client.query(
+        "SELECT countIf(jours_observables = 0), count(), countIf(fenetre_complete) "
+        "FROM eds_gold_pilotage.kpi_readmissions_30j"
+    ).result_rows[0]
+    assert muettes == 96, "lignes sans fenêtre d'observation"
+    assert total == 120
+    assert completes == 0, "trois jours de dépôt ne peuvent pas couvrir 30 jours"
+
+
+def test_le_taux_publie_ne_porte_que_sur_les_sorties_observables(client):
+    """La tuile de synthèse doit exclure les sorties qui ne mesurent rien."""
+    readmissions, observables, taux, couverture = client.query(
+        "SELECT nb_readmissions_30j, nb_sorties_observables, taux_readmission_pct, "
+        "       pct_sorties_observables "
+        "FROM eds_gold_pilotage.kpi_synthese"
+    ).result_rows[0]
+    assert readmissions == 687
+    assert observables == 1_421
+    assert taux == 48.3
+    assert couverture == 12.2, "part des sorties sur lesquelles l'indicateur se prononce"
+
+
 def test_la_dms_ignore_les_sejours_en_cours(client):
     """Une durée partielle fausserait la moyenne : elle ne doit pas être comptée."""
     sorties_gold = scalar(client, "SELECT sum(nb_sorties) FROM eds_gold_pilotage.kpi_dms_service")
