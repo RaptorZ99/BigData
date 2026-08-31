@@ -10,7 +10,9 @@ ENV_FILE := .env
 .PHONY: help env up down pipeline provision demo test test-e2e lint fmt reset logs status quality diagram
 
 help: ## Affiche cette aide
-	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
+	@# Le motif accepte les chiffres : sans quoi une cible comme `test-e2e`
+	@# resterait invisible dans l'aide tout en étant documentée ailleurs.
+	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
 $(ENV_FILE):

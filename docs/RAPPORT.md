@@ -250,6 +250,24 @@ run dans `ops.quality_report`.
 | **Q8** Relevé postérieur à la sortie | Contrôle | 64 799 | 64 799 | 0 | **0** |
 | **Q6** Formats et intégrité référentielle (5 règles) | Contrôle | — | — | 0 | **0** |
 
+Les deux règles de rejet du monitoring se recoupent partiellement. Comme chaque ligne
+écartée porte **tous** ses motifs, concaténés, le recoupement se vérifie directement :
+
+| Motif de rejet | Lignes |
+|---|---:|
+| `hr_out_of_range+spo2_out_of_range` | 1 358 |
+| `parent_stay_rejected` | 509 |
+| `hr_out_of_range+spo2_out_of_range+parent_stay_rejected` | 11 |
+| **Total écarté** | **1 878** |
+
+Soit 1 369 relevés hors plage (1 358 + 11) et 520 en cascade (509 + 11), pour **64 799
+relevés conservés** sur 66 677.
+
+Ce tableau confirme aussi l'hypothèse formulée au profilage : **la fréquence cardiaque et
+la saturation sont toujours aberrantes ensemble**, jamais l'une sans l'autre, et la
+température ne l'est jamais. C'est la signature d'un capteur défaillant, non d'un patient
+en détresse — ce qui justifie de les écarter plutôt que de les traiter comme des alertes.
+
 Quelques décisions méritent d'être explicitées.
 
 **Une sortie non renseignée n'est pas une anomalie.** C'est un patient encore hospitalisé.
