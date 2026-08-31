@@ -446,6 +446,39 @@ approximation d'un an au plus, conséquence directe et assumée de la minimisati
 
 Toutes ces tables appliquent le seuil de diffusion décrit en §7.
 
+### 5.6 Retrouver n'importe quel chiffre
+
+Le sujet demande de pouvoir « justifier chaque chiffre ». Voici le chemin exact, du nombre
+affiché à l'expression SQL qui le produit — chaque ligne est vérifiable en copiant la
+requête dans la console ClickHouse (`http://localhost:8123/play`).
+
+| Chiffre affiché | Valeur | Table gold | Expression déterminante |
+|---|---:|---|---|
+| Séjours pris en charge | 14 864 | `kpi_synthese` | `count()` sur `fact_sejour` |
+| Patients suivis | 5 358 | `kpi_synthese` | `uniqExact(patient_pseudo)` |
+| DMS globale | 6,08 j | `kpi_synthese` | `avg(duree_jours)` **où** `discharge_ts IS NOT NULL` |
+| DMS par service | 6,01 → 6,23 j | `kpi_dms_service` | `sum(dms_jours * nb_sorties) / sum(nb_sorties)` — moyenne **repondérée**, une moyenne de moyennes serait fausse |
+| Passages aux urgences | 581 → 639 /j | `kpi_urgences_jour` | `countIf(is_service_urgences)` |
+| Admissions en mode urgence | 1 627 → 1 721 /j | `kpi_urgences_jour` | `countIf(is_admission_urgence)` |
+| Réadmissions à 30 jours | 687 / 11 678 | `kpi_readmissions_30j` | `arrayExists(adm -> adm > discharge_ts AND adm <= discharge_ts + INTERVAL 30 DAY, admissions_du_patient)` |
+| Relevés en alerte | 3 053 / 64 799 | `kpi_alertes_monitoring` | `countIf(is_alert)`, soit FC hors [40;130] **ou** SpO2 < 90 **ou** T ≥ 38,5 |
+| Séjours en cours | 1 190 | `kpi_synthese` | `countIf(is_ongoing)`, soit `discharge_ts IS NULL` |
+| Taille des cohortes | 2 689 → 2 764 | `cohorte_pathologie` | `uniqExact(patient_pseudo)` **par code CIM-10**, `HAVING >= 5` |
+| Prévalence | % de 5 358 | `prevalence_pathologie` | dénominateur calculé comme scalaire indépendant, jamais par jointure |
+| Pyramide des âges | total 5 358 | `cohorte_demographie_globale` | grain sexe × tranche : un patient compté **une** fois |
+| Cellules supprimées (k<5) | 4 / 1 600 | `k_anonymat_controle` | cellules calculées − cellules diffusées, au même périmètre |
+
+Trois vérifications que le jury peut faire lui-même en une commande :
+
+```bash
+make quality              # les 17 contrôles qualité du dernier traitement
+make test-e2e             # les invariants, dont chacun de ces chiffres
+uv run eds check-cloisonnement   # les deux barrières de cloisonnement
+```
+
+La suite d'intégration **ancre ces valeurs** : modifier une règle sans le vouloir ferait
+échouer un test nommé, pas dériver un chiffre en silence.
+
 ---
 
 ## 6. Restitution et cloisonnement
