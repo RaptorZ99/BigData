@@ -76,37 +76,48 @@ INNER JOIN eds_silver.dim_patient AS p USING (patient_pseudo)
 GROUP BY sexe, tranche_age_debut, tranche_age
 HAVING nb_patients >= 5;
 
--- ── Description de cohorte : âge et sexe, par pathologie ────────────────────
-CREATE OR REPLACE TABLE eds_gold_recherche.cohorte_demographie
-ENGINE = MergeTree
-ORDER BY (code_cim10, sexe, tranche_age_debut)
-COMMENT 'Distribution par sexe et tranche d''âge, par pathologie (k >= 5 par cellule)'
-AS
-SELECT
-    d.code_cim10                                                    AS code_cim10,
-    c.libelle                                                       AS libelle,
-    p.sex                                                           AS sexe,
-    intDiv(toYear(today()) - p.birth_year, 10) * 10                 AS tranche_age_debut,
-    concat(
-        toString(intDiv(toYear(today()) - p.birth_year, 10) * 10),
-        '-',
-        toString(intDiv(toYear(today()) - p.birth_year, 10) * 10 + 9)
-    )                                                               AS tranche_age,
-    uniqExact(d.patient_pseudo)                                     AS nb_patients
-FROM eds_silver.fact_diagnostic AS d
-INNER JOIN eds_silver.dim_cim10  AS c USING (code_cim10)
-INNER JOIN eds_silver.dim_patient AS p USING (patient_pseudo)
-GROUP BY code_cim10, libelle, sexe, tranche_age_debut, tranche_age
-HAVING nb_patients >= 5;
 
--- ── Description de cohorte au grain fin (avec le département) ───────────────
--- C'est à ce niveau de détail que le k-anonymat mord réellement : certaines
--- cellules descendent sous 5 patients et sont supprimées de la diffusion.
--- Le nombre de cellules ainsi retirées est reporté dans le rapport qualité.
-CREATE OR REPLACE TABLE eds_gold_recherche.cohorte_demographie_region
+-- ═══════════════════════════════════════════════════════════════════════════
+--  Description de cohorte : deux niveaux de détail, et une précaution
+--  indispensable entre les deux.
+-- ═══════════════════════════════════════════════════════════════════════════
+--
+-- Appliquer `HAVING >= 5` séparément sur une vue agrégée et sur sa
+-- décomposition NE SUFFIT PAS. Si une seule cellule fine est supprimée, sa
+-- valeur se retrouve par soustraction :
+--
+--     total de la marge  −  somme des cellules fines diffusées  =  cellule cachée
+--
+-- L'attaque ne demande aucun privilège particulier : une jointure entre les deux
+-- tables, avec le compte chercheur, suffit à reconstruire la pathologie, le sexe,
+-- la tranche d'âge, le département **et** l'effectif exact de patients censés
+-- être protégés. C'est le mécanisme dit de « différenciation », bien connu du
+-- contrôle statistique de la divulgation.
+--
+-- La parade appliquée ici est la **suppression complémentaire** : une marge
+-- n'est diffusée que si TOUTE sa décomposition l'est. Dès qu'une cellule fine
+-- tombe sous le seuil, la ligne agrégée correspondante disparaît elle aussi —
+-- il n'y a alors plus rien à soustraire.
+--
+-- Le coût est assumé et mesuré : quelques lignes agrégées de moins, reportées
+-- dans `k_anonymat_controle`. Le principe retenu est qu'une donnée douteuse ne
+-- se diffuse pas, même agrégée.
+
+-- Grain fin, avec le marqueur de diffusabilité. Sert de base aux deux vues.
+-- Elle est construite avec la couche gold, car elle encode une règle de
+-- **diffusion** et non une règle de qualité — mais elle est rangée en silver,
+-- hors de portée des comptes de restitution.
+--
+-- ⚠ Cette table vit dans `eds_silver`, PAS dans la base des chercheurs : elle
+-- contient les effectifs des cellules sous le seuil, précisément ce que le
+-- k-anonymat doit cacher. La placer dans `eds_gold_recherche` exposerait
+-- directement ce que la suppression complémentaire protège.
+DROP TABLE IF EXISTS eds_gold_recherche.cellules_demographie;
+
+CREATE OR REPLACE TABLE eds_silver.cellules_demographie
 ENGINE = MergeTree
-ORDER BY (code_cim10, region_code, sexe, tranche_age_debut)
-COMMENT 'Distribution sexe × âge × département (k >= 5 : cellules trop petites supprimées)'
+ORDER BY (code_cim10, sexe, tranche_age_debut, region_code)
+COMMENT 'Travail interne du k-anonymat : grain fin AVEC les effectifs sous le seuil — jamais diffusé'
 AS
 SELECT
     d.code_cim10                                                    AS code_cim10,
@@ -119,42 +130,83 @@ SELECT
         '-',
         toString(intDiv(toYear(today()) - p.birth_year, 10) * 10 + 9)
     )                                                               AS tranche_age,
-    uniqExact(d.patient_pseudo)                                     AS nb_patients
+    uniqExact(d.patient_pseudo)                                     AS nb_patients,
+    uniqExact(d.patient_pseudo) >= 5                                AS diffusable
 FROM eds_silver.fact_diagnostic AS d
 INNER JOIN eds_silver.dim_cim10   AS c USING (code_cim10)
 INNER JOIN eds_silver.dim_patient AS p USING (patient_pseudo)
-GROUP BY code_cim10, libelle, region_code, sexe, tranche_age_debut, tranche_age
-HAVING nb_patients >= 5;
+GROUP BY code_cim10, libelle, region_code, sexe, tranche_age_debut, tranche_age;
 
--- ── Preuve du k-anonymat, diffusable ────────────────────────────────────────
--- Table volontairement exposée aux chercheurs : elle indique combien de
--- cellules ont été retirées, sans jamais révéler lesquelles ni leur effectif.
+-- ── Grain fin diffusé : les cellules d'au moins 5 patients ──────────────────
+CREATE OR REPLACE TABLE eds_gold_recherche.cohorte_demographie_region
+ENGINE = MergeTree
+ORDER BY (code_cim10, region_code, sexe, tranche_age_debut)
+COMMENT 'Distribution sexe × âge × département (k >= 5 : cellules trop petites supprimées)'
+AS
+SELECT code_cim10, libelle, region_code, sexe, tranche_age_debut, tranche_age, nb_patients
+FROM eds_silver.cellules_demographie
+WHERE diffusable;
+
+-- ── Marge par pathologie, sexe et âge ───────────────────────────────────────
+-- Diffusée uniquement si sa décomposition départementale l'est intégralement :
+-- c'est la suppression complémentaire décrite en tête de section.
+CREATE OR REPLACE TABLE eds_gold_recherche.cohorte_demographie
+ENGINE = MergeTree
+ORDER BY (code_cim10, sexe, tranche_age_debut)
+COMMENT 'Distribution par sexe et tranche d''âge, par pathologie (k >= 5 et suppression complémentaire)'
+AS
+-- L'alias de l'agrégat ne reprend pas le nom de la colonne source : sinon le
+-- `HAVING` le réinterpréterait comme un agrégat imbriqué.
+SELECT
+    code_cim10,
+    libelle,
+    sexe,
+    tranche_age_debut,
+    tranche_age,
+    total AS nb_patients
+FROM
+(
+    SELECT
+        code_cim10,
+        libelle,
+        sexe,
+        tranche_age_debut,
+        tranche_age,
+        sum(nb_patients)        AS total,
+        countIf(NOT diffusable) AS cellules_fines_supprimees
+    FROM eds_silver.cellules_demographie
+    GROUP BY code_cim10, libelle, sexe, tranche_age_debut, tranche_age
+)
+WHERE total >= 5
+  AND cellules_fines_supprimees = 0;
+
+-- ── Preuve du dispositif, diffusable ────────────────────────────────────────
+-- Exposée volontairement aux chercheurs : elle dit combien de cellules ont été
+-- retirées et pourquoi, sans jamais révéler lesquelles ni leur effectif. Depuis
+-- la suppression complémentaire, connaître ces nombres n'aide plus à retrouver
+-- quoi que ce soit : les marges correspondantes ont disparu elles aussi.
 CREATE OR REPLACE TABLE eds_gold_recherche.k_anonymat_controle
 ENGINE = MergeTree
 ORDER BY table_cible
-COMMENT 'Effet du seuil k >= 5 : nombre de cellules calculées, diffusées et supprimées'
+COMMENT 'Effet du seuil k >= 5 : cellules calculées, diffusées, supprimées, et suppressions complémentaires'
 AS
--- Les cellules « calculées » doivent l'être sur exactement le même périmètre que
--- les cellules diffusées, jointure au référentiel CIM-10 comprise : sans cela,
--- un code orphelin serait imputé au seuil k = 5 alors qu'il aurait été écarté
--- pour une tout autre raison, et le compteur mélangerait deux causes.
-WITH cellules_brutes AS
-(
-    SELECT count() AS n
-    FROM
-    (
-        SELECT d.code_cim10, p.region_code, p.sex,
-               intDiv(toYear(today()) - p.birth_year, 10) AS tranche
-        FROM eds_silver.fact_diagnostic AS d
-        INNER JOIN eds_silver.dim_cim10   AS c USING (code_cim10)
-        INNER JOIN eds_silver.dim_patient AS p USING (patient_pseudo)
-        GROUP BY d.code_cim10, p.region_code, p.sex, tranche
-    )
-)
 SELECT
-    'cohorte_demographie_region'                                        AS table_cible,
-    (SELECT n FROM cellules_brutes)                                     AS cellules_calculees,
-    (SELECT count() FROM eds_gold_recherche.cohorte_demographie_region) AS cellules_diffusees,
-    (SELECT n FROM cellules_brutes)
-        - (SELECT count() FROM eds_gold_recherche.cohorte_demographie_region) AS cellules_supprimees,
-    5                                                                   AS seuil_k;
+    'cohorte_demographie_region' AS table_cible,
+    'seuil k >= 5'               AS motif,
+    count()                      AS cellules_calculees,
+    countIf(diffusable)          AS cellules_diffusees,
+    countIf(NOT diffusable)      AS cellules_supprimees,
+    5                            AS seuil_k
+FROM eds_silver.cellules_demographie
+
+UNION ALL
+
+SELECT
+    'cohorte_demographie',
+    'suppression complémentaire (décomposition incomplète)',
+    uniqExact((code_cim10, sexe, tranche_age_debut)),
+    (SELECT count() FROM eds_gold_recherche.cohorte_demographie),
+    uniqExact((code_cim10, sexe, tranche_age_debut))
+        - (SELECT count() FROM eds_gold_recherche.cohorte_demographie),
+    5
+FROM eds_silver.cellules_demographie;

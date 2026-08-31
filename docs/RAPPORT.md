@@ -623,14 +623,42 @@ Cette règle ne doit pas rester théorique. Aux grains courants (pathologie, ou 
 sexe × âge), les cohortes de ce jeu de données comptent plusieurs centaines de patients :
 aucune cellule ne tombe sous le seuil, et le mécanisme resterait invisible. Nous avons donc
 ajouté une vue au grain le plus fin — **pathologie × sexe × tranche d'âge × département** —
-où la règle mord réellement :
+où la règle mord réellement.
 
-| Cellules calculées | Cellules diffusées | Cellules supprimées | Seuil |
-|---:|---:|---:|---:|
-| 1 600 | 1 596 | **4** | 5 |
+**Mais appliquer le seuil ne suffit pas.** C'est le piège classique du contrôle statistique
+de la divulgation, et nous y sommes tombés avant de le corriger.
 
-Ces quatre cellules, qui regroupaient chacune moins de cinq patients, n'apparaissent nulle
-part dans la restitution. Le compteur est recalculé et affiché à chaque exécution.
+Publier à la fois une vue agrégée et sa décomposition, en appliquant le seuil séparément aux
+deux, laisse fuiter les cellules supprimées :
+
+```
+   total de la marge  −  somme des cellules fines diffusées  =  cellule cachée
+```
+
+Concrètement, une simple jointure entre nos deux tables — avec le seul compte chercheur,
+sans aucun privilège particulier — reconstituait la pathologie, le sexe, la tranche d'âge,
+le département **et l'effectif exact** de patients censés être protégés. Notre table
+`k_anonymat_controle`, conçue comme preuve du dispositif, aggravait même le cas en indiquant
+combien de cellules chercher.
+
+La parade appliquée est la **suppression complémentaire** : une marge n'est diffusée que si
+toute sa décomposition l'est. Dès qu'une cellule fine tombe sous le seuil, la ligne agrégée
+correspondante disparaît elle aussi — il n'y a alors plus rien à soustraire.
+
+| Vue | Cellules calculées | Diffusées | Supprimées | Motif |
+|---|---:|---:|---:|---|
+| Grain fin (× département) | 1 600 | 1 596 | **4** | seuil k ≥ 5 |
+| Marge (pathologie × sexe × âge) | 200 | 197 | **3** | décomposition incomplète |
+
+Le coût est de trois lignes agrégées sur deux cents, et il est assumé : une donnée dont la
+diffusion permettrait d'en déduire une autre ne se diffuse pas, même agrégée.
+
+Une précaution supplémentaire en découle : la table de travail qui porte les effectifs sous
+le seuil vit dans `eds_silver`, **hors de portée des comptes de restitution**. La ranger
+dans la base des chercheurs exposerait directement ce que toute cette mécanique protège.
+
+L'attaque est rejouée à chaque exécution de la suite d'intégration : un test la reproduit et
+exige qu'elle ne rende rien.
 
 ### 7.3 Contrôles automatiques
 

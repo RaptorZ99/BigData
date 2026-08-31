@@ -31,6 +31,7 @@ EXPECTED_TABLES: dict[str, tuple[str, ...]] = {
         "fact_monitoring",
         "sejours_rejets",
         "monitoring_rejets",
+        "cellules_demographie",
     ),
     "eds_gold_pilotage": (
         "kpi_dms_service",

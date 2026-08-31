@@ -199,15 +199,82 @@ def test_k_anonymat_respecte_sur_toutes_les_tables_de_recherche(client):
         assert minimum >= 5, f"{table} diffuse une cohorte de {minimum} patients"
 
 
+def test_le_k_anonymat_resiste_a_l_attaque_par_differenciation(client):
+    """Une cellule supprimée ne doit pas se retrouver par soustraction.
+
+    Publier une marge et sa décomposition, en appliquant le seuil séparément aux
+    deux, laisse fuiter la cellule cachée : marge moins somme des cellules diffusées.
+    La suppression complémentaire retire la marge dès qu'une de ses cellules
+    fines manque. Ce test rejoue l'attaque et exige qu'elle ne rende rien.
+    """
+    reconstructibles = scalar(
+        client,
+        """
+        SELECT count() FROM (
+            SELECT m.nb_patients - sum(r.nb_patients) AS reste
+            FROM eds_gold_recherche.cohorte_demographie AS m
+            LEFT JOIN eds_gold_recherche.cohorte_demographie_region AS r
+              ON  r.code_cim10  = m.code_cim10
+              AND r.sexe        = m.sexe
+              AND r.tranche_age = m.tranche_age
+            GROUP BY m.code_cim10, m.sexe, m.tranche_age, m.nb_patients
+            HAVING reste > 0
+        )
+        """,
+    )
+    assert reconstructibles == 0, (
+        f"{reconstructibles} cellule(s) sous le seuil reconstructibles par différenciation"
+    )
+
+
+def test_la_table_de_travail_du_k_anonymat_est_hors_de_portee(config, client):
+    """`cellules_demographie` porte les effectifs SOUS le seuil : elle doit rester interne.
+
+    C'est la table qui sait ce que le k-anonymat cache. La ranger dans la base
+    des chercheurs exposerait directement ce que la suppression complémentaire
+    protège — elle vit donc en silver, inaccessible aux comptes de restitution.
+    """
+    interne = scalar(
+        client,
+        "SELECT countIf(NOT diffusable) FROM eds_silver.cellules_demographie",
+    )
+    assert interne > 0, "la table de travail devrait contenir les cellules sous le seuil"
+
+    chercheur = connect(config, user="chu_recherche", password=config.recherche_password)
+    with pytest.raises(Exception):  # noqa: B017 — tout refus fait l'affaire
+        chercheur.query("SELECT count() FROM eds_silver.cellules_demographie")
+
+    exposee = scalar(
+        client,
+        "SELECT count() FROM system.tables "
+        "WHERE database = 'eds_gold_recherche' AND name = 'cellules_demographie'",
+    )
+    assert exposee == 0, "la table de travail ne doit pas exister dans la base des chercheurs"
+
+
 def test_le_k_anonymat_supprime_effectivement_des_cellules(client):
-    """Si rien n'était jamais supprimé, la règle ne serait pas démontrée."""
-    calculees, diffusees, supprimees = client.query(
-        "SELECT cellules_calculees, cellules_diffusees, cellules_supprimees "
-        "FROM eds_gold_recherche.k_anonymat_controle"
-    ).result_rows[0]
-    assert calculees == 1_600
-    assert diffusees == 1_596
-    assert supprimees == 4
+    """Si rien n'était jamais supprimé, la règle ne serait pas démontrée.
+
+    Deux suppressions coexistent : celles du seuil lui-même au grain fin, et
+    celles que la protection contre la différenciation impose sur les marges.
+    """
+    mesures = {
+        table: (calculees, diffusees, supprimees)
+        for table, calculees, diffusees, supprimees in client.query(
+            "SELECT table_cible, cellules_calculees, cellules_diffusees, cellules_supprimees "
+            "FROM eds_gold_recherche.k_anonymat_controle"
+        ).result_rows
+    }
+
+    # Grain fin : le seuil k >= 5 écarte 4 cellules sur 1 600.
+    assert mesures["cohorte_demographie_region"] == (1_600, 1_596, 4)
+
+    # Marges : 3 lignes retirées par suppression complémentaire, car leur
+    # décomposition départementale n'est pas intégralement diffusable.
+    calculees, diffusees, supprimees = mesures["cohorte_demographie"]
+    assert calculees == 200
+    assert supprimees == 3
+    assert diffusees == calculees - supprimees
 
 
 @pytest.mark.parametrize("base", ["eds_gold_recherche", "eds_gold_pilotage"])
