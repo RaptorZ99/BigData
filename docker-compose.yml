@@ -1,0 +1,61 @@
+# EDS CHU — entrepôt (ClickHouse) + restitution (Metabase).
+name: eds-chu
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.3
+    container_name: eds-clickhouse
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_ETL_USER:-chu_etl}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_ETL_PASSWORD:?CLICKHOUSE_ETL_PASSWORD manquant (cp .env.example .env)}
+      # Autorise chu_etl à créer les users/GRANTs de cloisonnement en SQL.
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "8123:8123"   # HTTP : clients, UI /play
+      - "9000:9000"   # protocole natif
+    volumes:
+      # Stockage du moteur : volume Docker nommé, jamais un dossier de l'hôte.
+      # Un bind mount macOS ne garantit pas les renommages atomiques dont
+      # ClickHouse a besoin (CREATE OR REPLACE TABLE échoue alors sur un
+      # `filesystem error: in rename`).
+      - clickhouse-data:/var/lib/clickhouse
+      # Le lake, lui, reste un dossier de l'hôte : le moteur le lit via file(),
+      # en lecture seule. Aucune donnée ne transite par la mémoire Python.
+      - ./data/lake:/var/lib/clickhouse/user_files/lake:ro
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  metabase:
+    image: metabase/metabase:v0.58.31
+    container_name: eds-metabase
+    ports:
+      - "3000:3000"
+    environment:
+      # H2 embarqué persisté : suffisant pour la démo. En production on
+      # basculerait sur Postgres (cf. docs/RAPPORT.md § limites).
+      MB_DB_FILE: /metabase-data/metabase.db
+      JAVA_TIMEZONE: Europe/Paris
+    volumes:
+      - metabase-data:/metabase-data
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    restart: unless-stopped
+
+volumes:
+  clickhouse-data:
+  metabase-data:

@@ -1,0 +1,60 @@
+-- Tables d'exploitation : elles répondent à « d'où vient cette donnée, quand
+-- a-t-elle été traitée, et qu'a-t-on écarté ? ». C'est le socle de la
+-- traçabilité exigée par le sujet et de l'idempotence du pipeline.
+
+-- Journal d'ingestion : une ligne par (domaine, jour, fichier) traité.
+-- Le checksum du fichier source sert de clé d'idempotence : un fichier déjà
+-- ingéré à l'identique est sauté, un fichier modifié est rejoué.
+-- ReplacingMergeTree : rejouer un jour remplace la ligne au lieu d'empiler.
+CREATE TABLE IF NOT EXISTS ops.ingest_log
+(
+    domain       LowCardinality(String),
+    ingest_date  Date,
+    source_file  String,
+    sha256       String,
+    rows_source  Int64   DEFAULT -1,
+    rows_loaded  Int64   DEFAULT -1,
+    status       Enum8('success' = 1, 'failed' = 2),
+    error        String  DEFAULT '',
+    run_id       String,
+    started_at   DateTime,
+    finished_at  DateTime
+)
+ENGINE = ReplacingMergeTree(finished_at)
+ORDER BY (domain, ingest_date, source_file)
+COMMENT 'Journal d''ingestion : idempotence par checksum et traçabilité fichier → table';
+
+-- Historique des exécutions du pipeline (une ligne par `eds run`).
+CREATE TABLE IF NOT EXISTS ops.pipeline_runs
+(
+    run_id         String,
+    started_at     DateTime,
+    finished_at    Nullable(DateTime),
+    status         Enum8('running' = 1, 'success' = 2, 'failed' = 3, 'partial' = 4),
+    days_processed String DEFAULT '',
+    files_ok       UInt32 DEFAULT 0,
+    files_failed   UInt32 DEFAULT 0,
+    error          String DEFAULT ''
+)
+ENGINE = ReplacingMergeTree(started_at)
+ORDER BY run_id
+COMMENT 'Exécutions du pipeline : quand, quoi, et avec quel résultat';
+
+-- Rapport qualité : combien de lignes lues, gardées, écartées, par règle.
+-- C'est ce qui permet de justifier chaque chiffre des dashboards.
+CREATE TABLE IF NOT EXISTS ops.quality_report
+(
+    run_id        String,
+    layer         LowCardinality(String),
+    table_name    LowCardinality(String),
+    rule          LowCardinality(String),
+    rule_label    String,
+    rows_in       Int64,
+    rows_kept     Int64,
+    rows_rejected Int64,
+    details       String   DEFAULT '',
+    checked_at    DateTime DEFAULT now()
+)
+ENGINE = MergeTree
+ORDER BY (run_id, layer, table_name, rule)
+COMMENT 'Contrôles qualité par run : lignes lues / conservées / écartées, par règle';
