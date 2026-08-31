@@ -396,6 +396,50 @@ def test_un_utilisateur_ne_voit_qu_un_seul_univers(config, usage, dashboard, con
     assert [b["name"] for b in client.get("/api/database")["data"]] == [connexion]
 
 
+def test_les_dashboards_sont_provisionnes_en_pleine_largeur(config):
+    """Le rendu ne doit pas dépendre de l'historique de l'instance Metabase.
+
+    `POST /api/dashboard` ignore silencieusement `width` : un tableau de bord
+    créé de zéro restait en largeur `fixed` — enfermé dans un millier de pixels,
+    avec deux marges vides — alors qu'un tableau de bord reprovisionné passait
+    bien en `full`. Le défaut ne se voyait donc jamais en développement, et
+    seulement après un `make reset`. Ce contrôle porte sur l'état réel de
+    l'instance, pas sur l'intention du code.
+    """
+    from eds.metabase import MetabaseClient, MetabaseError
+
+    client = MetabaseClient(config.metabase_url)
+    try:
+        client.authenticate(config.admin_email, config.admin_password)
+    except MetabaseError as exc:
+        pytest.skip(f"Metabase indisponible : {exc}")
+
+    provisionnes = [
+        client.get(f"/api/dashboard/{d['id']}")
+        for d in client.get("/api/dashboard")
+        if d["name"].startswith(("🏥", "🔬"))
+    ]
+    assert len(provisionnes) == 2, "les deux tableaux de bord doivent exister"
+
+    for dashboard in provisionnes:
+        assert dashboard["width"] == "full", (
+            f"« {dashboard['name']} » est en largeur {dashboard['width']!r} : "
+            "la grille n'occupera pas l'écran"
+        )
+
+        # La disposition poussée doit être celle que le code décrit : si deux
+        # cartes se recouvraient, Metabase les repousserait à l'affichage.
+        cartes = dashboard["dashcards"]
+        hauteur = max(c["row"] + c["size_y"] for c in cartes)
+        for ligne in range(hauteur):
+            occupation = sum(
+                c["size_x"] for c in cartes if c["row"] <= ligne < c["row"] + c["size_y"]
+            )
+            assert occupation == 24, (
+                f"« {dashboard['name']} » : ligne {ligne} à {occupation} colonnes sur 24"
+            )
+
+
 @pytest.mark.parametrize(
     ("user_key", "base_autorisee"),
     [("pilotage", "eds_gold_pilotage"), ("recherche", "eds_gold_recherche")],

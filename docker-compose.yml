@@ -43,6 +43,12 @@ services:
       # basculerait sur Postgres (cf. docs/RAPPORT.md § limites).
       MB_DB_FILE: /metabase-data/metabase.db
       JAVA_TIMEZONE: Europe/Paris
+      # Metabase installe par défaut une base et un tableau de bord de
+      # démonstration e-commerce. Ils ne sont visibles d'aucun des deux comptes
+      # de restitution (les permissions de collection les excluent), mais ils
+      # encombrent la vue d'administration d'un contenu étranger au CHU — et
+      # une base de démonstration n'a rien à faire dans un entrepôt de santé.
+      MB_LOAD_SAMPLE_CONTENT: "false"
     volumes:
       - metabase-data:/metabase-data
     depends_on:

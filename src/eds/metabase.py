@@ -390,11 +390,13 @@ def ensure_dashboard(
         # de 24 colonnes proportionnelle à l'écran.
         "width": "full",
     }
-    if existing:
-        dashboard_id = existing["id"]
-        client.put(f"/api/dashboard/{dashboard_id}", payload)
-    else:
-        dashboard_id = client.post("/api/dashboard", payload)["id"]
+    # La création n'accepte qu'un sous-ensemble du payload — `width` y est
+    # silencieusement ignoré. Le PUT qui suit est donc appliqué dans les deux
+    # cas, sans quoi un tableau de bord neuf resterait en largeur `fixed` alors
+    # qu'un tableau de bord reprovisionné passerait en `full` : le rendu
+    # dépendrait de l'historique de l'instance, pas du code.
+    dashboard_id = existing["id"] if existing else client.post("/api/dashboard", payload)["id"]
+    client.put(f"/api/dashboard/{dashboard_id}", payload)
 
     cards_by_name = {
         card["name"]: card
