@@ -26,7 +26,11 @@ pseudonyme au moment même de la copie depuis le dépôt du CHU.
 
 ## Démarrage rapide
 
-**Prérequis** : Docker et [uv](https://docs.astral.sh/uv/). Rien d'autre.
+**Prérequis** : Docker et [uv](https://docs.astral.sh/uv/). Rien d'autre à installer.
+
+Le dépôt du CHU (`source-filestorage/`) n'est **pas versionné** : il contient l'identité
+réelle des patients. Placez-le à la racine du projet avant de lancer la démonstration, ou
+indiquez son chemin dans `EDS_SOURCE_DIR`.
 
 ```bash
 git clone <url-du-depot> && cd eds-chu
