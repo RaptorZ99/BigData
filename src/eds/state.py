@@ -189,6 +189,29 @@ def last_run_id(client: Client) -> str | None:
     return rows[0][0] if rows else None
 
 
+def last_quality_run_id(client: Client) -> str | None:
+    """Dernier run ayant réellement produit un rapport qualité.
+
+    Un run incrémental sans nouveau fichier ne reconstruit rien, donc n'écrit
+    aucun contrôle. Le rapport pertinent reste alors celui du dernier
+    traitement effectif : c'est lui qui justifie les chiffres actuellement
+    publiés dans les tableaux de bord.
+    """
+    rows = client.query(
+        """
+        SELECT q.run_id
+        FROM ops.quality_report AS q
+        INNER JOIN (
+            SELECT run_id, started_at FROM ops.pipeline_runs FINAL
+        ) AS r ON r.run_id = q.run_id
+        GROUP BY q.run_id, r.started_at
+        ORDER BY r.started_at DESC
+        LIMIT 1
+        """
+    ).result_rows
+    return rows[0][0] if rows else None
+
+
 def _as_date(day: str):
     from datetime import date
 

@@ -22,8 +22,6 @@ log = get_logger(__name__)
 
 SQL_DIR = PROJECT_ROOT / "sql"
 
-# Découpage naïf mais suffisant : nos scripts n'utilisent ni chaîne contenant un
-# point-virgule ni bloc procédural. On retire d'abord les commentaires de ligne.
 _LINE_COMMENT = re.compile(r"--[^\n]*")
 
 
@@ -55,11 +53,53 @@ def connect(config: Config, *, user: str | None = None, password: str | None = N
 
 
 def split_statements(script: str) -> Iterator[str]:
-    """Découpe un script SQL en instructions exécutables."""
-    for raw in _LINE_COMMENT.sub("", script).split(";"):
-        statement = raw.strip()
-        if statement:
-            yield statement
+    """Découpe un script SQL en instructions, en respectant les chaînes.
+
+    Un point-virgule situé à l'intérieur d'un littéral — un libellé de contrôle
+    qualité, par exemple — ne sépare pas deux instructions. Un découpage naïf
+    sur `;` produirait ici du SQL tronqué, avec une erreur de syntaxe difficile
+    à relier à sa cause.
+
+    Les commentaires de ligne sont retirés au préalable, sauf lorsqu'ils
+    apparaissent à l'intérieur d'une chaîne.
+    """
+    statement: list[str] = []
+    dans_chaine = False
+    index = 0
+    texte = script
+
+    while index < len(texte):
+        caractere = texte[index]
+
+        if dans_chaine:
+            statement.append(caractere)
+            if caractere == "'":
+                # Deux apostrophes successives échappent une apostrophe.
+                if index + 1 < len(texte) and texte[index + 1] == "'":
+                    statement.append(texte[index + 1])
+                    index += 2
+                    continue
+                dans_chaine = False
+            index += 1
+            continue
+
+        if caractere == "'":
+            dans_chaine = True
+            statement.append(caractere)
+        elif texte.startswith("--", index):
+            fin = texte.find("\n", index)
+            index = len(texte) if fin == -1 else fin
+            continue
+        elif caractere == ";":
+            if instruction := "".join(statement).strip():
+                yield instruction
+            statement = []
+        else:
+            statement.append(caractere)
+        index += 1
+
+    if instruction := "".join(statement).strip():
+        yield instruction
 
 
 def render(script: str, params: dict[str, str] | None = None) -> str:

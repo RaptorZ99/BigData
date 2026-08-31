@@ -388,7 +388,7 @@ FROM eds_bronze.patients GROUP BY patient_pseudo
 - Flags d'alerte métier sur les lignes valides (seuils **hypothèses documentées** au rapport) : `alert_hr = hr < 40 OR hr > 130`, `alert_spo2 = spo2 < 90`, `alert_temp = temp_c >= 38.5`, `is_alert = OR` des trois. Attendu : **3 053 relevés en alerte (4,7 %)**.
 - Flag `is_after_discharge` (join fact_sejour au build). **Attendu : 0** — les 520 relevés post-sortie du profilage appartenaient tous aux séjours invalides (cf. note §2.6) ; le flag reste comme contrôle actif.
 
-**Rapport qualité** : après le build silver, `transform.py` exécute une requête de comptage par règle (lignes bronze / gardées / rejetées / flaguées) et insère dans `ops.quality_report` (run_id, layer, table, rule, rows_in, rows_kept, rows_rejected, details, at). C'est la matérialisation du critère « justifier chaque chiffre ».
+**Rapport qualité** : après le build silver, `transform.py` exécute une requête de comptage par règle et insère dans `ops.quality_report` (run_id, layer, table, rule, rule_label, **rows_in, rows_kept, rows_rejected, rows_flagged**, details, checked_at). Les quatre compteurs sont distincts à dessein : une règle de **rejet** retire des lignes (`rows_rejected`), une règle de **signalement** les conserve en les marquant (`rows_flagged`), un **contrôle** est attendu à zéro. Les confondre rendrait le rapport ambigu — or c'est lui qui matérialise le critère « justifier chaque chiffre ».
 
 ---
 
@@ -497,7 +497,7 @@ Résultats de recherche **vérifiés** (2026-08-31) — flux et pièges :
 **Tables ops** (créées par `00_init`) :
 - `ops.ingest_log` : `domain, ingest_date, source_file, sha256, rows_source, rows_loaded, status ('success'|'failed'), error, started_at, finished_at`.
 - `ops.pipeline_runs` : `run_id (UUID), started_at, finished_at, status, days_processed, error`.
-- `ops.quality_report` : cf. §8.
+- `ops.quality_report` : `run_id, layer, table_name, rule, rule_label, rows_in, rows_kept, rows_rejected, rows_flagged, details, checked_at` — cf. §8.
 
 **Gestion des erreurs** :
 - Échec sur un `(domaine, jour)` → loggé + `ingest_log.status='failed'` ; le run **continue** sur les autres domaines ; statut final du run = `failed` ; **exit code ≠ 0** (le cron peut alerter). Silver/gold ne sont reconstruits que si au moins un chargement a réussi et jamais à partir d'un bronze partiellement chargé pour le jour en échec (la partition en échec est re-drop-ée avant retry).

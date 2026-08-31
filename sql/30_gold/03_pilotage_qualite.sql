@@ -13,9 +13,16 @@ SELECT
     q.table_name    AS table_cible,
     q.rule          AS rule,
     q.rule_label    AS controle,
-    q.rows_in       AS lignes_entrantes,
+    -- Nature de la règle : ce qu'il faut lire dans les compteurs.
+    multiIf(
+        q.rows_rejected > 0, 'rejet',
+        q.rows_flagged  > 0, 'signalement',
+        'contrôle conforme'
+    )               AS nature,
+    q.rows_in       AS lignes_lues,
     q.rows_kept     AS lignes_conservees,
     q.rows_rejected AS lignes_ecartees,
+    q.rows_flagged  AS lignes_signalees,
     q.details       AS precisions,
     q.checked_at    AS controle_le
 FROM ops.quality_report AS q

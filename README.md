@@ -42,14 +42,18 @@ make demo
 de dépôt, construit les indicateurs et crée les deux dashboards. Comptez deux à trois
 minutes au premier lancement (téléchargement des images).
 
-À la fin, la commande affiche les accès :
+À la fin, la commande affiche les accès et les identifiants — ceux de **votre**
+installation, lus dans `.env` :
 
 | Interface | URL | Compte |
 |---|---|---|
-| Dashboard pilotage | http://localhost:3000 | `pilotage@chu.local` / `PilotageChu2026!` |
-| Dashboard recherche | http://localhost:3000 | `recherche@chu.local` / `RechercheChu2026!` |
-| Administration Metabase | http://localhost:3000 | `admin@chu.local` / `AdminChu2026!` |
-| Console SQL ClickHouse | http://localhost:8123/play | `chu_etl` / `etl_change_me` |
+| Dashboard pilotage | http://localhost:3000 | `pilotage@chu.local` |
+| Dashboard recherche | http://localhost:3000 | `recherche@chu.local` |
+| Administration Metabase | http://localhost:3000 | `admin@chu.local` |
+| Console SQL ClickHouse | http://localhost:8123/play | `chu_etl` |
+
+Les mots de passe correspondants sont ceux de votre fichier `.env` ; ils ne sont écrits
+nulle part ailleurs, pour qu'ils ne puissent pas devenir faux.
 
 > **Démonstration du cloisonnement** : connectez-vous en `pilotage`, puis tentez d'ouvrir le
 > dashboard de recherche — l'accès est refusé, et réciproquement. La barrière n'est pas

@@ -42,6 +42,10 @@ COMMENT 'Exécutions du pipeline : quand, quoi, et avec quel résultat';
 
 -- Rapport qualité : combien de lignes lues, gardées, écartées, par règle.
 -- C'est ce qui permet de justifier chaque chiffre des dashboards.
+-- Quatre compteurs distincts, parce qu'une règle de rejet et une règle de
+-- signalement ne disent pas la même chose : « écartées » retire des lignes de
+-- l'entrepôt, « signalées » les conserve en les marquant. Les confondre rendrait
+-- le rapport ambigu — or c'est lui qui justifie chaque chiffre publié.
 CREATE TABLE IF NOT EXISTS ops.quality_report
 (
     run_id        String,
@@ -49,12 +53,21 @@ CREATE TABLE IF NOT EXISTS ops.quality_report
     table_name    LowCardinality(String),
     rule          LowCardinality(String),
     rule_label    String,
-    rows_in       Int64,
-    rows_kept     Int64,
-    rows_rejected Int64,
+    rows_in       Int64 COMMENT 'Lignes examinées par la règle',
+    rows_kept     Int64 COMMENT 'Lignes conservées dans la table cible',
+    rows_rejected Int64 COMMENT 'Lignes écartées, consultables dans une table de rejets',
+    rows_flagged  Int64 DEFAULT 0 COMMENT 'Lignes conservées mais marquées par un signalement',
     details       String   DEFAULT '',
     checked_at    DateTime DEFAULT now()
 )
 ENGINE = MergeTree
 ORDER BY (run_id, layer, table_name, rule)
-COMMENT 'Contrôles qualité par run : lignes lues / conservées / écartées, par règle';
+COMMENT 'Contrôles qualité par run : lignes lues, conservées, écartées, signalées';
+
+-- Migration : `CREATE TABLE IF NOT EXISTS` ne fait rien sur une table déjà
+-- créée, donc les colonnes ajoutées après coup doivent l'être explicitement.
+-- Le provisionnement reste ainsi rejouable sur un entrepôt existant.
+ALTER TABLE ops.quality_report
+    ADD COLUMN IF NOT EXISTS rows_flagged Int64 DEFAULT 0
+    COMMENT 'Lignes conservées mais marquées par un signalement'
+    AFTER rows_rejected;

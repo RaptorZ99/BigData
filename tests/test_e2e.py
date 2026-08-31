@@ -285,11 +285,18 @@ def test_l_ingestion_est_journalisee(client):
 
 
 def test_le_rapport_qualite_est_renseigne(client):
-    """Chaque run doit produire ses contrôles, sinon les chiffres ne sont pas justifiables."""
+    """Les chiffres publiés doivent toujours être adossés à un rapport qualité.
+
+    On vise le dernier run ayant construit les tables, et non le dernier run tout
+    court : un passage incrémental sans nouveau fichier ne reconstruit rien.
+    """
+    from eds.state import last_quality_run_id
+
+    run_id = last_quality_run_id(client)
+    assert run_id is not None, "aucun rapport qualité en base"
+
     regles = scalar(
         client,
-        "SELECT uniqExact(rule) FROM ops.quality_report "
-        "WHERE run_id = (SELECT run_id FROM ops.pipeline_runs FINAL "
-        "                ORDER BY started_at DESC LIMIT 1)",
+        f"SELECT uniqExact(rule) FROM ops.quality_report WHERE run_id = '{run_id}'",
     )
     assert regles >= 14

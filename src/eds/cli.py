@@ -160,14 +160,17 @@ def quality_command(
     ] = None,
 ) -> None:
     """Affiche le rapport qualité : lignes lues, conservées, écartées, par règle."""
-    from eds.state import last_run_id
+    from eds.state import last_quality_run_id
 
     config = _bootstrap()
     client = connect(config)
 
-    target = run_id or last_run_id(client)
+    # On vise le dernier run ayant produit des contrôles, et non simplement le
+    # dernier run : un passage incrémental sans nouveau fichier ne reconstruit
+    # rien, mais les chiffres publiés restent ceux du traitement précédent.
+    target = run_id or last_quality_run_id(client)
     if not target:
-        console.print("[yellow]Aucun run enregistré.[/]")
+        console.print("[yellow]Aucun contrôle qualité enregistré. Lancez `make pipeline`.[/]")
         raise typer.Exit(code=1)
 
     rows = transform.quality_report(client, target)
@@ -180,23 +183,40 @@ def quality_command(
         ("Couche", "left"),
         ("Table", "left"),
         ("Contrôle", "left"),
-        ("Entrées", "right"),
+        ("Nature", "left"),
+        ("Lues", "right"),
         ("Conservées", "right"),
         ("Écartées", "right"),
+        ("Signalées", "right"),
     ):
         table.add_column(column, justify=justify)
 
-    for layer, table_name, _rule, label, rows_in, rows_kept, rows_rejected, _details in rows:
-        rejected = f"[red]{rows_rejected:,}[/]" if rows_rejected else "[green]0[/]"
+    # Une règle de rejet retire des lignes ; une règle de signalement les
+    # conserve en les marquant. Distinguer les deux évite de lire un
+    # signalement comme une perte de données.
+    couleurs = {"rejet": "red", "signalement": "yellow", "conforme": "green"}
+
+    for layer, table_name, label, nature, lues, gardees, ecartees, signalees in rows:
         table.add_row(
             layer,
             table_name,
             label,
-            f"{rows_in:,}".replace(",", " "),
-            f"{rows_kept:,}".replace(",", " "),
-            rejected.replace(",", " "),
+            f"[{couleurs[nature]}]{nature}[/]",
+            _nombre(lues),
+            _nombre(gardees),
+            f"[red]{_nombre(ecartees)}[/]" if ecartees else "[dim]0[/]",
+            f"[yellow]{_nombre(signalees)}[/]" if signalees else "[dim]0[/]",
         )
     console.print(table)
+    console.print(
+        "[dim]rejet = lignes retirées (consultables dans les tables *_rejets) · "
+        "signalement = lignes conservées et marquées · conforme = contrôle sans écart[/]"
+    )
+
+
+def _nombre(valeur: int) -> str:
+    """Formate un entier avec des espaces comme séparateur de milliers."""
+    return f"{valeur:,}".replace(",", " ")
 
 
 @app.command("provision-warehouse")

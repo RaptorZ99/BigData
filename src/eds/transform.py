@@ -133,7 +133,17 @@ def quality_report(client: Client, run_id: str) -> list[tuple]:
     """Relit le rapport qualité d'un run, pour affichage."""
     return client.query(
         """
-        SELECT layer, table_name, rule, rule_label, rows_in, rows_kept, rows_rejected, details
+        SELECT
+            layer,
+            table_name,
+            rule_label,
+            multiIf(rows_rejected > 0, 'rejet',
+                    rows_flagged  > 0, 'signalement',
+                    'conforme')  AS nature,
+            rows_in,
+            rows_kept,
+            rows_rejected,
+            rows_flagged
         FROM ops.quality_report
         WHERE run_id = %(run_id)s
         ORDER BY layer, table_name, rule

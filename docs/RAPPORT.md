@@ -225,21 +225,30 @@ département.
 
 Le principe est simple et constant : **on écarte, on trace, on ne corrige jamais en
 silence.** Toute ligne rejetée part dans une table dédiée avec son motif, et reste
-consultable. Les chiffres ci-dessous sont ceux produits par la dernière exécution ; ils sont
-reproduits automatiquement à chaque run dans `ops.quality_report`.
+consultable.
 
-| Règle | Traitement | Entrées | Conservées | Écartées |
-|---|---|---:|---:|---:|
-| **Q1** Patients redéposés chaque jour | Déduplication, version la plus récente | 16 200 | 6 000 | 10 200 |
-| **Q2** Sortie antérieure à l'admission | **Rejet** | 15 000 | 14 864 | 136 |
-| **Q3** Séjour sans date de sortie | **Conservé** (patient hospitalisé) | 14 864 | 1 190 | 0 |
-| **Q4** Constantes hors plage physiologique | **Rejet**, motif par borne | 66 677 | 64 799 | 1 369 |
-| **Q5** Mode de sortie non renseigné | **Conservé** en valeur nulle | 14 864 | 3 165 | 0 |
-| **Q6** Formats et intégrité référentielle | Contrôles actifs (5 règles) | — | — | 0 |
-| **Q7** Admission après un décès antérieur | **Signalé**, non rejeté | 14 864 | 192 | 0 |
-| **Q8** Relevé postérieur à la sortie | Contrôle actif | 64 799 | 0 | 0 |
-| **C1** Relevé dont le séjour est écarté | **Rejet en cascade** | 66 677 | 64 799 | 520 |
-| **C2** Diagnostic dont le séjour est écarté | **Rejet en cascade** | 37 380 | 37 040 | 340 |
+Trois natures de règles cohabitent, et les confondre rendrait le rapport illisible :
+
+- **Rejet** — la ligne quitte l'entrepôt et se retrouve dans une table `*_rejets` ;
+- **Signalement** — la ligne est **conservée** mais marquée, parce qu'elle est légitime ou
+  parce que l'anomalie relève de la source ;
+- **Contrôle** — vérification attendue à zéro, dont le passage au vert est l'information.
+
+Les chiffres ci-dessous sont ceux de la dernière exécution ; ils sont recalculés à chaque
+run dans `ops.quality_report`.
+
+| Règle | Nature | Lues | Conservées | Écartées | Signalées |
+|---|---|---:|---:|---:|---:|
+| **Q1** Patients redéposés chaque jour | Déduplication | 16 200 | 6 000 | 10 200 | — |
+| **Q2** Sortie antérieure à l'admission | Rejet | 15 000 | 14 864 | 136 | — |
+| **Q4** Constantes hors plage physiologique | Rejet | 66 677 | 64 799 | 1 369 | — |
+| **C1** Relevé dont le séjour est écarté | Rejet en cascade | 66 677 | 64 799 | 520 | — |
+| **C2** Diagnostic dont le séjour est écarté | Rejet en cascade | 37 380 | 37 040 | 340 | — |
+| **Q3** Séjour sans date de sortie | Signalement | 14 864 | 14 864 | 0 | 1 190 |
+| **Q5** Mode de sortie non renseigné | Signalement | 14 864 | 14 864 | 0 | 3 165 |
+| **Q7** Admission après un décès antérieur | Signalement | 14 864 | 14 864 | 0 | 192 |
+| **Q8** Relevé postérieur à la sortie | Contrôle | 64 799 | 64 799 | 0 | **0** |
+| **Q6** Formats et intégrité référentielle (5 règles) | Contrôle | — | — | 0 | **0** |
 
 Quelques décisions méritent d'être explicitées.
 

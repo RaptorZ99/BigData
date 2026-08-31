@@ -40,15 +40,19 @@ provision: ## (Re)crée les connexions, groupes, users et dashboards Metabase
 	uv run eds provision-metabase
 
 demo: up pipeline provision ## Démo complète : démarrage + ingestion + dashboards
+	@# Les identifiants sont affichés juste au-dessus par `eds provision-metabase`,
+	@# qui les lit dans .env : ils ne sont pas dupliqués ici, pour qu'ils ne
+	@# puissent jamais devenir faux.
 	@echo ""
 	@echo "═══════════════════════════════════════════════════════════════"
 	@echo "  EDS CHU — prêt."
 	@echo "═══════════════════════════════════════════════════════════════"
-	@echo "  Metabase    http://localhost:3000"
-	@echo "    pilotage    pilotage@chu.local  / PilotageChu2026!"
-	@echo "    recherche   recherche@chu.local / RechercheChu2026!"
-	@echo "    admin       admin@chu.local     / AdminChu2026!"
-	@echo "  ClickHouse  http://localhost:8123/play  (chu_etl)"
+	@echo "  Dashboards   http://localhost:3000"
+	@echo "               (identifiants affichés ci-dessus, définis dans .env)"
+	@echo "  Console SQL  http://localhost:8123/play"
+	@echo ""
+	@echo "  Vérifier :   make status · make quality · make test-e2e"
+	@echo "               uv run eds check-cloisonnement"
 	@echo "═══════════════════════════════════════════════════════════════"
 
 status: ## État de l'ingestion et comptages par couche

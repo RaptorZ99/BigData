@@ -245,13 +245,19 @@ _PILOTAGE_CARDS = [
     },
     {
         "name": "Contrôles qualité du dernier traitement",
-        "description": "Lignes lues, conservées et écartées, règle par règle.",
+        "description": (
+            "Règle par règle : lignes lues, conservées, écartées (retirées) "
+            "et signalées (conservées mais marquées)."
+        ),
         "display": "table",
         "sql": (
-            "SELECT controle, lignes_entrantes AS `lignes lues`,\n"
-            "       lignes_conservees AS `conservées`, lignes_ecartees AS `écartées`\n"
+            "SELECT controle, nature,\n"
+            "       lignes_lues       AS `lues`,\n"
+            "       lignes_conservees AS `conservées`,\n"
+            "       lignes_ecartees   AS `écartées`,\n"
+            "       lignes_signalees  AS `signalées`\n"
             "FROM kpi_qualite_pipeline\n"
-            "ORDER BY `écartées` DESC, controle"
+            "ORDER BY `écartées` DESC, `signalées` DESC, controle"
         ),
         "row": 26,
         "col": 12,
