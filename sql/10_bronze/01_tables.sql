@@ -5,7 +5,9 @@
 --   * PARTITION BY _ingest_date  → rejouer un jour = DROP PARTITION + INSERT,
 --     donc un chargement idempotent sans état intermédiaire à nettoyer ;
 --   * colonnes _source_file / _ingest_date / _loaded_at → lignage complet,
---     chaque ligne sait de quel fichier et de quel run elle provient.
+--     chaque ligne sait de quel fichier elle provient, de quel jour de dépôt,
+--     et à quel moment elle a été chargée. Le run correspondant se retrouve
+--     dans `ops.ingest_log`, qui associe chaque fichier à son exécution.
 
 CREATE TABLE IF NOT EXISTS eds_bronze.patients
 (

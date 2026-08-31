@@ -50,7 +50,33 @@ INNER JOIN eds_silver.dim_cim10 AS c USING (code_cim10)
 GROUP BY code_cim10, libelle
 HAVING nb_patients >= 5;
 
--- ── Description de cohorte : âge et sexe ────────────────────────────────────
+-- ── Pyramide des âges de l'ensemble de la population suivie ─────────────────
+-- Grain : sexe × tranche d'âge, un patient compté UNE fois.
+--
+-- Cette table existe précisément parce que `nb_patients` est une mesure **non
+-- additive** : la sommer à travers les pathologies compterait cinq fois un
+-- patient portant cinq diagnostics. La distribution d'ensemble doit donc être
+-- calculée à son propre grain, jamais dérivée de `cohorte_demographie`.
+CREATE OR REPLACE TABLE eds_gold_recherche.cohorte_demographie_globale
+ENGINE = MergeTree
+ORDER BY (sexe, tranche_age_debut)
+COMMENT 'Distribution de la population suivie par sexe et tranche d''âge (patients distincts)'
+AS
+SELECT
+    p.sex                                                           AS sexe,
+    intDiv(toYear(today()) - p.birth_year, 10) * 10                 AS tranche_age_debut,
+    concat(
+        toString(intDiv(toYear(today()) - p.birth_year, 10) * 10),
+        '-',
+        toString(intDiv(toYear(today()) - p.birth_year, 10) * 10 + 9)
+    )                                                               AS tranche_age,
+    uniqExact(s.patient_pseudo)                                     AS nb_patients
+FROM eds_silver.fact_sejour AS s
+INNER JOIN eds_silver.dim_patient AS p USING (patient_pseudo)
+GROUP BY sexe, tranche_age_debut, tranche_age
+HAVING nb_patients >= 5;
+
+-- ── Description de cohorte : âge et sexe, par pathologie ────────────────────
 CREATE OR REPLACE TABLE eds_gold_recherche.cohorte_demographie
 ENGINE = MergeTree
 ORDER BY (code_cim10, sexe, tranche_age_debut)
@@ -108,6 +134,10 @@ ENGINE = MergeTree
 ORDER BY table_cible
 COMMENT 'Effet du seuil k >= 5 : nombre de cellules calculées, diffusées et supprimées'
 AS
+-- Les cellules « calculées » doivent l'être sur exactement le même périmètre que
+-- les cellules diffusées, jointure au référentiel CIM-10 comprise : sans cela,
+-- un code orphelin serait imputé au seuil k = 5 alors qu'il aurait été écarté
+-- pour une tout autre raison, et le compteur mélangerait deux causes.
 WITH cellules_brutes AS
 (
     SELECT count() AS n
@@ -116,6 +146,7 @@ WITH cellules_brutes AS
         SELECT d.code_cim10, p.region_code, p.sex,
                intDiv(toYear(today()) - p.birth_year, 10) AS tranche
         FROM eds_silver.fact_diagnostic AS d
+        INNER JOIN eds_silver.dim_cim10   AS c USING (code_cim10)
         INNER JOIN eds_silver.dim_patient AS p USING (patient_pseudo)
         GROUP BY d.code_cim10, p.region_code, p.sex, tranche
     )

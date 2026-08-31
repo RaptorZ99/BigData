@@ -210,16 +210,23 @@ def ensure_group(client: MetabaseClient, name: str) -> int:
 def ensure_user(
     client: MetabaseClient, email: str, password: str, group_id: int, label: str
 ) -> int:
-    """Crée l'utilisateur d'un usage et l'affecte à son groupe."""
+    """Crée l'utilisateur d'un usage, l'affecte à son groupe et aligne son mot de passe.
+
+    Le mot de passe est réappliqué à chaque provisionnement : sans cela, changer
+    la valeur dans `.env` laisserait le compte inchangé alors que la commande
+    annoncerait le nouvel identifiant.
+    """
     users = (client.get("/api/user") or {}).get("data", [])
     existing = _find_by(users, "email", email)
 
     if existing:
+        user_id = existing["id"]
         client.put(
-            f"/api/user/{existing['id']}",
+            f"/api/user/{user_id}",
             {"user_group_memberships": _memberships(group_id)},
         )
-        return existing["id"]
+        _reset_password(client, user_id, password, email)
+        return user_id
 
     created = client.post(
         "/api/user",
@@ -233,6 +240,20 @@ def ensure_user(
     )
     log.info("Utilisateur créé : %s", email)
     return created["id"]
+
+
+def _reset_password(client: MetabaseClient, user_id: int, password: str, email: str) -> None:
+    """Réaligne le mot de passe d'un compte existant sur celui de la configuration.
+
+    L'échec n'est pas bloquant — Metabase refuse notamment de réappliquer un mot
+    de passe identique — mais il doit être visible, sinon l'utilisateur se verrait
+    communiquer un identifiant qui ne fonctionne pas.
+    """
+    try:
+        client.put(f"/api/user/{user_id}/password", {"password": password})
+        log.info("Mot de passe réaligné : %s", email)
+    except MetabaseError as exc:
+        log.debug("Mot de passe inchangé pour %s (%s)", email, exc)
 
 
 def _memberships(group_id: int) -> list[dict]:
@@ -297,15 +318,22 @@ def apply_collection_permissions(client: MetabaseClient, mapping: dict[int, int]
     groups: dict[str, Any] = graph["groups"]
     collection_ids = {str(collection_id) for collection_id in mapping.values()}
 
+    # On ferme TOUTES les collections connues, pas seulement celles que l'on
+    # vient de créer : sinon le contenu de démonstration livré avec Metabase
+    # resterait ouvert au groupe « All Users », donc à tout le monde.
+    connues = {
+        cle for entree in groups.values() for cle in entree if cle != "root"
+    } | collection_ids
+
     for group_id, collection_id in mapping.items():
         entry = groups.setdefault(str(group_id), {})
         entry["root"] = "none"
-        for other in collection_ids:
-            entry[other] = "read" if other == str(collection_id) else "none"
+        for autre in connues:
+            entry[autre] = "read" if autre == str(collection_id) else "none"
 
     tous = groups.setdefault("1", {})
     tous["root"] = "none"
-    for collection_id in collection_ids:
+    for collection_id in connues:
         tous[collection_id] = "none"
 
     client.put("/api/collection/graph", {"revision": graph["revision"], "groups": groups})
@@ -459,8 +487,12 @@ def provision(config: Config) -> None:
             client, database_ids[usage.key], collection_ids[usage.key], DASHBOARDS[usage.key]
         )
 
+    # Les comptes sont rappelés, les mots de passe non : cette sortie finit dans
+    # `logs/cron.log` en exécution planifiée, et un secret n'a rien à faire dans
+    # un journal. Ils restent lisibles dans `.env`, leur seule source de vérité.
     console.print("[green]✓[/] Metabase provisionné.")
     console.print(f"  [bold]{config.metabase_url}[/]")
-    console.print(f"  pilotage   {config.pilotage_email} / {config.metabase_pilotage_password}")
-    console.print(f"  recherche  {config.recherche_email} / {config.metabase_recherche_password}")
-    console.print(f"  admin      {config.admin_email} / {config.admin_password}")
+    console.print(f"  pilotage   {config.pilotage_email}")
+    console.print(f"  recherche  {config.recherche_email}")
+    console.print(f"  admin      {config.admin_email}")
+    console.print("[dim]  Mots de passe : voir .env (MB_*_PASSWORD).[/]")

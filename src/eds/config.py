@@ -17,9 +17,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 # est généré aléatoirement (openssl rand -hex 32 en produit 64).
 MIN_SALT_LENGTH = 32
 
-# Sel de démonstration livré dans .env.example : accepté (le projet doit tourner
-# après un simple `make demo`) mais signalé, car il n'est pas secret.
-DEMO_SALT = "demo-salt-a-remplacer-par-openssl-rand-hex-32"
+# Valeur de remplissage de .env.example. Elle est publique, donc inutilisable :
+# un sel connu rend le HMAC réversible par simple force brute sur l'espace des
+# identifiants patients. `make env` en génère un aléatoire à la création du
+# fichier ; ce garde-fou couvre le cas d'un .env recopié à la main.
+PLACEHOLDER_SALT = "remplace-moi-par-openssl-rand-hex-32"
 
 
 class ConfigError(RuntimeError):
@@ -50,9 +52,16 @@ class Config:
     metabase_recherche_password: str
 
     @property
-    def uses_demo_salt(self) -> bool:
-        """Vrai si le sel livré en exemple est utilisé tel quel."""
-        return self.salt == DEMO_SALT
+    def uses_weak_passwords(self) -> bool:
+        """Vrai si des mots de passe d'exemple subsistent dans la configuration."""
+        return any(
+            "change_me" in mot_de_passe
+            for mot_de_passe in (
+                self.clickhouse_password,
+                self.pilotage_password,
+                self.recherche_password,
+            )
+        )
 
 
 def load_dotenv(path: Path | None = None) -> None:
@@ -96,6 +105,12 @@ def load_config() -> Config:
         raise ConfigError(
             f"EDS_SALT trop court ({len(salt)} caractères, minimum {MIN_SALT_LENGTH}). "
             "Générez un sel robuste : openssl rand -hex 32"
+        )
+    if salt == PLACEHOLDER_SALT:
+        raise ConfigError(
+            "EDS_SALT vaut encore la valeur d'exemple, qui est publique : "
+            "les pseudonymes seraient réversibles. "
+            "Générez un sel propre à votre installation : openssl rand -hex 32"
         )
 
     source_dir = _resolve(os.environ.get("EDS_SOURCE_DIR", "./source-filestorage"))

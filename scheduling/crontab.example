@@ -2,25 +2,45 @@
 #  EDS CHU — planification de l'ingestion quotidienne
 #
 #  Installation :
-#      crontab -e          puis coller la ligne ci-dessous en adaptant le chemin
+#      crontab -e          puis coller les lignes ci-dessous en adaptant chemin
+#                          et adresse de destination
 #      crontab -l          pour vérifier
 #
-#  Le pipeline est incrémental et idempotent : le relancer sans nouveau dépôt
-#  ne fait rien, et le relancer après un incident reprend là où il faut.
-#  Il rend un code de sortie non nul en cas d'échec, ce qui permet à cron (ou à
-#  une supervision) d'alerter.
+#  Le pipeline est incrémental et idempotent : le relancer sans nouveau dépôt ne
+#  fait rien, et le relancer après un incident reprend là où il faut.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Variables d'environnement (cron démarre avec un PATH minimal).
+# Cron démarre avec un environnement minimal : le PATH doit être explicite.
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin
 
-# Ingestion quotidienne à 02h05, après le dépôt nocturne du CHU.
-5 2 * * * cd /chemin/vers/eds-chu && make pipeline >> logs/cron.log 2>&1
+# Destinataire des alertes. Cron envoie un courriel dès qu'une tâche écrit sur
+# sa sortie — c'est le mécanisme d'alerte natif, et il n'exige aucun outil tiers.
+MAILTO=exploitation@chu.local
 
-# Variante avec notification en cas d'échec (nécessite `mail`) :
-# 5 2 * * * cd /chemin/vers/eds-chu && make pipeline >> logs/cron.log 2>&1 \
-#           || mail -s "[EDS] échec du pipeline" exploitation@chu.local < logs/cron.log
+# ── Ingestion quotidienne, à 02h05, après le dépôt nocturne du CHU ───────────
+#
+# Le pipeline est silencieux quand tout va bien : ses messages partent dans le
+# journal, et seules les erreurs remontent sur la sortie standard. Cron n'envoie
+# donc un courriel qu'en cas de problème.
+#
+# `|| echo` garantit qu'un échec produit une sortie même si le pipeline s'est
+# arrêté sans rien écrire : sans cela, un code de retour non nul passerait
+# inaperçu, cron n'alertant que sur une sortie non vide.
+5 2 * * * cd /chemin/vers/eds-chu && { make pipeline >> logs/cron.log 2>&1 || echo "[EDS] Échec du pipeline — voir logs/cron.log et logs/pipeline.log"; }
 
-# Contrôle hebdomadaire du cloisonnement des accès (lundi 06h00).
-0 6 * * 1 cd /chemin/vers/eds-chu && uv run eds check-cloisonnement >> logs/cron.log 2>&1
+# ── Contrôle hebdomadaire du cloisonnement des accès (lundi 06h00) ───────────
+0 6 * * 1 cd /chemin/vers/eds-chu && { uv run eds check-cloisonnement >> logs/cron.log 2>&1 || echo "[EDS] Cloisonnement non conforme — vérifier les droits ClickHouse"; }
+
+# ── Rotation du journal de cron (1er du mois) ────────────────────────────────
+# `logs/pipeline.log` tourne tout seul (5 Mo × 5 fichiers) ; celui de cron, non.
+0 4 1 * * cd /chemin/vers/eds-chu && mv -f logs/cron.log logs/cron.log.1 2>/dev/null
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Variante sans courriel : superviser le code de retour depuis un outil
+#  externe (Nagios, Zabbix, healthchecks.io…).
+#
+#  5 2 * * * cd /chemin/vers/eds-chu && make pipeline >> logs/cron.log 2>&1 \
+#            && curl -fsS https://hc-ping.com/<uuid> \
+#            || curl -fsS https://hc-ping.com/<uuid>/fail
+# ─────────────────────────────────────────────────────────────────────────────

@@ -36,10 +36,10 @@ def _bootstrap(verbose: bool = False):
         console.print(f"[bold red]Configuration invalide[/] : {exc}")
         raise typer.Exit(code=2) from exc
 
-    if config.uses_demo_salt:
+    if config.uses_weak_passwords:
         console.print(
-            "[yellow]⚠ Sel de démonstration utilisé.[/] Pour un usage réel : "
-            "openssl rand -hex 32 → EDS_SALT dans .env"
+            "[yellow]⚠ Mots de passe d'exemple encore en place.[/] "
+            "Remplacez les valeurs « …_change_me » de .env avant tout usage réel."
         )
     return config
 
@@ -70,9 +70,16 @@ def run_command(
     config = _bootstrap(verbose)
     client = connect(config)
 
-    report = pipeline.run(
-        client, config, only_date=date, full_refresh=full_refresh, force_rebuild=rebuild
-    )
+    try:
+        report = pipeline.run(
+            client, config, only_date=date, full_refresh=full_refresh, force_rebuild=rebuild
+        )
+    except Exception as exc:
+        # L'erreur est déjà journalisée avec sa pile complète ; en sortie
+        # console, une trace Python n'aide personne à décider quoi faire.
+        console.print(f"[bold red]✗ Le pipeline s'est arrêté :[/] {exc}")
+        console.print(f"[dim]Détails et pile d'appels : {log_file_path()}[/]")
+        raise typer.Exit(code=1) from exc
 
     if report.files_ok:
         console.print(

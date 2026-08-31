@@ -42,7 +42,8 @@ Deux usages, **cloisonnés** : pilotage hospitalier et recherche clinique.
 - **Anomalies à écarter** : `discharge_ts < admission_ts` → 44 + 50 + 42 = **136 séjours** (durées négatives ~-0,2 j).
 - **Légitime, à conserver** : `discharge_ts` vide (séjour en cours) → 390 + 407 + 393 = 1 190 séjours.
 - **À conserver avec NULL** : 1 992 séjours ont `discharge_ts` renseigné mais `discharge_mode` vide (et 0 cas inverse). Total `discharge_mode` vide : 3 182.
-- Durées valides : 0 à 12 jours. Réadmissions ≤ 30 j calculables : **491** séjours suivis d'une réadmission (4 150 patients multi-séjours sur 5 366, max 10 séjours).
+- Durées valides : 0 à 12 jours. 4 150 patients multi-séjours sur 5 366, max 10 séjours.
+- ⚠ **Estimation de profilage à ne pas reprendre comme invariant** : un premier comptage donnait 491 réadmissions ≤ 30 j, sur données brutes et avec la définition naïve (« admission chronologiquement suivante »). Après nettoyage et avec la définition retenue (§9.1), le chiffre est **687**. Voir §9.1 pour l'explication de l'écart.
 - **Anomalies « bonus » repérées** (à signaler/flaguer, pas à rejeter) : **220 séjours admis après un décès antérieur** du même patient.
 - **Artefact de données synthétiques** : 8 362 séjours chevauchent le séjour précédent du même patient → **ne pas rejeter** (ce serait >50 % des données), documenter en limite du rapport.
 

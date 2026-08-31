@@ -171,7 +171,10 @@ _PILOTAGE_CARDS = [
     },
     {
         "name": "Nature des alertes par service",
-        "description": "Répartition entre fréquence cardiaque, saturation et température.",
+        "description": (
+            "Nombre d'alertes par type. Un même relevé pouvant déclencher plusieurs "
+            "alertes, le total dépasse le nombre de relevés en alerte."
+        ),
         "display": "bar",
         "sql": (
             "SELECT service_label AS service,\n"
@@ -185,7 +188,8 @@ _PILOTAGE_CARDS = [
         "visualization_settings": {
             "graph.dimensions": ["service"],
             "graph.metrics": ["Fréquence cardiaque", "Saturation (SpO2)", "Température"],
-            "stackable.stack_type": "stacked",
+            # Barres groupées et non empilées : un relevé peut déclencher
+            # plusieurs alertes, un empilement laisserait croire à un total.
             "graph.x_axis.title_text": "Service",
             "graph.y_axis.title_text": "Nombre d'alertes",
         },
@@ -341,13 +345,18 @@ _RECHERCHE_CARDS = [
     },
     {
         "name": "Distribution par âge et sexe",
-        "description": "Pyramide des âges de l'ensemble des cohortes, par tranche de 10 ans.",
+        "description": (
+            "Pyramide des âges de la population suivie, patients comptés une seule fois."
+        ),
         "display": "bar",
+        # Lue depuis la table au grain sexe × âge, et non agrégée depuis la vue
+        # par pathologie : `nb_patients` n'est pas additif, un patient portant
+        # plusieurs diagnostics y serait compté autant de fois.
         "sql": (
             "SELECT tranche_age AS `tranche d'âge`,\n"
             "       sumIf(nb_patients, sexe = 'F') AS Femmes,\n"
             "       sumIf(nb_patients, sexe = 'M') AS Hommes\n"
-            "FROM cohorte_demographie\n"
+            "FROM cohorte_demographie_globale\n"
             "GROUP BY `tranche d'âge`, tranche_age_debut\n"
             "ORDER BY tranche_age_debut"
         ),

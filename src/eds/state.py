@@ -32,6 +32,21 @@ class IngestedFile:
     status: str
 
 
+# Colonnes de ops.pipeline_runs. `updated_at` porte la version : la clôture
+# d'un run doit toujours l'emporter sur son ouverture.
+_RUN_COLUMNS = [
+    "run_id",
+    "started_at",
+    "finished_at",
+    "status",
+    "days_processed",
+    "files_ok",
+    "files_failed",
+    "error",
+    "updated_at",
+]
+
+
 def new_run_id() -> str:
     """Identifiant court et lisible, repris dans les logs et les tables ops."""
     return uuid.uuid4().hex[:12]
@@ -128,17 +143,8 @@ def start_run(client: Client, run_id: str) -> datetime:
     started_at = datetime.now()
     client.insert(
         "ops.pipeline_runs",
-        [[run_id, started_at, None, "running", "", 0, 0, ""]],
-        column_names=[
-            "run_id",
-            "started_at",
-            "finished_at",
-            "status",
-            "days_processed",
-            "files_ok",
-            "files_failed",
-            "error",
-        ],
+        [[run_id, started_at, None, "running", "", 0, 0, "", datetime.now()]],
+        column_names=_RUN_COLUMNS,
     )
     return started_at
 
@@ -155,38 +161,24 @@ def finish_run(
     error: str = "",
 ) -> None:
     """Clôt le run. La ligne remplace la précédente (ReplacingMergeTree)."""
+    fin = datetime.now()
     client.insert(
         "ops.pipeline_runs",
         [
             [
                 run_id,
                 started_at,
-                datetime.now(),
+                fin,
                 status,
                 ", ".join(sorted(days)),
                 files_ok,
                 files_failed,
                 error[:2000],
+                fin,
             ]
         ],
-        column_names=[
-            "run_id",
-            "started_at",
-            "finished_at",
-            "status",
-            "days_processed",
-            "files_ok",
-            "files_failed",
-            "error",
-        ],
+        column_names=_RUN_COLUMNS,
     )
-
-
-def last_run_id(client: Client) -> str | None:
-    rows = client.query(
-        "SELECT run_id FROM ops.pipeline_runs FINAL ORDER BY started_at DESC LIMIT 1"
-    ).result_rows
-    return rows[0][0] if rows else None
 
 
 def last_quality_run_id(client: Client) -> str | None:

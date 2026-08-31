@@ -85,11 +85,15 @@ UNION ALL
 -- ── Q5 · SIGNALEMENT ────────────────────────────────────────────────────────
 SELECT
     '{run_id}', 'silver', 'fact_sejour', 'Q5_mode_sortie_absent',
-    'Séjours dont le mode de sortie n''est pas renseigné',
+    'Séjours sortis dont le mode de sortie n''est pas renseigné',
     (SELECT count() FROM eds_silver.fact_sejour),
     (SELECT count() FROM eds_silver.fact_sejour),
     0,
-    (SELECT countIf(discharge_mode IS NULL) FROM eds_silver.fact_sejour),
+    -- On restreint aux séjours effectivement terminés : un séjour en cours n'a
+    -- pas encore de mode de sortie, et il est déjà compté par la règle Q3.
+    -- Sans ce filtre, les 1 190 séjours ouverts seraient signalés deux fois.
+    (SELECT countIf(discharge_ts IS NOT NULL AND discharge_mode IS NULL)
+     FROM eds_silver.fact_sejour),
     'Information manquante à la source : conservée en NULL, jamais inventée'
 
 UNION ALL

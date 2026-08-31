@@ -28,8 +28,10 @@ log = get_logger(__name__)
 DAY_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _CHUNK_SIZE = 1024 * 1024
 
-# Colonnes directement identifiantes : supprimées à la source, jamais copiées.
-FORBIDDEN_COLUMNS = ("nir", "nom", "prenom", "birth_date")
+# Colonnes directement ou indirectement identifiantes : elles ne sont jamais
+# écrites dans le lake. La liste sert de garde-fou vérifié — `_verifier_sortie`
+# refuse d'écrire un fichier qui en contiendrait une.
+FORBIDDEN_COLUMNS = ("nir", "nom", "prenom", "birth_date", "patient_id")
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,14 +54,17 @@ class CollectResult:
 
     source: SourceFile
     lake_path: Path
-    sha256: str
     rows: int
 
 
-def _sha256(path: Path) -> str:
-    """Empreinte du fichier source : clé d'idempotence de l'ingestion."""
+def checksum(source: SourceFile) -> str:
+    """Empreinte du fichier source : clé d'idempotence de l'ingestion.
+
+    Calculée **avant** toute copie, pour pouvoir décider s'il y a lieu de
+    travailler : un fichier inchangé ne doit être ni recopié ni repseudonymisé.
+    """
     digest = hashlib.sha256()
-    with path.open("rb") as handle:
+    with source.path.open("rb") as handle:
         while chunk := handle.read(_CHUNK_SIZE):
             digest.update(chunk)
     return digest.hexdigest()
@@ -91,6 +96,20 @@ def _copy_verbatim(source: Path, target: Path) -> int:
     return _atomic_write(target, write)
 
 
+def _verifier_sortie(fieldnames: list[str]) -> None:
+    """Refuse d'écrire un fichier dont l'en-tête porterait une colonne interdite.
+
+    Garde-fou de dernier recours : une évolution maladroite d'un collecteur ne
+    doit pas pouvoir faire entrer une donnée identifiante dans le lake.
+    """
+    interdites = sorted(set(fieldnames) & set(FORBIDDEN_COLUMNS))
+    if interdites:
+        raise ValueError(
+            "Colonne(s) identifiante(s) dans la sortie du lake : "
+            f"{', '.join(interdites)}. Elles ne doivent jamais quitter la source."
+        )
+
+
 def _transform_csv(
     source: Path,
     target: Path,
@@ -98,6 +117,7 @@ def _transform_csv(
     transform: Callable[[dict[str, str]], dict[str, object] | None],
 ) -> int:
     """Réécrit un CSV ligne à ligne en appliquant `transform`."""
+    _verifier_sortie(fieldnames)
 
     def write(tmp: Path) -> int:
         rows = 0
@@ -201,7 +221,6 @@ def discover(config: Config) -> Iterator[SourceFile]:
 def collect(source: SourceFile, config: Config) -> CollectResult:
     """Copie un fichier vers le lake en appliquant la pseudonymisation requise."""
     lake_path = config.lake_dir / source.domain / source.ingest_date / source.relative_name
-    checksum = _sha256(source.path)
 
     collector = _COLLECTORS.get(source.domain)
     if collector is None:
@@ -211,7 +230,7 @@ def collect(source: SourceFile, config: Config) -> CollectResult:
         rows = collector(source.path, lake_path, config)
         log.debug("Copie pseudonymisée : %s (%s lignes)", source.label, rows)
 
-    return CollectResult(source=source, lake_path=lake_path, sha256=checksum, rows=rows)
+    return CollectResult(source=source, lake_path=lake_path, rows=rows)
 
 
 def lake_relative_path(source: SourceFile) -> str:

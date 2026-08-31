@@ -158,28 +158,42 @@ def _ingest(
     only_date: str | None,
 ) -> None:
     """Collecte puis charge chaque fichier à traiter, en isolant les échecs."""
-    for source in collect_module.discover(config):
-        if only_date and source.ingest_date != only_date:
-            continue
+    fichiers = list(collect_module.discover(config))
 
+    if only_date:
+        fichiers = [f for f in fichiers if f.ingest_date == only_date]
+        if not fichiers:
+            # Le rejeu d'un jour est un geste de reprise sur incident : une faute
+            # de frappe dans la date ne doit pas ressembler à une reprise réussie.
+            jours = sorted({f.ingest_date for f in collect_module.discover(config)})
+            raise ValueError(
+                f"Aucun fichier déposé le {only_date}. "
+                f"Jours disponibles : {', '.join(jours) or 'aucun'}"
+            )
+
+    for source in fichiers:
         file_started = datetime.now()
         try:
-            result = collect_module.collect(source, config)
+            # L'empreinte est calculée sur le fichier source, donc avant toute
+            # copie : un fichier inchangé n'est ni recopié ni repseudonymisé.
+            # Sur un dépôt volumineux, c'est ce qui rend le run à vide gratuit.
+            empreinte = collect_module.checksum(source)
 
-            do_load, reason = state.needs_ingestion(source, result.sha256, journal)
+            do_load, reason = state.needs_ingestion(source, empreinte, journal)
             if not do_load:
                 report.files_skipped += 1
                 log.debug("%s : %s", source.label, reason)
                 continue
 
             log.info("%s : %s", source.label, reason)
+            result = collect_module.collect(source, config)
             rows_loaded = load_bronze.load(client, source)
 
             state.record_ingestion(
                 client,
                 run_id=report.run_id,
                 source=source,
-                checksum=result.sha256,
+                checksum=empreinte,
                 rows_source=result.rows,
                 rows_loaded=rows_loaded,
                 status="success",

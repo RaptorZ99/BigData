@@ -260,19 +260,44 @@ def test_acces_autorise_a_son_perimetre(config, user_key, base_autorisee):
 
 
 # ── Traçabilité ─────────────────────────────────────────────────────────────
-def test_toutes_les_lignes_portent_leur_lignage(client):
-    """Chaque ligne doit savoir de quel fichier et de quel jour elle vient."""
-    for database, table in (
-        ("eds_bronze", "sejours"),
-        ("eds_silver", "fact_sejour"),
-        ("eds_silver", "fact_monitoring"),
-    ):
-        sans_lignage = scalar(
-            client,
-            f"SELECT countIf(_source_file = '' OR _ingest_date = toDate(0)) "
-            f"FROM {database}.{table}",
-        )
-        assert sans_lignage == 0, f"{database}.{table}"
+LIGNAGE_ATTENDU = [
+    ("eds_bronze", table)
+    for table in ("patients", "sejours", "diagnostics", "monitoring", "services", "cim10")
+] + [
+    ("eds_silver", table)
+    for table in (
+        "dim_patient",
+        "dim_service",
+        "dim_cim10",
+        "fact_sejour",
+        "fact_diagnostic",
+        "fact_monitoring",
+        "sejours_rejets",
+        "monitoring_rejets",
+    )
+]
+
+
+@pytest.mark.parametrize(("database", "table"), LIGNAGE_ATTENDU)
+def test_toutes_les_lignes_portent_leur_lignage(client, database, table):
+    """Sans exception : chaque ligne sait de quel fichier et de quel jour elle vient.
+
+    Le contrôle couvre les quatorze tables de bronze et de silver — dimensions
+    comprises — pour que l'affirmation du rapport reste vérifiable.
+    """
+    colonnes = scalar(
+        client,
+        "SELECT count() FROM system.columns "
+        f"WHERE database = '{database}' AND table = '{table}' "
+        "  AND name IN ('_source_file', '_ingest_date')",
+    )
+    assert colonnes == 2, f"{database}.{table} n'a pas ses colonnes de lignage"
+
+    sans_lignage = scalar(
+        client,
+        f"SELECT countIf(_source_file = '' OR _ingest_date = toDate(0)) FROM {database}.{table}",
+    )
+    assert sans_lignage == 0, f"{database}.{table}"
 
 
 def test_l_ingestion_est_journalisee(client):

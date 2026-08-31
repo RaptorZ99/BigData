@@ -25,20 +25,30 @@ ORDER BY (domain, ingest_date, source_file)
 COMMENT 'Journal d''ingestion : idempotence par checksum et traçabilité fichier → table';
 
 -- Historique des exécutions du pipeline (une ligne par `eds run`).
+--
+-- La colonne de version est `updated_at`, et non `started_at` : un run écrit une
+-- première ligne à son ouverture puis une seconde à sa clôture, toutes deux avec
+-- le même `started_at`. Une version identique laisserait la déduplication choisir
+-- arbitrairement, et un run terminé pourrait rester affiché « running ».
 CREATE TABLE IF NOT EXISTS ops.pipeline_runs
 (
     run_id         String,
     started_at     DateTime,
     finished_at    Nullable(DateTime),
     status         Enum8('running' = 1, 'success' = 2, 'failed' = 3, 'partial' = 4),
-    days_processed String DEFAULT '',
-    files_ok       UInt32 DEFAULT 0,
-    files_failed   UInt32 DEFAULT 0,
-    error          String DEFAULT ''
+    days_processed String   DEFAULT '',
+    files_ok       UInt32   DEFAULT 0,
+    files_failed   UInt32   DEFAULT 0,
+    error          String   DEFAULT '',
+    updated_at     DateTime DEFAULT now() COMMENT 'Version : la dernière écriture gagne'
 )
-ENGINE = ReplacingMergeTree(started_at)
+ENGINE = ReplacingMergeTree(updated_at)
 ORDER BY run_id
 COMMENT 'Exécutions du pipeline : quand, quoi, et avec quel résultat';
+
+ALTER TABLE ops.pipeline_runs
+    ADD COLUMN IF NOT EXISTS updated_at DateTime DEFAULT now()
+    COMMENT 'Version : la dernière écriture gagne';
 
 -- Rapport qualité : combien de lignes lues, gardées, écartées, par règle.
 -- C'est ce qui permet de justifier chaque chiffre des dashboards.

@@ -17,10 +17,14 @@ help: ## Affiche cette aide
 
 $(ENV_FILE):
 	@cp .env.example $(ENV_FILE)
-	@echo "→ .env créé depuis .env.example."
-	@echo "  ⚠ Pensez à y mettre un vrai sel : openssl rand -hex 32"
+	@# Le sel protège l'identité des patients : il est tiré au hasard dès la
+	@# création du fichier, plutôt que laissé à une valeur d'exemple publique.
+	@SALT=$$(openssl rand -hex 32); \
+	 sed -i.bak "s|^EDS_SALT=.*|EDS_SALT=$$SALT|" $(ENV_FILE) && rm -f $(ENV_FILE).bak
+	@echo "→ .env créé, avec un sel de pseudonymisation généré aléatoirement."
+	@echo "  ⚠ Remplacez aussi les mots de passe '..._change_me' avant tout usage réel."
 
-env: $(ENV_FILE) ## Crée .env depuis .env.example s'il n'existe pas
+env: $(ENV_FILE) ## Crée .env (avec un sel généré) s'il n'existe pas
 
 up: env ## Démarre ClickHouse + Metabase, puis provisionne l'entrepôt
 	@# Le lake doit exister avant le démarrage : Docker le monte dans ClickHouse,
@@ -89,4 +93,6 @@ reset: ## ⚠ Détruit conteneurs, volumes et zone de travail (source intacte)
 	 [ "$$ok" = "y" ] || { echo "Annulé."; exit 1; }
 	docker compose down -v
 	rm -rf data logs
-	@echo "→ Réinitialisé. `make demo` repart de zéro."
+	@# Guillemets simples : entre guillemets doubles, bash interpréterait les
+	@# accents graves comme une substitution de commande et relancerait la démo.
+	@echo '→ Réinitialisé. Lancez `make demo` pour repartir de zéro.'

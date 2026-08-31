@@ -34,13 +34,13 @@ indiquez son chemin dans `EDS_SOURCE_DIR`.
 
 ```bash
 git clone <url-du-depot> && cd eds-chu
-cp .env.example .env
-
-# Pour un usage réel, remplacez le sel de démonstration :
-#   openssl rand -hex 32   →   EDS_SALT dans .env
-
 make demo
 ```
+
+`make demo` crée au passage le fichier `.env` et **y génère un sel de pseudonymisation
+aléatoire** : les pseudonymes de votre installation ne sont donc dérivables par personne
+d'autre. Pensez seulement à remplacer les mots de passe `…_change_me` avant tout usage réel
+— le pipeline vous le rappelle à chaque exécution tant que c'est le cas.
 
 `make demo` démarre ClickHouse et Metabase, provisionne l'entrepôt, ingère les trois jours
 de dépôt, construit les indicateurs et crée les deux dashboards. Comptez deux à trois
@@ -119,8 +119,10 @@ Le modèle de données détaillé est dans **[`docs/img/eds-data-model.png`](doc
 | **ops** | Exploitation | Journal d'ingestion, historique des runs, rapport qualité chiffré |
 
 **Les transformations s'exécutent en SQL dans ClickHouse.** Python copie des fichiers et
-envoie des requêtes ; les données ne transitent jamais par sa mémoire. C'est ce qui permet
-au flux de monitoring — de loin le plus volumineux — de passer à l'échelle.
+envoie des requêtes ; aucune donnée métier ne remonte côté client pour y être transformée.
+Seuls les deux CSV à pseudonymiser traversent Python, en flux ligne à ligne, à mémoire
+constante. Le monitoring — de loin le flux le plus volumineux — est lu directement par le
+moteur : c'est ce qui permet à la chaîne de passer à l'échelle.
 
 ---
 
@@ -146,7 +148,7 @@ La commande `eds` offre un contrôle plus fin :
 ```bash
 uv run eds run --date 2026-08-27     # rejoue un jour précis (reprise sur incident)
 uv run eds run --full-refresh        # recharge tout depuis la source
-uv run eds run --rebuild             # reconstruit silver et gold sans réingérer
+uv run eds run --rebuild             # reconstruit silver et gold (après modification du SQL)
 uv run eds check-cloisonnement       # vérifie les droits d'accès dans ClickHouse
 uv run eds --help
 ```
@@ -195,7 +197,7 @@ uv run eds --help
 | **Minimisation** | NIR, nom et prénom ne sont jamais copiés ; la date de naissance est réduite à l'année ; la table des constantes ne porte même pas de pseudonyme, aucun indicateur n'en ayant besoin. |
 | **Cloisonnement** | Deux comptes SQL ClickHouse en lecture seule sur leur seule base gold, deux connexions et deux collections Metabase. Une requête écrite à la main ne franchit pas la frontière : c'est le moteur qui refuse. |
 | **Petits effectifs** | `HAVING uniqExact(patient_pseudo) >= 5` sur chaque cellule diffusée en recherche ; âges en tranches de dix ans. L'effet est mesuré et affiché : 4 cellules retirées sur 1 600 au grain le plus fin. |
-| **Traçabilité** | Chaque ligne porte son fichier d'origine, son jour de dépôt et son horodatage de chargement. Chaque exécution est journalisée, chaque règle qualité chiffrée. |
+| **Traçabilité** | Chaque ligne de bronze et de silver porte son fichier d'origine, son jour de dépôt et son horodatage de traitement. Les tables gold sont des agrégats : elles se rattachent à leur run via `ops.quality_report`. Chaque exécution est journalisée, chaque règle qualité chiffrée. |
 
 ---
 

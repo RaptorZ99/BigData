@@ -298,10 +298,14 @@ en §5.3.
 
 ### 4.3 Traçabilité
 
-Chaque ligne de bronze et de silver porte trois colonnes de lignage : le fichier dont elle
-provient, le jour de dépôt correspondant, et l'horodatage de son chargement. Chaque
-exécution du pipeline est enregistrée avec son identifiant, son statut et les jours
-traités. Chaque règle de qualité produit un comptage.
+Chaque ligne de bronze et de silver — les huit tables, dimensions comprises — porte trois
+colonnes de lignage : le fichier dont elle provient, le jour de dépôt correspondant, et
+l'horodatage de son traitement. Les tables gold, qui sont des agrégats, n'ont pas de ligne
+individuelle à tracer : elles se rattachent à leur exécution par `ops.quality_report`.
+
+Chaque exécution du pipeline est enregistrée avec son identifiant, son statut et les jours
+traités ; `ops.ingest_log` relie chaque fichier au run qui l'a chargé. Chaque règle de
+qualité produit un comptage.
 
 Concrètement, cela permet de répondre à « d'où sort ce 14 864 ? » sans ouvrir un seul
 fichier : le tableau de bord de pilotage affiche le rapport qualité, et le journal

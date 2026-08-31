@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from eds.collect import collect, discover
+from eds.collect import checksum, collect, discover
 from eds.config import Config
 from eds.pseudo import PSEUDO_PATTERN, pseudonymize_id
 
@@ -83,6 +83,19 @@ def test_les_anomalies_ne_sont_pas_filtrees_a_la_collecte(config: Config):
 
 def test_le_checksum_source_est_calcule(config: Config):
     """Il sert de clé d'idempotence dans ops.ingest_log."""
-    resultats = [collect(source, config) for source in discover(config)]
-    assert all(len(r.sha256) == 64 for r in resultats)
-    assert len({r.sha256 for r in resultats}) == len(resultats)
+    empreintes = [checksum(source) for source in discover(config)]
+    assert all(len(e) == 64 for e in empreintes)
+    assert len(set(empreintes)) == len(empreintes)
+
+
+def test_le_checksum_ne_depend_pas_de_la_collecte(config: Config):
+    """Il porte sur le fichier source : on peut décider avant de copier quoi que ce soit.
+
+    C'est ce qui rend un run sans nouveau dépôt réellement gratuit — ni copie,
+    ni repseudonymisation.
+    """
+    source = next(iter(discover(config)))
+    avant = checksum(source)
+    collect(source, config)
+    assert checksum(source) == avant
+    assert not (config.lake_dir / "inexistant").exists()
