@@ -193,16 +193,23 @@ uv run eds --help
 │   ├── test_pipeline.py    dépôt incomplet, échec partiel, couche en retard
 │   ├── test_dashboards.py  mise en page : chevauchements, titres, tables visées
 │   └── test_e2e.py         invariants de l'entrepôt (nécessite Docker)
-├── docs/
+├── docs/                 Toute la documentation
 │   ├── RAPPORT.md          dossier d'analyse et de conception (Partie 1)
 │   ├── EXPLOITATION.md     lancement, maintenance, reprise sur incident (Partie 2)
+│   ├── PLAN.md             plan d'implémentation et profilage des sources
+│   ├── CONVENTIONS.md      règles du projet et pièges rencontrés
+│   ├── FICHE-SUJET.md      énoncé de l'épreuve
 │   ├── data-model.puml     modèle de données (source PlantUML)
 │   └── img/                diagramme rendu et captures des tableaux de bord
 ├── .github/workflows/    Intégration continue (style, tests, invariants)
 ├── benchmarks/           Banc d'essai de tenue en charge (20 M de relevés)
 ├── scheduling/           Exemple de planification cron
-└── PLAN.md               Plan d'implémentation détaillé
+└── CLAUDE.md             Configuration Claude Code (importe docs/CONVENTIONS.md)
 ```
+
+La racine ne porte que le `README`, la configuration (`Makefile`, `docker-compose.yml`,
+`pyproject.toml`, `CLAUDE.md`) et les répertoires de code. **Toute la documentation vit dans
+`docs/`.**
 
 ---
 
@@ -248,4 +255,7 @@ de santé. Localement, `make test-e2e` les exécute tous.
   définition de chaque indicateur, gouvernance, limites et recommandations.
 - **[docs/EXPLOITATION.md](docs/EXPLOITATION.md)** — mise en service, exploitation
   quotidienne, supervision, reprise sur incident, maintenance.
-- **[PLAN.md](PLAN.md)** — plan d'implémentation et profilage détaillé des sources.
+- **[docs/PLAN.md](docs/PLAN.md)** — plan d'implémentation et profilage détaillé des sources.
+- **[docs/CONVENTIONS.md](docs/CONVENTIONS.md)** — règles impératives du projet, pièges des
+  données et pièges techniques rencontrés à l'implémentation.
+- **[docs/FICHE-SUJET.md](docs/FICHE-SUJET.md)** — l'énoncé de l'épreuve.

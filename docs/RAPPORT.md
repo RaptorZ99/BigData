@@ -889,4 +889,4 @@ définitions SQL, éviterait les désaccords ultérieurs.
 - [Modèle de données détaillé](img/eds-data-model.png) — également en
   [vectoriel](img/eds-data-model.svg), lisible à toute échelle à l'impression
 - [Documentation d'exploitation](EXPLOITATION.md)
-- [Plan d'implémentation et profilage complet](../PLAN.md)
+- [Plan d'implémentation et profilage complet](PLAN.md)

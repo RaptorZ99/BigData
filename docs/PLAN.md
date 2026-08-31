@@ -1,8 +1,8 @@
 # PLAN.md — Entrepôt de Données de Santé (EDS) du CHU
 
-> **Plan d'implémentation autosuffisant.** Ce document contient tout le contexte nécessaire : le besoin, le profilage complet des données sources (déjà réalisé — ne pas le refaire), les décisions d'architecture justifiées, les résultats des recherches techniques (versions, API, pièges), les spécifications détaillées de chaque composant, l'ordre d'implémentation et les critères d'acceptation. Le sujet officiel est dans `FICHE-SUJET.md`, les règles impératives dans `CLAUDE.md`.
+> **Plan d'implémentation autosuffisant.** Ce document contient tout le contexte nécessaire : le besoin, le profilage complet des données sources (déjà réalisé — ne pas le refaire), les décisions d'architecture justifiées, les résultats des recherches techniques (versions, API, pièges), les spécifications détaillées de chaque composant, l'ordre d'implémentation et les critères d'acceptation. Le sujet officiel est dans [`FICHE-SUJET.md`](FICHE-SUJET.md), les règles impératives dans [`CONVENTIONS.md`](CONVENTIONS.md).
 >
-> **Statut : plan exécuté.** Le projet est livré. Ce document reste la référence pour le *profilage* des sources (§2) et pour les *décisions* d'architecture (§3) — deux choses que l'implémentation n'a pas remises en cause. En revanche, **les chiffres publiés font foi dans [`docs/RAPPORT.md`](docs/RAPPORT.md)** : l'implémentation a corrigé deux points que ce plan n'avait pas anticipés, signalés ci-dessous à chaque occurrence.
+> **Statut : plan exécuté.** Le projet est livré. Ce document reste la référence pour le *profilage* des sources (§2) et pour les *décisions* d'architecture (§3) — deux choses que l'implémentation n'a pas remises en cause. En revanche, **les chiffres publiés font foi dans [`RAPPORT.md`](RAPPORT.md)** : l'implémentation a corrigé deux points que ce plan n'avait pas anticipés, signalés ci-dessous à chaque occurrence.
 >
 > 1. **Le taux de réadmission ne se lit pas sans sa fenêtre d'observation.** Le plan prévoyait « 687 / 11 678 = 5,9 % ». Ce ratio est arithmétiquement exact et métier faux : 88 % du dénominateur est constitué de sorties postérieures à la dernière admission connue, qui ne peuvent structurellement rien constater. Le chiffre publié est **687 / 1 421 sorties observables = 48,3 %**, assorti de sa couverture de 12,2 % (rapport §5.3).
 > 2. **Le k-anonymat appelait une suppression complémentaire.** Appliquer le seuil séparément à une marge et à sa décomposition laisse retrouver la cellule cachée par soustraction (rapport §7.2).
@@ -21,7 +21,7 @@ Deux usages, **cloisonnés** : pilotage hospitalier et recherche clinique.
 
 **Stack** : ClickHouse (Docker) = entrepôt · Python (uv) = orchestrateur · Metabase (Docker) = dashboards.
 
-**Principes non négociables** (détaillés dans `CLAUDE.md`) :
+**Principes non négociables** (détaillés dans [`CONVENTIONS.md`](CONVENTIONS.md)) :
 - Toute transformation bronze→silver→gold est du **SQL exécuté dans ClickHouse**. Python copie des fichiers et envoie des requêtes, rien d'autre. Pas de pandas.
 - **Aucune donnée identifiante n'entre dans l'entrepôt** : pseudonymisation à l'entrée du lake (bonus du sujet, à implémenter).
 - **Idempotence** : relancer le pipeline ne duplique jamais rien.
@@ -146,9 +146,10 @@ Le modèle de données complet (bronze typé, **silver en constellation** — 3 
 ```
 .
 ├── README.md                  # quickstart, archi, démo — spec §14
-├── CLAUDE.md                  # règles projet (existe déjà)
-├── PLAN.md                    # ce document
-├── FICHE-SUJET.md             # sujet (existe déjà)
+├── CLAUDE.md                  # 3 lignes : importe docs/CONVENTIONS.md
+├── docs/CONVENTIONS.md        # règles projet et pièges rencontrés
+├── docs/PLAN.md               # ce document
+├── docs/FICHE-SUJET.md        # sujet
 ├── .gitignore                 # existe déjà (source-filestorage/, data/, .env exclus)
 ├── .env.example               # toutes les variables, valeurs de démo
 ├── docker-compose.yml
@@ -592,7 +593,7 @@ Commits : Conventional Commits, un commit par phase minimum (`feat(collect): …
 | Restitution | 2 dashboards provisionnés automatiquement, adaptés à chaque public |
 | Automatisation | CLI incrémentale idempotente, cron, gestion d'erreurs, exit codes, logs, ops.* |
 | RGPD / gouvernance | Pseudonymisation à l'entrée du lake (bonus ★), minimisation, RBAC double niveau, k≥5, traçabilité complète |
-| Documentation | README + RAPPORT + EXPLOITATION + CLAUDE.md + ce plan |
+| Documentation | README + docs/RAPPORT + docs/EXPLOITATION + docs/CONVENTIONS + ce plan |
 
 ---
 
