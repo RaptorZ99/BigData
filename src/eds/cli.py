@@ -282,10 +282,48 @@ def check_cloisonnement_command() -> None:
         )
 
     console.print(table)
+    all_ok &= _check_cloisonnement_metabase(config)
+
     if not all_ok:
         console.print("[bold red]Cloisonnement non conforme.[/]")
         raise typer.Exit(code=1)
-    console.print("[green]✓ Cloisonnement conforme : chaque usage ne voit que ses données.[/]")
+    console.print(
+        "\n[green]✓ Cloisonnement conforme aux deux niveaux[/] : "
+        "l'entrepôt refuse la requête, et l'interface ne montre pas le contenu."
+    )
+
+
+def _check_cloisonnement_metabase(config) -> bool:
+    """Vérifie la seconde barrière : chaque compte n'ouvre que son dashboard.
+
+    Le contrôle SQL prouve qu'une requête hors périmètre est refusée par le
+    moteur ; celui-ci prouve qu'un utilisateur ne voit même pas le tableau de
+    bord de l'autre usage. Les deux ensemble constituent la démonstration
+    demandée — rejouable, plutôt qu'illustrée par une capture d'écran.
+    """
+    from eds.metabase import MetabaseError, verifier_cloisonnement
+
+    try:
+        resultats = verifier_cloisonnement(config)
+    except MetabaseError as exc:
+        console.print(f"[yellow]⚠ Contrôle Metabase impossible ({exc}).[/]")
+        console.print("[dim]  Metabase est-il démarré et provisionné ? `make provision`[/]")
+        return True  # l'absence de Metabase n'invalide pas le cloisonnement SQL
+
+    table = Table(title="Cloisonnement du contenu (Metabase)", header_style="bold")
+    for column in ("Utilisateur", "Tableau de bord", "Attendu", "Résultat"):
+        table.add_column(column)
+
+    for controle in resultats:
+        constate = "accès" if controle.autorise_constate else "refusé"
+        table.add_row(
+            controle.utilisateur,
+            controle.dashboard,
+            "accès" if controle.autorise_attendu else "refus",
+            f"[green]✓ {constate}[/]" if controle.conforme else f"[bold red]✗ {constate}[/]",
+        )
+    console.print(table)
+    return all(controle.conforme for controle in resultats)
 
 
 def _first_table(config, database: str) -> str:

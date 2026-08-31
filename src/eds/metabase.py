@@ -150,7 +150,7 @@ class MetabaseClient:
             )
             token = session.get("id") if isinstance(session, dict) else None
         else:
-            log.info("Instance déjà configurée : connexion.")
+            log.debug("Instance déjà configurée : connexion de %s.", email)
             token = self.post("/api/session", {"username": email, "password": password})["id"]
 
         if not token:
@@ -442,6 +442,66 @@ def ensure_dashboard(
     client.put(f"/api/dashboard/{dashboard_id}", {"dashcards": dashcards})
     log.info("Dashboard prêt : %s (%d éléments)", spec["name"], len(dashcards))
     return dashboard_id
+
+
+@dataclass(frozen=True, slots=True)
+class ControleAcces:
+    """Résultat d'une tentative d'accès à un tableau de bord."""
+
+    utilisateur: str
+    dashboard: str
+    autorise_attendu: bool
+    autorise_constate: bool
+
+    @property
+    def conforme(self) -> bool:
+        return self.autorise_attendu == self.autorise_constate
+
+
+def verifier_cloisonnement(config: Config) -> list[ControleAcces]:
+    """Tente, pour chaque utilisateur, d'ouvrir les deux tableaux de bord.
+
+    C'est la démonstration attendue par le sujet, sous une forme rejouable : on
+    se connecte réellement avec chaque compte et on interroge l'API comme le
+    ferait le navigateur. Un refus se traduit par un code HTTP 403.
+    """
+    admin = MetabaseClient(config.metabase_url)
+    admin.wait_until_ready()
+    admin.authenticate(config.admin_email, config.admin_password)
+
+    dashboards = {
+        DASHBOARDS[usage.key]["name"]: usage.key
+        for usage in USAGES
+        if _find_by(admin.get("/api/dashboard") or [], "name", DASHBOARDS[usage.key]["name"])
+    }
+    identifiants = {
+        "pilotage": (config.pilotage_email, config.metabase_pilotage_password),
+        "recherche": (config.recherche_email, config.metabase_recherche_password),
+    }
+
+    resultats: list[ControleAcces] = []
+    for usage in USAGES:
+        email, mot_de_passe = identifiants[usage.key]
+        client = MetabaseClient(config.metabase_url)
+        client.authenticate(email, mot_de_passe)
+
+        for nom, proprietaire in dashboards.items():
+            identifiant = _find_by(admin.get("/api/dashboard") or [], "name", nom)["id"]
+            try:
+                client.get(f"/api/dashboard/{identifiant}")
+                autorise = True
+            except MetabaseError:
+                autorise = False
+
+            resultats.append(
+                ControleAcces(
+                    utilisateur=email,
+                    dashboard=nom,
+                    autorise_attendu=(proprietaire == usage.key),
+                    autorise_constate=autorise,
+                )
+            )
+    return resultats
 
 
 def provision(config: Config) -> None:

@@ -59,10 +59,11 @@ installation, lus dans `.env` :
 Les mots de passe correspondants sont ceux de votre fichier `.env` ; ils ne sont écrits
 nulle part ailleurs, pour qu'ils ne puissent pas devenir faux.
 
-> **Démonstration du cloisonnement** : connectez-vous en `pilotage`, puis tentez d'ouvrir le
-> dashboard de recherche — l'accès est refusé, et réciproquement. La barrière n'est pas
-> seulement dans Metabase : `uv run eds check-cloisonnement` prouve que le refus vient de
-> ClickHouse lui-même.
+> **Démonstration du cloisonnement** : `uv run eds check-cloisonnement` teste les deux
+> barrières et affiche le résultat — ClickHouse refuse la requête hors périmètre, et
+> Metabase refuse l'ouverture du tableau de bord de l'autre usage. Vous pouvez le
+> constater vous-même : connectez-vous en `pilotage`, puis tentez d'ouvrir le dashboard
+> de recherche.
 
 ---
 
@@ -149,7 +150,8 @@ La commande `eds` offre un contrôle plus fin :
 uv run eds run --date 2026-08-27     # rejoue un jour précis (reprise sur incident)
 uv run eds run --full-refresh        # recharge tout depuis la source
 uv run eds run --rebuild             # reconstruit silver et gold (après modification du SQL)
-uv run eds check-cloisonnement       # vérifie les droits d'accès dans ClickHouse
+uv run eds check-cloisonnement       # prouve le cloisonnement aux deux niveaux
+uv run benchmarks/charge_monitoring.py   # mesure la tenue en charge du monitoring
 uv run eds --help
 ```
 
@@ -183,6 +185,7 @@ uv run eds --help
 │   ├── RAPPORT.md          dossier d'analyse et de conception
 │   ├── EXPLOITATION.md     lancement, maintenance, reprise sur incident
 │   └── data-model.puml     modèle de données
+├── benchmarks/           Banc d'essai de tenue en charge (20 M de relevés)
 ├── scheduling/           Exemple de planification cron
 └── PLAN.md               Plan d'implémentation détaillé
 ```

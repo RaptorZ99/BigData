@@ -242,6 +242,25 @@ def test_acces_refuse_hors_de_son_perimetre(config, user_key, base_interdite):
         restreint.query(f"SELECT count() FROM {base_interdite}.fact_sejour")
 
 
+def test_cloisonnement_du_contenu_dans_metabase(config):
+    """Seconde barrière : un compte n'ouvre pas le tableau de bord de l'autre usage.
+
+    Le contrôle SQL prouve que le moteur refuse la requête ; celui-ci prouve que
+    l'interface ne montre même pas le contenu. C'est la démonstration demandée
+    par le sujet, sous une forme rejouable.
+    """
+    from eds.metabase import MetabaseError, verifier_cloisonnement
+
+    try:
+        resultats = verifier_cloisonnement(config)
+    except MetabaseError as exc:
+        pytest.skip(f"Metabase indisponible : {exc}")
+
+    assert len(resultats) == 4, "deux utilisateurs × deux tableaux de bord"
+    non_conformes = [f"{c.utilisateur} → {c.dashboard}" for c in resultats if not c.conforme]
+    assert not non_conformes, f"accès non conformes : {non_conformes}"
+
+
 @pytest.mark.parametrize(
     ("user_key", "base_autorisee"),
     [("pilotage", "eds_gold_pilotage"), ("recherche", "eds_gold_recherche")],

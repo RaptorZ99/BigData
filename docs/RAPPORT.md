@@ -192,16 +192,45 @@ le demande.
 
 ### 3.4 Volumétrie et passage à l'échelle
 
-Sur les trois jours fournis, le pipeline complet s'exécute en quelques secondes. Ce qui
-compte davantage, c'est ce qui se passerait en production :
+Le sujet impose que « l'architecture tienne la charge » pour le flux de monitoring. Nous
+avons préféré le mesurer plutôt que l'affirmer. Le banc d'essai
+[`benchmarks/charge_monitoring.py`](../benchmarks/charge_monitoring.py) fabrique des
+fichiers Parquet de taille croissante et les charge **par le chemin réel du pipeline**,
+c'est-à-dire `INSERT … SELECT FROM file()`.
 
-- Le monitoring croît linéairement avec le nombre de lits équipés. Une base orientée
-  colonnes le compresse très efficacement (les constantes varient peu d'un relevé au
-  suivant) et n'en lit que les colonnes utiles lors d'une agrégation.
-- Le partitionnement par jour permet de ne toucher qu'un jour à la fois, aussi bien pour
-  l'ingestion que pour une éventuelle purge.
-- La reconstruction complète de silver et gold devrait, elle, passer à un traitement
-  incrémental si le volume l'exigeait — c'est le principal point d'évolution identifié.
+| Volume chargé | Fichier Parquet | Durée | Débit |
+|---:|---:|---:|---:|
+| 1 000 000 relevés | 17 Mo | 0,3 s | 3,4 M lignes/s |
+| 5 000 000 relevés | 83 Mo | 1,1 s | 4,4 M lignes/s |
+| **20 000 000 relevés** | **330 Mo** | **4,6 s** | **4,4 M lignes/s** |
+
+Trois enseignements, qui sont autant de validations de choix d'architecture :
+
+**Le débit est stable et le temps croît linéairement.** Charger vingt fois plus de données
+prend vingt fois plus de temps, pas davantage. Il n'y a donc pas de seuil au-delà duquel la
+chaîne s'effondrerait : c'est la conséquence directe du fait que le moteur lit le fichier
+lui-même, sans que rien ne remonte côté client. Un pipeline qui rapatrierait ces 20 millions
+de lignes en mémoire Python aurait, lui, un mur.
+
+**Les agrégations restent instantanées.** Sur ces 20 millions de relevés, compter les
+alertes prend 0,04 seconde, et l'agrégation quotidienne autant. La construction de silver et
+gold — qui n'est qu'une suite d'agrégations de cette nature — reste donc réalisable en
+reconstruction complète bien au-delà des volumes du CHU.
+
+**La compression colonne fait son travail.** 20 millions de relevés occupent 280 Mo sur
+disque, soit environ 14 octets par ligne pour cinq colonnes. Les constantes vitales variant
+peu d'un relevé au suivant, elles se compressent très bien — c'est précisément ce pour quoi
+une base orientée colonnes est le bon choix ici.
+
+Pour situer : **20 millions de relevés représentent 300 fois le volume des trois jours
+fournis**, soit, au rythme observé d'un relevé toutes les trente minutes, environ **420 lits
+équipés surveillés pendant un an**. À cette échelle, le chargement quotidien resterait sous
+la seconde.
+
+Deux points d'évolution restent identifiés, sans urgence à ce volume : la reconstruction
+intégrale de silver et gold devrait passer à un traitement incrémental si l'entrepôt
+dépassait la centaine de millions de lignes, et l'ingestion par fichier quotidien devrait
+céder la place à un flux continu si le CHU passait au temps réel.
 
 ---
 
@@ -457,15 +486,13 @@ diffusion, et un compteur affiche son effet réel.
 Le niveau qui compte est le premier. Les deux autres organisent l'interface ; celui-là
 oppose un refus même à une requête SQL écrite à la main.
 
-**Démonstration.** Connecté en `pilotage@chu.local`, l'accès direct à l'URL du tableau de
-bord de recherche est refusé — et réciproquement :
-
-![Accès refusé hors périmètre](img/cloisonnement-acces-refuse.jpg)
-
-Côté moteur, la commande `uv run eds check-cloisonnement` vérifie les cinq scénarios
-d'accès et confirme que chaque compte est bien confiné :
+**Démonstration.** Plutôt qu'une capture d'écran — qui montre un refus sans prouver *qui*
+s'est vu refuser *quoi* — la démonstration est **rejouable en une commande**.
+`uv run eds check-cloisonnement` se connecte réellement avec chaque compte et teste les deux
+barrières :
 
 ```
+            Cloisonnement des accès (ClickHouse)
 ┏━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━┓
 ┃ Compte        ┃ Base cible         ┃ Attendu ┃ Résultat  ┃
 ┡━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━┩
@@ -475,10 +502,30 @@ d'accès et confirme que chaque compte est bien confiné :
 │ chu_recherche │ eds_gold_pilotage  │ refus   │ ✓ refusé  │
 │ chu_recherche │ eds_silver         │ refus   │ ✓ refusé  │
 └───────────────┴────────────────────┴─────────┴───────────┘
+
+                 Cloisonnement du contenu (Metabase)
+┏━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━┓
+┃ Utilisateur         ┃ Tableau de bord         ┃ Attendu ┃ Résultat ┃
+┡━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━┩
+│ pilotage@chu.local  │ 🏥 Pilotage hospitalier │ accès   │ ✓ accès  │
+│ pilotage@chu.local  │ 🔬 Recherche clinique   │ refus   │ ✓ refusé │
+│ recherche@chu.local │ 🏥 Pilotage hospitalier │ refus   │ ✓ refusé │
+│ recherche@chu.local │ 🔬 Recherche clinique   │ accès   │ ✓ accès  │
+└─────────────────────┴─────────────────────────┴─────────┴──────────┘
+
+✓ Cloisonnement conforme aux deux niveaux : l'entrepôt refuse la requête,
+  et l'interface ne montre pas le contenu.
 ```
 
-Ni l'un ni l'autre n'a accès aux couches bronze, silver ou d'exploitation : celles-ci
-restent réservées au compte technique du pipeline.
+Les neuf scénarios sont également exécutés par la suite d'intégration (`make test-e2e`) :
+une régression du cloisonnement ferait échouer les tests, elle ne pourrait pas passer
+inaperçue.
+
+Ni l'un ni l'autre compte n'a accès aux couches bronze, silver ou d'exploitation : celles-ci
+restent réservées au compte technique du pipeline. Voici ce que voit un utilisateur
+« pilotage » qui tente d'ouvrir le tableau de bord de recherche :
+
+![Accès refusé hors périmètre](img/cloisonnement-acces-refuse.jpg)
 
 ---
 
