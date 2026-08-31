@@ -156,7 +156,7 @@ _PILOTAGE_CARDS = [
             "graph.x_axis.title_text": "Service",
             "graph.y_axis.title_text": "Taux de réadmission (%)",
         },
-        "row": 19,
+        "row": 21,
         "col": 0,
         "size_x": 12,
         "size_y": 6,
@@ -175,7 +175,7 @@ _PILOTAGE_CARDS = [
         "row": 11,
         "col": 0,
         "size_x": 12,
-        "size_y": 2,
+        "size_y": 4,
     },
     {
         "name": "Couverture de l'indicateur de réadmission",
@@ -191,7 +191,7 @@ _PILOTAGE_CARDS = [
             "GROUP BY `jour de sortie`\n"
             "ORDER BY `jour de sortie`"
         ),
-        "row": 13,
+        "row": 15,
         "col": 0,
         "size_x": 12,
         "size_y": 6,
@@ -258,6 +258,8 @@ _PILOTAGE_CARDS = [
         "visualization_settings": {
             "graph.dimensions": ["flux"],
             "graph.metrics": ["nb_sejours"],
+            "graph.max_categories_enabled": False,
+            "graph.max_categories": 20,
             "graph.show_values": True,
             "graph.x_axis.title_text": "Nombre de séjours",
             "graph.y_axis.title_text": "Flux",
@@ -365,6 +367,8 @@ _RECHERCHE_CARDS = [
         "visualization_settings": {
             "graph.dimensions": ["pathologie"],
             "graph.metrics": ["nb_patients"],
+            "graph.max_categories_enabled": False,
+            "graph.max_categories": 20,
             "graph.show_values": True,
             "graph.x_axis.title_text": "Patients",
             "graph.y_axis.title_text": "Pathologie (CIM-10)",
@@ -386,6 +390,8 @@ _RECHERCHE_CARDS = [
         "visualization_settings": {
             "graph.dimensions": ["pathologie"],
             "graph.metrics": ["prévalence (%)"],
+            "graph.max_categories_enabled": False,
+            "graph.max_categories": 20,
             "graph.show_values": True,
             "graph.x_axis.title_text": "Prévalence (%)",
             "graph.y_axis.title_text": "Pathologie (CIM-10)",
@@ -425,22 +431,29 @@ _RECHERCHE_CARDS = [
         "size_y": 7,
     },
     {
-        "name": "Répartition par sexe et pathologie",
-        "description": "Composition des cohortes par sexe.",
+        "name": "Part des femmes par pathologie",
+        "description": (
+            "Composition des cohortes par sexe, exprimée en part de femmes. "
+            "Une série unique : Metabase regrouperait les catégories excédentaires "
+            "sous « Autre » au-delà de huit séries, ce qui masquerait deux pathologies."
+        ),
         "display": "row",
+        # Le ratio est plus lisible que deux séries d'effectifs quasi identiques :
+        # toutes les cohortes comptent environ 2 700 patients, les barres absolues
+        # ne se distinguaient pas les unes des autres.
         "sql": (
             "SELECT libelle AS pathologie,\n"
-            "       sumIf(nb_patients, sexe = 'F') AS Femmes,\n"
-            "       sumIf(nb_patients, sexe = 'M') AS Hommes\n"
+            "       round(100.0 * sumIf(nb_patients, sexe = 'F')\n"
+            "             / sum(nb_patients), 1) AS `part de femmes (%)`\n"
             "FROM cohorte_demographie\n"
             "GROUP BY pathologie\n"
-            "ORDER BY pathologie"
+            "ORDER BY `part de femmes (%)` DESC"
         ),
         "visualization_settings": {
             "graph.dimensions": ["pathologie"],
-            "graph.metrics": ["Femmes", "Hommes"],
-            "stackable.stack_type": "stacked",
-            "graph.x_axis.title_text": "Patients",
+            "graph.metrics": ["part de femmes (%)"],
+            "graph.show_values": True,
+            "graph.x_axis.title_text": "Part de femmes (%)",
             "graph.y_axis.title_text": "Pathologie",
         },
         "row": 11,
