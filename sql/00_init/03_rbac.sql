@@ -8,8 +8,13 @@
 --
 -- Script rejoué à chaque `eds provision-warehouse` : entièrement idempotent.
 
+-- `OR REPLACE` et non `IF NOT EXISTS` : sur un compte déjà créé, ce dernier ne
+-- ferait rien, et changer le mot de passe dans .env laisserait l'ancien actif.
+-- Le provisionnement doit rendre l'entrepôt conforme à sa configuration, pas
+-- seulement l'initialiser.
+
 -- ── Pilotage hospitalier ────────────────────────────────────────────────────
-CREATE USER IF NOT EXISTS chu_pilotage
+CREATE USER OR REPLACE chu_pilotage
     IDENTIFIED WITH sha256_password BY '{pilotage_password}'
     DEFAULT DATABASE eds_gold_pilotage;
 
@@ -20,7 +25,7 @@ REVOKE ALL ON eds_gold_recherche.* FROM chu_pilotage;
 REVOKE ALL ON ops.*                FROM chu_pilotage;
 
 -- ── Recherche clinique ──────────────────────────────────────────────────────
-CREATE USER IF NOT EXISTS chu_recherche
+CREATE USER OR REPLACE chu_recherche
     IDENTIFIED WITH sha256_password BY '{recherche_password}'
     DEFAULT DATABASE eds_gold_recherche;
 
