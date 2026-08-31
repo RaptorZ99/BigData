@@ -70,7 +70,7 @@ def needs_ingestion(
     previous = journal.get(key)
 
     if previous is None:
-        return True, "nouveau"
+        return True, "nouveau ou rejeu demandé"
     if previous.status != "success":
         return True, f"reprise après échec ({previous.status})"
     if previous.sha256 != checksum:

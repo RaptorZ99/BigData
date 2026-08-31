@@ -88,7 +88,10 @@ def run(
     log.info("Run %s démarré (mode : %s)", run_id, _mode_label(only_date, full_refresh))
 
     try:
-        journal = {} if full_refresh else state.load_ingest_log(client)
+        # `--full-refresh` et `--date` sont des demandes explicites de rejeu :
+        # on ignore alors le journal, sans quoi un fichier inchangé serait sauté
+        # — précisément le cas d'une reprise après incident.
+        journal = {} if (full_refresh or only_date) else state.load_ingest_log(client)
         _ingest(client, config, journal, report, only_date=only_date)
 
         # On reconstruit s'il y a du nouveau, mais aussi si les couches dérivées

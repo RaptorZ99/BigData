@@ -27,11 +27,23 @@ Le plan d'implémentation complet et autosuffisant est dans **`PLAN.md`** — le
 - Les 520 relevés monitoring « post-sortie » appartiennent **tous** aux 136 séjours invalides (sortie < admission) : ils partent en **cascade** dans `monitoring_rejets` (`parent_stay_rejected`) et le flag `is_after_discharge` vaut **0** après nettoyage (contrôle actif). Invariants post-nettoyage à respecter : fact_sejour 14 864 · fact_diagnostic 37 040 · fact_monitoring 64 799 (cf. PLAN.md §2.6).
 - Les séjours qui se chevauchent pour un même patient (~8 300) sont un artefact des données synthétiques : **ne pas** les rejeter, le documenter en limite.
 
-## Commandes de référence (une fois implémenté)
+## Pièges techniques rencontrés à l'implémentation
+
+- **Volumes Docker nommés obligatoires pour ClickHouse.** Un bind mount macOS ne garantit pas les renommages atomiques exigés par `CREATE OR REPLACE TABLE` (échec `filesystem error: in rename`). Seul le lake reste un dossier de l'hôte, monté en lecture seule.
+- **Le lake doit exister avant `docker compose up`** : supprimer `data/lake` conteneur allumé casse le montage (`FILE_DOESNT_EXIST`) — remède : `docker compose restart clickhouse`. Le chargement tolère une visibilité retardée du fichier par quelques tentatives espacées.
+- **Alias SQL** : `max(_ingest_date) AS _ingest_date` rend les autres `argMax(…, _ingest_date)` récursifs (`ILLEGAL_AGGREGATION`). Nommer les alias de lignage différemment (`last_ingest_date`, `source_file`).
+- **`LowCardinality`** : comparer une telle colonne produit un `LowCardinality(UInt8)` que ClickHouse refuse de matérialiser → `CAST(… AS Bool)`.
+- **Clés de tri non nullables** : `assumeNotNull()` après le filtre qui garantit la valeur.
+- **Metabase** : le jeton de setup reste exposé après configuration — se fier à `has-user-setup`. Le blocage complet des données (`view-data: blocked`) est payant ; en OSS on combine `create-queries: "no"` et les permissions de collection, l'interdiction réelle venant des GRANT ClickHouse.
+- **Réadmission** : ne jamais utiliser `leadInFrame` ici (cf. PLAN.md §9.1).
+
+## Commandes de référence
 
 ```bash
-make up          # démarre ClickHouse + Metabase et provisionne tout
-make pipeline    # exécute le pipeline incrémental (jours non encore ingérés)
-make demo        # démo complète de zéro (reset + up + pipeline + provision)
-uv run eds --help
+make demo        # démo complète de zéro (up + pipeline + provision) — ~30 s
+make pipeline    # pipeline incrémental (jours non encore ingérés)
+make test        # tests unitaires ; make test-e2e pour les invariants de l'entrepôt
+uv run eds run --rebuild          # reconstruit silver+gold après modification du SQL
+uv run eds run --date 2026-08-27  # rejeu forcé d'un jour (reprise sur incident)
+uv run eds check-cloisonnement    # vérifie les droits d'accès ClickHouse
 ```

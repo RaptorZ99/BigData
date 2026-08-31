@@ -1,0 +1,26 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  EDS CHU — planification de l'ingestion quotidienne
+#
+#  Installation :
+#      crontab -e          puis coller la ligne ci-dessous en adaptant le chemin
+#      crontab -l          pour vérifier
+#
+#  Le pipeline est incrémental et idempotent : le relancer sans nouveau dépôt
+#  ne fait rien, et le relancer après un incident reprend là où il faut.
+#  Il rend un code de sortie non nul en cas d'échec, ce qui permet à cron (ou à
+#  une supervision) d'alerter.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Variables d'environnement (cron démarre avec un PATH minimal).
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin
+
+# Ingestion quotidienne à 02h05, après le dépôt nocturne du CHU.
+5 2 * * * cd /chemin/vers/eds-chu && make pipeline >> logs/cron.log 2>&1
+
+# Variante avec notification en cas d'échec (nécessite `mail`) :
+# 5 2 * * * cd /chemin/vers/eds-chu && make pipeline >> logs/cron.log 2>&1 \
+#           || mail -s "[EDS] échec du pipeline" exploitation@chu.local < logs/cron.log
+
+# Contrôle hebdomadaire du cloisonnement des accès (lundi 06h00).
+0 6 * * 1 cd /chemin/vers/eds-chu && uv run eds check-cloisonnement >> logs/cron.log 2>&1
