@@ -3,6 +3,11 @@
 -- Rendre visible ce qui a été écarté et pourquoi, c'est ce qui permet de
 -- répondre à « d'où sort ce chiffre ? » depuis le dashboard lui-même, sans
 -- ouvrir la base d'exploitation (à laquelle le compte pilotage n'a pas accès).
+--
+-- ⚠ Ce script s'exécute en DERNIER de la couche gold, volontairement : il
+-- recopie `ops.quality_report`, que les contrôles RGPD (04_quality.sql)
+-- viennent d'alimenter. Le placer plus tôt exposerait les seules règles silver
+-- et laisserait croire que le k-anonymat n'est pas contrôlé.
 CREATE OR REPLACE TABLE eds_gold_pilotage.kpi_qualite_pipeline
 ENGINE = MergeTree
 ORDER BY (rule)

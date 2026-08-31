@@ -143,6 +143,19 @@ source-filestorage  →  lake  →  bronze  →  silver  →  gold  →  Metabas
 
 Le modèle de données complet est en annexe : [`docs/img/eds-data-model.png`](img/eds-data-model.png).
 
+> **Un écart assumé avec l'architecture conseillée.** Le sujet décrit le lake comme une
+> « copie brute, telle quelle », mais demande par ailleurs — c'est le bonus valorisé — que
+> l'identifiant patient soit pseudonymisé **dès l'entrée du lake** et que les identifiants
+> directs soient supprimés. Les deux ne peuvent pas être vrais en même temps.
+>
+> Nous avons tranché en faveur de la protection : notre lake est une copie *fidèle mais
+> pseudonymisée*. Elle conserve toutes les lignes, tous les fichiers et toutes les
+> anomalies — rien n'est filtré, la sélection qualité reste l'affaire de silver — mais
+> l'identité en clair ne franchit jamais la frontière du dépôt du CHU. C'est le seul
+> arbitrage qui rende vraie la phrase « aucune donnée identifiante n'entre dans
+> l'entrepôt » ; l'alternative aurait été d'écrire le NIR et les noms sur notre disque pour
+> les effacer une étape plus loin.
+
 ### 3.2 Justification des choix
 
 | Décision | Choix retenu | Pourquoi |
@@ -234,8 +247,10 @@ Trois natures de règles cohabitent, et les confondre rendrait le rapport illisi
   parce que l'anomalie relève de la source ;
 - **Contrôle** — vérification attendue à zéro, dont le passage au vert est l'information.
 
-Les chiffres ci-dessous sont ceux de la dernière exécution ; ils sont recalculés à chaque
-run dans `ops.quality_report`.
+Les chiffres ci-dessous sont ceux de la dernière exécution. Le tableau regroupe les cinq
+contrôles Q6 sur une ligne et laisse de côté les trois contrôles RGPD de la couche gold
+(§7.2) : la table `ops.quality_report` en compte donc **dix-sept**, recalculés à chaque run
+et consultables depuis le tableau de bord de pilotage.
 
 | Règle | Nature | Lues | Conservées | Écartées | Signalées |
 |---|---|---:|---:|---:|---:|
@@ -245,7 +260,7 @@ run dans `ops.quality_report`.
 | **C1** Relevé dont le séjour est écarté | Rejet en cascade | 66 677 | 64 799 | 520 | — |
 | **C2** Diagnostic dont le séjour est écarté | Rejet en cascade | 37 380 | 37 040 | 340 | — |
 | **Q3** Séjour sans date de sortie | Signalement | 14 864 | 14 864 | 0 | 1 190 |
-| **Q5** Mode de sortie non renseigné | Signalement | 14 864 | 14 864 | 0 | 3 165 |
+| **Q5** Sortie datée mais mode non renseigné | Signalement | 14 864 | 14 864 | 0 | 1 975 |
 | **Q7** Admission après un décès antérieur | Signalement | 14 864 | 14 864 | 0 | 192 |
 | **Q8** Relevé postérieur à la sortie | Contrôle | 64 799 | 64 799 | 0 | **0** |
 | **Q6** Formats et intégrité référentielle (5 règles) | Contrôle | — | — | 0 | **0** |

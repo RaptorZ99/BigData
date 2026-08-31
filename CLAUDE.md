@@ -36,11 +36,16 @@ Le plan d'implémentation complet et autosuffisant est dans **`PLAN.md`** — le
 - **Clés de tri non nullables** : `assumeNotNull()` après le filtre qui garantit la valeur.
 - **Metabase** : le jeton de setup reste exposé après configuration — se fier à `has-user-setup`. Le blocage complet des données (`view-data: blocked`) est payant ; en OSS on combine `create-queries: "no"` et les permissions de collection, l'interdiction réelle venant des GRANT ClickHouse.
 - **Réadmission** : ne jamais utiliser `leadInFrame` ici (cf. PLAN.md §9.1).
+- **Découpage SQL** : le découpeur respecte les chaînes — un `;` dans un libellé métier ne sépare pas deux instructions. Ne pas revenir à un `split(";")` naïf.
+- **Ordre du gold** : `05_pilotage_qualite.sql` s'exécute en dernier car il recopie `ops.quality_report`, alimenté par `04_quality.sql`. Le placer plus tôt n'exposerait que les règles silver.
+- **Mesures non additives** : `nb_patients` ne se somme jamais hors de son grain. La pyramide des âges lit `cohorte_demographie_globale` (grain sexe × tranche), pas `cohorte_demographie` (grain CIM-10 × sexe × tranche) — sinon un patient à 5 diagnostics est compté 5 fois.
+- **Provisionnement convergent** : `CREATE USER OR REPLACE` côté ClickHouse et réalignement du mot de passe côté Metabase. `IF NOT EXISTS` ne met pas à jour un compte existant, donc changer `.env` n'aurait aucun effet.
+- **Secrets hors des logs** : ne jamais imprimer un mot de passe sur stdout — la sortie du provisionnement finit dans `logs/cron.log`.
 
 ## Commandes de référence
 
 ```bash
-make demo        # démo complète de zéro (up + pipeline + provision) — ~30 s
+make demo        # démo complète de zéro (up + pipeline + provision)
 make pipeline    # pipeline incrémental (jours non encore ingérés)
 make test        # tests unitaires ; make test-e2e pour les invariants de l'entrepôt
 uv run eds run --rebuild          # reconstruit silver+gold après modification du SQL

@@ -15,16 +15,22 @@ help: ## Affiche cette aide
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
-$(ENV_FILE):
-	@cp .env.example $(ENV_FILE)
-	@# Le sel protège l'identité des patients : il est tiré au hasard dès la
-	@# création du fichier, plutôt que laissé à une valeur d'exemple publique.
-	@SALT=$$(openssl rand -hex 32); \
-	 sed -i.bak "s|^EDS_SALT=.*|EDS_SALT=$$SALT|" $(ENV_FILE) && rm -f $(ENV_FILE).bak
-	@echo "→ .env créé, avec un sel de pseudonymisation généré aléatoirement."
-	@echo "  ⚠ Remplacez aussi les mots de passe '..._change_me' avant tout usage réel."
+# Valeur d'exemple du sel, refusée au démarrage car publique.
+PLACEHOLDER_SALT := remplace-moi-par-openssl-rand-hex-32
 
-env: $(ENV_FILE) ## Crée .env (avec un sel généré) s'il n'existe pas
+env: ## Crée .env si besoin et garantit un sel de pseudonymisation valide
+	@if [ ! -f $(ENV_FILE) ]; then \
+	    cp .env.example $(ENV_FILE); \
+	    echo "→ .env créé depuis .env.example."; \
+	 fi
+	@# On traite aussi le cas d'un .env recopié à la main : sans cela, le sel
+	@# d'exemple resterait en place et le pipeline refuserait de démarrer.
+	@if grep -q "^EDS_SALT=$(PLACEHOLDER_SALT)$$" $(ENV_FILE); then \
+	    SALT=$$(openssl rand -hex 32); \
+	    sed -i.bak "s|^EDS_SALT=.*|EDS_SALT=$$SALT|" $(ENV_FILE) && rm -f $(ENV_FILE).bak; \
+	    echo "→ Sel de pseudonymisation généré aléatoirement."; \
+	    echo "  ⚠ Remplacez aussi les mots de passe '..._change_me' avant tout usage réel."; \
+	 fi
 
 up: env ## Démarre ClickHouse + Metabase, puis provisionne l'entrepôt
 	@# Le lake doit exister avant le démarrage : Docker le monte dans ClickHouse,
