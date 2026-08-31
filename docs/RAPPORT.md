@@ -637,10 +637,30 @@ jeu synthétique dont les prévalences n'ont aucune valeur clinique (§8.1).
 Le niveau qui compte est le premier. Les deux autres organisent l'interface ; celui-là
 oppose un refus même à une requête SQL écrite à la main.
 
-Le résultat se constate directement : interrogée avec le compte `pilotage`, l'interface ne
-liste **qu'un** tableau de bord, **une** collection et **une** base de données — celle de
-son usage. Il n'y a pas de contenu grisé ni de connexion inaccessible : l'autre usage
-n'existe simplement pas de son point de vue.
+Le résultat se constate directement. Voici ce que voit un utilisateur connecté avec le
+compte **pilotage** : une seule collection dans sa barre latérale, un seul tableau de bord.
+
+![Ce que voit un utilisateur pilotage](img/cloisonnement-vue-pilotage.jpg)
+
+Et une seule connexion dans l'explorateur de données — celle de son usage :
+
+![Une seule base de données accessible](img/cloisonnement-bases-pilotage.jpg)
+
+Il n'y a **pas de contenu grisé ni de connexion inaccessible** : l'autre usage n'existe
+simplement pas de son point de vue. C'est une propriété plus forte qu'un masquage, et elle
+est vérifiée par la suite d'intégration, qui interroge l'API avec les identifiants de
+chaque utilisateur et exige exactement une entrée dans chaque liste.
+
+S'il devine l'adresse de l'espace de recherche et la saisit à la main, il est refusé — la
+barre latérale montre bien que c'est le compte pilotage qui se voit opposer ce refus :
+
+![Accès refusé hors périmètre](img/cloisonnement-acces-refuse.jpg)
+
+**Un détail qui va dans le bon sens.** Sur un tableau de bord hors périmètre, Metabase ne
+répond pas « accès refusé » mais « page introuvable ». La nuance n'est pas cosmétique : un
+refus explicite confirmerait l'existence de la ressource, et permettrait d'énumérer par
+essais successifs ce que contient l'espace de recherche. Ici, l'utilisateur n'apprend même
+pas que ce tableau de bord existe.
 
 **Une précaution qui ne relève pas de la confidentialité mais de la disponibilité.** Les
 deux comptes autorisent le SQL libre depuis Metabase. Le `GRANT SELECT` empêche toute
@@ -650,10 +670,10 @@ temps d'exécution et mémoire bornés) et un quota horaire sont donc attachés 
 comptes. Les seuils sont très au-dessus d'un usage normal : ils n'interdisent rien, ils
 arrêtent une boucle emballée.
 
-**Démonstration.** Plutôt qu'une capture d'écran — qui montre un refus sans prouver *qui*
-s'est vu refuser *quoi* — la démonstration est **rejouable en une commande**.
-`uv run eds check-cloisonnement` se connecte réellement avec chaque compte et teste les deux
-barrières :
+**Démonstration.** Les captures ci-dessus montrent le résultat, mais une capture se périme
+et ne prouve rien d'un état courant. La démonstration qui compte est donc **rejouable en une
+commande** : `uv run eds check-cloisonnement` se connecte réellement avec chaque compte et
+teste les deux barrières, sur l'installation de celui qui la lance :
 
 ```
             Cloisonnement des accès (ClickHouse)
@@ -686,10 +706,7 @@ une régression du cloisonnement ferait échouer les tests, elle ne pourrait pas
 inaperçue.
 
 Ni l'un ni l'autre compte n'a accès aux couches bronze, silver ou d'exploitation : celles-ci
-restent réservées au compte technique du pipeline. Voici ce que voit un utilisateur
-« pilotage » qui tente d'ouvrir le tableau de bord de recherche :
-
-![Accès refusé hors périmètre](img/cloisonnement-acces-refuse.jpg)
+restent réservées au compte technique du pipeline.
 
 ---
 

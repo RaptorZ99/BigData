@@ -68,9 +68,10 @@ nulle part ailleurs, pour qu'ils ne puissent pas devenir faux.
 
 > **Démonstration du cloisonnement** : `uv run eds check-cloisonnement` teste les deux
 > barrières et affiche le résultat — ClickHouse refuse la requête hors périmètre, et
-> Metabase refuse l'ouverture du tableau de bord de l'autre usage. Vous pouvez le
-> constater vous-même : connectez-vous en `pilotage`, puis tentez d'ouvrir le dashboard
-> de recherche.
+> Metabase ne montre pas le contenu de l'autre usage. Vous pouvez le constater vous-même :
+> connectez-vous en `pilotage`, vous ne verrez **qu'une** collection, **qu'un** tableau de
+> bord et **qu'une** base de données. Les captures sont en
+> [§6.2 du rapport](docs/RAPPORT.md#62-le-cloisonnement-à-trois-niveaux).
 
 ---
 

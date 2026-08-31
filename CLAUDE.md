@@ -53,6 +53,7 @@ Le plan d'implémentation complet et autosuffisant est dans **`PLAN.md`** — le
 - **Deux séries d'ordres de grandeur différents** : sans `graph.y_axis.auto_split: False`, Metabase les place sur deux axes Y distincts et des barres de hauteur comparable représentent des effectifs dans un rapport de 1 à 10.
 - **Format des nombres** : `custom-formatting` (`type/Number.number_separators = ", "`) est posé au provisionnement, sinon l'interface française affiche « 14,864 ». Inutile d'y ajouter `date_style` : Metabase ne l'applique pas aux colonnes des requêtes SQL natives.
 - **Le refus doit être un vrai refus** : `check-cloisonnement` ne compte comme preuve qu'un échec portant `ACCESS_DENIED` ou `NOT_ENOUGH_PRIVILEGES`. Un `except Exception` nu ferait passer au vert une base absente ou un moteur arrêté.
+- **Metabase répond 404, pas 403, sur un dashboard hors périmètre** (403 sur une collection). Ce n'est pas un bug : un refus explicite confirmerait l'existence de la ressource et permettrait de l'énumérer. Ne pas « corriger » ce comportement en cherchant un message d'erreur plus bavard.
 
 ## État livré — chiffres de référence
 
