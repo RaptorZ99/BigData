@@ -173,7 +173,7 @@ uv run eds --help
 │   ├── 15_bronze_load/     chargements paramétrés par jour
 │   ├── 20_silver/          constellation, règles qualité, rapport
 │   └── 30_gold/            indicateurs par usage
-├── tests/                76 tests
+├── tests/                90 tests
 │   ├── test_pseudo.py      pseudonymisation : stabilité, non-réversibilité
 │   ├── test_collect.py     aucune donnée identifiante ne sort de la source
 │   ├── test_state.py       décision d'ingestion : les 4 branches de l'incrémentalité
