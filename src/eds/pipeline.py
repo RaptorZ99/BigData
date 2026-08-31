@@ -94,10 +94,17 @@ def run(
         journal = {} if (full_refresh or only_date) else state.load_ingest_log(client)
         _ingest(client, config, journal, report, only_date=only_date)
 
-        # On reconstruit s'il y a du nouveau, mais aussi si les couches dérivées
-        # sont en retard sur bronze : un run précédent a pu charger bronze puis
-        # échouer en transformation. Le pipeline se remet ainsi d'aplomb seul.
-        if report.has_changes or force_rebuild:
+        # Un échec de chargement laisse bronze amputé du jour concerné :
+        # reconstruire silver et gold dessus publierait des indicateurs faux
+        # sans que rien ne le signale. On préfère conserver l'état précédent,
+        # cohérent, et laisser le run suivant reprendre.
+        if report.files_failed:
+            log.error(
+                "Publication suspendue : %d fichier(s) en échec. "
+                "Les tableaux de bord conservent les chiffres du dernier run complet.",
+                report.files_failed,
+            )
+        elif report.has_changes or force_rebuild:
             _rebuild(client, run_id, report)
         elif transform.is_stale(client):
             log.warning("Couches dérivées en retard sur bronze : reconstruction.")
@@ -158,6 +165,15 @@ def _ingest(
     only_date: str | None,
 ) -> None:
     """Collecte puis charge chaque fichier à traiter, en isolant les échecs."""
+    # Un jour déposé de façon incomplète doit alerter, pas passer pour un run
+    # nominal : sans cela, l'entrepôt serait reconstruit sur une source amputée
+    # et le cron ne verrait rien.
+    for absent in collect_module.missing_files(config):
+        message = f"{absent} : fichier attendu absent du dépôt"
+        report.errors.append(message)
+        report.files_failed += 1
+        log.error(message)
+
     fichiers = list(collect_module.discover(config))
 
     if only_date:

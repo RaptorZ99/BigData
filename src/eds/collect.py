@@ -198,7 +198,30 @@ def discover(config: Config) -> Iterator[SourceFile]:
     """Parcourt le dépôt du CHU et énumère les fichiers présents, par jour.
 
     L'ordre est déterministe (domaine, puis jour) pour des runs reproductibles.
+    Les fichiers attendus mais absents sont signalés par `missing_files`.
     """
+    for domain, day, path, filename, present in _scan(config):
+        if present:
+            yield SourceFile(domain, day, path, filename)
+
+
+def missing_files(config: Config) -> list[str]:
+    """Fichiers attendus pour un jour déposé, mais absents du dépôt.
+
+    Un jour partiellement déposé n'est pas un run normal : l'entrepôt serait
+    reconstruit sur une source amputée. Le pipeline le traite donc comme un
+    échec, afin que le code de sortie alerte plutôt que de laisser croire à une
+    exécution nominale.
+    """
+    return [
+        f"{domain}/{day}/{filename}"
+        for domain, day, _path, filename, present in _scan(config)
+        if not present
+    ]
+
+
+def _scan(config: Config) -> Iterator[tuple[str, str, Path, str, bool]]:
+    """Énumère tous les fichiers attendus, présents ou non."""
     for domain in sorted(EXPECTED_FILES):
         domain_dir = config.source_dir / domain
         if not domain_dir.is_dir():
@@ -212,10 +235,7 @@ def discover(config: Config) -> Iterator[SourceFile]:
 
             for filename in EXPECTED_FILES[domain]:
                 path = day_dir / filename
-                if path.is_file():
-                    yield SourceFile(domain, day_dir.name, path, filename)
-                else:
-                    log.warning("Fichier attendu manquant : %s/%s", day_dir, filename)
+                yield domain, day_dir.name, path, filename, path.is_file()
 
 
 def collect(source: SourceFile, config: Config) -> CollectResult:

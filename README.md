@@ -185,6 +185,7 @@ uv run eds --help
 │   ├── RAPPORT.md          dossier d'analyse et de conception
 │   ├── EXPLOITATION.md     lancement, maintenance, reprise sur incident
 │   └── data-model.puml     modèle de données
+├── .github/workflows/    Intégration continue (style, tests, invariants)
 ├── benchmarks/           Banc d'essai de tenue en charge (20 M de relevés)
 ├── scheduling/           Exemple de planification cron
 └── PLAN.md               Plan d'implémentation détaillé

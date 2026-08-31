@@ -52,4 +52,9 @@ SELECT
     (SELECT count() FROM eds_silver.fact_monitoring)                        AS nb_releves,
     (SELECT countIf(is_alert) FROM eds_silver.fact_monitoring)              AS nb_releves_alerte,
     (SELECT round(100.0 * countIf(is_alert) / count(), 1)
-     FROM eds_silver.fact_monitoring)                                       AS pct_releves_alerte;
+     FROM eds_silver.fact_monitoring)                                       AS pct_releves_alerte,
+    -- Horodatage de construction de la couche gold. Comparé à celui de silver,
+    -- il rend détectable un échec survenu APRÈS la construction de silver :
+    -- sans lui, le run suivant conclurait « tout est à jour » et les tableaux
+    -- de bord figeraient les chiffres de l'avant-dernier traitement.
+    now()                                                                   AS _built_at;

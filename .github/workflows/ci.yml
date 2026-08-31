@@ -1,0 +1,73 @@
+name: CI
+
+# Deux niveaux de vérification, volontairement séparés :
+#
+#   * `qualite` ne demande rien d'autre que le dépôt — style et tests unitaires,
+#     dont ceux qui garantissent qu'aucune donnée identifiante ne quitte la
+#     source. Il tourne en quelques secondes sur chaque poussée.
+#   * `entrepot` monte ClickHouse et rejoue les invariants chiffrés. Il exige le
+#     dépôt du CHU, qui n'est pas versionné : il ne s'exécute donc que si un
+#     jeu de données est mis à disposition du runner.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  qualite:
+    name: Style et tests unitaires
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Installer les dépendances
+        run: uv sync --all-extras --dev
+
+      - name: Vérifier le style
+        run: |
+          uv run ruff check src tests
+          uv run ruff format --check src tests
+
+      - name: Tests unitaires
+        run: uv run pytest -m "not integration" -q
+
+  entrepot:
+    name: Invariants de l'entrepôt
+    runs-on: ubuntu-latest
+    # Le dépôt du CHU contient l'identité réelle des patients : il n'est pas
+    # versionné. Ce job ne s'exécute que si le runner y a accès.
+    if: ${{ vars.EDS_SOURCE_AVAILABLE == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Récupérer le dépôt du CHU
+        run: |
+          mkdir -p source-filestorage
+          # À adapter à votre hébergement (stockage objet, partage réseau…).
+          echo "::notice::Placez ici la récupération de source-filestorage/"
+
+      - name: Démarrer l'entrepôt et ingérer
+        run: make demo
+
+      - name: Invariants et cloisonnement
+        run: |
+          uv run pytest -q
+          uv run eds check-cloisonnement
+
+      - name: Journaux en cas d'échec
+        if: failure()
+        run: |
+          docker compose logs --tail 200
+          tail -100 logs/pipeline.log || true

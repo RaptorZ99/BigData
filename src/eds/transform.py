@@ -85,8 +85,17 @@ def is_stale(client: Client) -> bool:
         log.warning("Tables manquantes : %s", ", ".join(absentes))
         return True
 
-    built_at = _scalar(client, "SELECT max(_built_at) FROM eds_silver.fact_sejour")
-    if built_at is None:
+    silver_at = _scalar(client, "SELECT max(_built_at) FROM eds_silver.fact_sejour")
+    if silver_at is None:
+        return True
+
+    # Gold est-elle en retard sur silver ? Ce contrôle attrape le cas où la
+    # construction de silver a réussi puis celle de gold a échoué : sans lui, le
+    # run suivant conclurait « tout est à jour » et les tableaux de bord
+    # figeraient les chiffres de l'avant-dernier traitement.
+    gold_at = _scalar(client, "SELECT max(_built_at) FROM eds_gold_pilotage.kpi_synthese")
+    if gold_at is None or gold_at < silver_at:
+        log.warning("Couche gold en retard sur silver : reconstruction.")
         return True
 
     loaded_at = _scalar(
@@ -100,7 +109,7 @@ def is_stale(client: Client) -> bool:
         )
         """,
     )
-    return loaded_at is not None and loaded_at > built_at
+    return loaded_at is not None and loaded_at > silver_at
 
 
 def _scalar(client: Client, query: str):
