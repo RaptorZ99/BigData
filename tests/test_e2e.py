@@ -316,8 +316,7 @@ def test_aucune_base_de_restitution_n_expose_de_pseudonyme(client, base):
     """
     colonnes = scalar(
         client,
-        "SELECT count() FROM system.columns "
-        f"WHERE database = '{base}' AND name = 'patient_pseudo'",
+        f"SELECT count() FROM system.columns WHERE database = '{base}' AND name = 'patient_pseudo'",
     )
     assert colonnes == 0, f"{base} expose un pseudonyme patient"
 
