@@ -39,3 +39,6 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+# Projet rédigé en français : ces caractères sont de la typographie voulue,
+# pas des homoglyphes accidentels.
+allowed-confusables = ["×", "—", "–", "’"]

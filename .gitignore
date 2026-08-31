@@ -1,7 +1,6 @@
 # Données de santé — ne jamais versionner
 source-filestorage/
 data/
-*.parquet
 
 # Secrets
 .env
