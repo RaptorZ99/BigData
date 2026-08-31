@@ -383,6 +383,12 @@ def ensure_dashboard(
         "name": spec["name"],
         "description": spec["description"],
         "collection_id": collection_id,
+        # `fixed` (le défaut) enferme le tableau de bord dans une colonne d'un
+        # millier de pixels et laisse deux marges vides sur un écran large. Nos
+        # tables ont six à huit colonnes et nos graphiques huit catégories : à
+        # largeur contrainte, les libellés se tronquent. `full` rend la grille
+        # de 24 colonnes proportionnelle à l'écran.
+        "width": "full",
     }
     if existing:
         dashboard_id = existing["id"]
@@ -504,11 +510,33 @@ def verifier_cloisonnement(config: Config) -> list[ControleAcces]:
     return resultats
 
 
+def apply_formatting(client: MetabaseClient) -> None:
+    """Impose la convention française d'écriture des nombres.
+
+    Sans cela, un tableau de bord dont l'interface est en français affiche
+    « 14,864 » séjours et une DMS de « 6.08 » : un lecteur francophone lit le
+    premier comme quatorze virgule huit cent soixante-quatre. Le réglage est
+    global à l'instance et rejoué à chaque provisionnement, donc idempotent.
+
+    Le format de date n'est volontairement pas forcé ici : Metabase n'applique
+    `date_style` qu'aux colonnes dont il connaît les métadonnées, ce qui n'est
+    pas le cas des requêtes SQL natives. Le format retenu par défaut
+    (« 28 août 2026 » en français) reste non ambigu.
+    """
+    client.put(
+        "/api/setting/custom-formatting",
+        # Virgule décimale, espace insécable fin pour les milliers.
+        {"value": {"type/Number": {"number_separators": ", "}}},
+    )
+    log.info("Formatage français des nombres appliqué.")
+
+
 def provision(config: Config) -> None:
     """Provisionne Metabase de bout en bout et affiche les accès."""
     client = MetabaseClient(config.metabase_url)
     client.wait_until_ready()
     client.authenticate(config.admin_email, config.admin_password)
+    apply_formatting(client)
 
     credentials = {
         "pilotage": (config.pilotage_email, config.metabase_pilotage_password),

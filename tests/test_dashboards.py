@@ -26,9 +26,10 @@ from eds.transform import EXPECTED_TABLES
 # Largeur de la grille Metabase.
 GRILLE = 24
 
-# Une tuile de synthèse fait 4 à 5 colonnes ; au-delà d'une quinzaine de
-# caractères, Metabase coupe le titre avec une ellipse.
-LONGUEUR_MAX_TITRE_SCALAIRE = 17
+# Caractères lisibles par colonne de grille, mesuré à l'écran : une tuile de
+# quatre colonnes en tient treize, une de cinq colonnes dix-sept. Au-delà,
+# Metabase coupe le titre avec une ellipse.
+CARACTERES_PAR_COLONNE = 3.4
 
 # Base gold interrogée par chaque tableau de bord.
 BASE_PAR_DASHBOARD = {
@@ -93,6 +94,7 @@ def test_les_tuiles_de_synthese_couvrent_toute_la_largeur():
     assert len(tuiles) == 5
     assert {c["row"] for c in tuiles} == {2}, "les tuiles doivent être sur une seule ligne"
     assert sum(c["size_x"] for c in tuiles) == GRILLE
+    assert len({c["size_y"] for c in tuiles}) == 1, "hauteurs inégales : la bande serait crantée"
 
     # Elles doivent aussi être jointives, sans trou entre deux colonnes.
     debuts = sorted((c["col"], c["size_x"]) for c in tuiles)
@@ -103,14 +105,41 @@ def test_les_tuiles_de_synthese_couvrent_toute_la_largeur():
 
 
 @pytest.mark.parametrize("cle", sorted(DASHBOARDS))
+def test_chaque_ligne_de_la_grille_est_pleine(cle: str):
+    """Toute la largeur est occupée, sur toute la hauteur — ni trou, ni bande orpheline.
+
+    C'est la traduction vérifiable de « le tableau de bord prend toute la page » :
+    combinée à l'absence de chevauchement, cette règle garantit que les cartes
+    pavent exactement la grille.
+    """
+    cartes = _cartes(cle)
+    hauteur = max(c["row"] + c["size_y"] for c in cartes)
+
+    for ligne in range(hauteur):
+        occupation = sum(c["size_x"] for c in cartes if c["row"] <= ligne < c["row"] + c["size_y"])
+        assert occupation == GRILLE, (
+            f"{cle} : la ligne {ligne} occupe {occupation} colonnes sur {GRILLE} — "
+            "vide à droite, ou bande incomplète"
+        )
+
+
+@pytest.mark.parametrize("cle", sorted(DASHBOARDS))
 def test_les_titres_des_tuiles_tiennent_dans_leur_carte(cle: str):
+    """La contrainte porte sur la largeur réelle de la carte, pas sur un maximum fixe.
+
+    C'est le mode d'échec qui s'était produit : les cinq tuiles avaient été
+    raccourcies sous un seuil unique, mais la plus étroite avait hérité du titre
+    le plus long et restait tronquée.
+    """
     for carte in _cartes(cle):
         if carte.get("display") != "scalar":
             continue
         nom = carte["name"]
-        assert len(nom) <= LONGUEUR_MAX_TITRE_SCALAIRE, (
-            f"{cle} : « {nom} » ({len(nom)} caractères) sera tronqué à l'affichage — "
-            "raccourcir le nom et déplacer le détail dans la description"
+        budget = int(carte["size_x"] * CARACTERES_PAR_COLONNE)
+        assert len(nom) <= budget, (
+            f"{cle} : « {nom} » ({len(nom)} caractères) sera tronqué dans une carte "
+            f"de {carte['size_x']} colonnes ({budget} caractères) — raccourcir le nom, "
+            "élargir la carte, ou déplacer le détail dans la description"
         )
 
 

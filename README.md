@@ -168,7 +168,8 @@ uv run eds --help
 │   ├── transform.py        silver et gold
 │   ├── pipeline.py         orchestration, erreurs, traçabilité
 │   ├── state.py            journal d'ingestion, idempotence
-│   ├── metabase.py         provisionnement de la restitution
+│   ├── metabase.py         provisionnement de la restitution (API)
+│   ├── metabase_content.py définition et disposition des dashboards
 │   └── cli.py              interface en ligne de commande
 ├── sql/
 │   ├── 00_init/            bases, tables d'exploitation, comptes cloisonnés
@@ -176,7 +177,7 @@ uv run eds --help
 │   ├── 15_bronze_load/     chargements paramétrés par jour
 │   ├── 20_silver/          constellation, règles qualité, rapport
 │   └── 30_gold/            indicateurs par usage
-├── tests/                122 tests (62 unitaires, 60 d'intégration)
+├── tests/                124 tests (64 unitaires, 60 d'intégration)
 │   ├── test_pseudo.py      pseudonymisation : stabilité, non-réversibilité
 │   ├── test_collect.py     aucune donnée identifiante ne sort de la source
 │   ├── test_config.py      détection des secrets d'exemple

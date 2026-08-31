@@ -494,6 +494,12 @@ affiche la couverture :
 - ces 1 421 sorties représentent **12,2 % du total** ;
 - **aucune** sortie ne dispose des trente jours complets.
 
+Le tableau de bord porte l'avertissement **au-dessus** des deux cartes, et affiche la
+couverture jour par jour à côté du taux : chaque sortie postérieure au 28 août est
+explicitement marquée « hors fenêtre ».
+
+![Réadmissions et couverture de l'indicateur](img/pilotage-readmissions.jpg)
+
 Ce 48,3 % n'est pas non plus un « taux de réadmission à 30 jours » au sens clinique : il
 porte sur une fenêtre de un à trois jours. Il est publié parce qu'il mesure quelque chose de
 réel, accompagné de sa couverture, plutôt que dilué dans un chiffre qui n'en mesure aucun.
@@ -595,10 +601,20 @@ d'ingestion — est ce qui distingue ce tableau de bord d'un tableau de bord ord
 utilisateur qui doute d'un chiffre voit, sans quitter l'interface et sans accès à la base
 d'exploitation, combien de lignes ont été écartées et par quelle règle.
 
+**La mise en page est du code, pas un réglage d'interface.** Les deux tableaux de bord sont
+provisionnés en pleine largeur, leurs cartes pavent exactement la grille de vingt-quatre
+colonnes, et chacune est dimensionnée pour son contenu — les dix-huit règles de qualité
+tiennent sans défilement interne. Quatre défauts que seul l'écran révèle sont vérifiés par
+des tests (`tests/test_dashboards.py`), donc avant même de provisionner : cartes qui se
+chevauchent, ligne de grille incomplète, titre trop long pour sa carte, requête visant une
+table gold inexistante. Les nombres suivent enfin la convention française — « 14 864 » et
+« 6,08 », pas « 14,864 » et « 6.08 », qu'un lecteur francophone lirait de travers.
+
 ![Tableau de bord de pilotage](img/dashboard-pilotage.jpg)
 
-Le bas du tableau de bord porte cette traçabilité, accessible sans quitter l'interface et
-sans accès à la base d'exploitation :
+Le bas du tableau de bord porte cette traçabilité. Les **dix-huit règles** y figurent en
+entier, du rejet le plus volumineux au contrôle attendu à zéro, avec pour chacune les lignes
+lues, conservées, écartées et signalées :
 
 ![Rapport qualité et journal d'ingestion](img/rapport-qualite-dashboard.jpg)
 
@@ -731,6 +747,11 @@ correspondante disparaît elle aussi — il n'y a alors plus rien à soustraire.
 
 Le coût est de trois lignes agrégées sur deux cents, et il est assumé : une donnée dont la
 diffusion permettrait d'en déduire une autre ne se diffuse pas, même agrégée.
+
+Le dispositif est exposé aux chercheurs eux-mêmes — l'encart explique la règle, le compteur
+en mesure l'effet à chaque traitement :
+
+![Protection des petits effectifs et son effet mesuré](img/recherche-k-anonymat.jpg)
 
 Une précaution supplémentaire en découle : la table de travail qui porte les effectifs sous
 le seuil vit dans `eds_silver`, **hors de portée des comptes de restitution**. La ranger

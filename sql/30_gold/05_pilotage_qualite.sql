@@ -18,11 +18,12 @@ SELECT
     q.table_name    AS table_cible,
     q.rule          AS rule,
     q.rule_label    AS controle,
-    -- Nature de la règle : ce qu'il faut lire dans les compteurs.
+    -- Nature de la règle : ce qu'il faut lire dans les compteurs. Libellés
+    -- courts — la colonne du tableau de bord tronquait « contrôle conforme ».
     multiIf(
         q.rows_rejected > 0, 'rejet',
         q.rows_flagged  > 0, 'signalement',
-        'contrôle conforme'
+        'conforme'
     )               AS nature,
     q.rows_in       AS lignes_lues,
     q.rows_kept     AS lignes_conservees,

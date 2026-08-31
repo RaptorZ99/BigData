@@ -8,19 +8,33 @@ appartient à l'entrepôt, l'outil de restitution ne fait qu'afficher. Un chiffr
 du dashboard est donc toujours retrouvable en SQL, ce qui est exactement ce
 qu'on veut pouvoir démontrer.
 
-La grille Metabase fait 24 colonnes de large. Deux règles de mise en page sont
-suivies partout, parce qu'elles sont ce qui distingue un tableau de bord lisible
-d'un empilement de graphiques :
+La grille Metabase fait 24 colonnes de large, et les tableaux de bord sont
+provisionnés en `width: "full"` (cf. `metabase.py`) : la grille occupe donc toute
+la largeur de l'écran, sans marge latérale. Quatre règles de mise en page en
+découlent, parce qu'elles sont ce qui distingue un tableau de bord lisible d'un
+empilement de graphiques :
 
   * **aucun chevauchement.** Deux cartes qui se recouvrent sont repoussées par
     Metabase à l'affichage, dans un ordre que le code ne contrôle pas — la
     disposition versionnée cesse alors de décrire ce que l'utilisateur voit. Les
     cartes sont donc réparties en bandes horizontales successives, chacune
     occupant les 24 colonnes ;
-  * **les titres tiennent dans leur carte.** Une tuile de synthèse fait cinq
-    colonnes, soit une quinzaine de caractères lisibles ; au-delà, Metabase
-    tronque et le chiffre perd son sens. Le nom reste court, la définition
-    complète va dans la description, accessible au survol.
+  * **chaque bande fait exactement 24 colonnes.** Une bande plus étroite laisse
+    un vide à droite ; une bande plus large renvoie sa dernière carte à la ligne ;
+  * **les titres tiennent dans leur carte.** Une carte offre environ 3,4
+    caractères lisibles par colonne de grille — une tuile de quatre colonnes en
+    tient treize, une de cinq colonnes dix-sept. Au-delà, Metabase tronque et un
+    chiffre sans son titre ne veut plus rien dire. Le nom reste court, la
+    définition complète va dans la description, accessible au survol. Même règle
+    pour les valeurs affichées dans les tables : « aucune mesure possible » est
+    devenu « hors fenêtre » pour cette raison ;
+  * **une carte est dimensionnée pour son contenu.** Un graphique respire sur
+    huit unités de hauteur, pas six ; une table de dix-huit lignes en demande
+    treize, sinon elle impose un défilement interne — invisible sur une capture,
+    et pénible à l'usage.
+
+`tests/test_dashboards.py` vérifie les trois premières règles à chaque exécution
+de la suite unitaire, sans démarrer Metabase.
 """
 
 from __future__ import annotations
@@ -41,7 +55,9 @@ _PILOTAGE_CARDS = [
         "size_y": 2,
     },
     # ── Bande 1 · les cinq chiffres clés ────────────────────────────────────
-    # Cinq tuiles de 5, 5, 5, 5 et 4 colonnes : exactement 24.
+    # Quatre colonnes pour « Séjours », cinq pour les quatre autres : 24 pile.
+    # La tuile la plus étroite revient au titre le plus court — l'inverse
+    # tronquait « Séjours en cours ».
     {
         "name": "Séjours",
         "description": "Séjours valides sur la période, après contrôles qualité.",
@@ -49,7 +65,7 @@ _PILOTAGE_CARDS = [
         "sql": "SELECT nb_sejours FROM kpi_synthese",
         "row": 2,
         "col": 0,
-        "size_x": 5,
+        "size_x": 4,
         "size_y": 3,
     },
     {
@@ -61,7 +77,7 @@ _PILOTAGE_CARDS = [
         "display": "scalar",
         "sql": "SELECT dms_globale_jours FROM kpi_synthese",
         "row": 2,
-        "col": 5,
+        "col": 4,
         "size_x": 5,
         "size_y": 3,
     },
@@ -76,7 +92,7 @@ _PILOTAGE_CARDS = [
         "display": "scalar",
         "sql": "SELECT taux_readmission_pct FROM kpi_synthese",
         "row": 2,
-        "col": 10,
+        "col": 9,
         "size_x": 5,
         "size_y": 3,
     },
@@ -89,7 +105,7 @@ _PILOTAGE_CARDS = [
         "display": "scalar",
         "sql": "SELECT pct_releves_alerte FROM kpi_synthese",
         "row": 2,
-        "col": 15,
+        "col": 14,
         "size_x": 5,
         "size_y": 3,
     },
@@ -99,8 +115,8 @@ _PILOTAGE_CARDS = [
         "display": "scalar",
         "sql": "SELECT nb_sejours_en_cours FROM kpi_synthese",
         "row": 2,
-        "col": 20,
-        "size_x": 4,
+        "col": 19,
+        "size_x": 5,
         "size_y": 3,
     },
     # ── Bande 2 · activité ──────────────────────────────────────────────────
@@ -127,7 +143,7 @@ _PILOTAGE_CARDS = [
         "row": 5,
         "col": 0,
         "size_x": 12,
-        "size_y": 6,
+        "size_y": 8,
     },
     {
         "name": "Activité des urgences par jour",
@@ -152,7 +168,7 @@ _PILOTAGE_CARDS = [
         "row": 5,
         "col": 12,
         "size_x": 12,
-        "size_y": 6,
+        "size_y": 8,
     },
     # ── Bande 3 · surveillance des constantes ───────────────────────────────
     {
@@ -170,10 +186,10 @@ _PILOTAGE_CARDS = [
             "graph.x_axis.title_text": "Jour",
             "graph.y_axis.title_text": "Relevés en alerte",
         },
-        "row": 11,
+        "row": 13,
         "col": 0,
         "size_x": 12,
-        "size_y": 6,
+        "size_y": 8,
     },
     {
         "name": "Nature des alertes par service",
@@ -196,13 +212,22 @@ _PILOTAGE_CARDS = [
             "graph.metrics": ["Fréquence cardiaque", "Saturation (SpO2)", "Température"],
             # Barres groupées et non empilées : un relevé peut déclencher
             # plusieurs alertes, un empilement laisserait croire à un total.
+            #
+            # `auto_split: False` est indispensable ici. Les alertes de
+            # température sont environ dix fois plus nombreuses que les autres ;
+            # laissé à lui-même, Metabase place les séries sur DEUX axes Y de
+            # graduations différentes, et des barres de hauteur comparable
+            # représentent alors des effectifs dans un rapport de 1 à 10. Un axe
+            # unique montre l'écart réel, qui est précisément l'information.
+            "graph.y_axis.auto_split": False,
+            "graph.show_values": True,
             "graph.x_axis.title_text": "Service",
             "graph.y_axis.title_text": "Nombre d'alertes",
         },
-        "row": 11,
+        "row": 13,
         "col": 12,
         "size_x": 12,
-        "size_y": 6,
+        "size_y": 8,
     },
     # ── Bande 4 · réadmissions, précédées de leur avertissement ─────────────
     # L'encart passe AVANT les deux cartes : un taux de réadmission lu sans sa
@@ -219,10 +244,10 @@ _PILOTAGE_CARDS = [
             "et **aucune** n'a les 30 jours complets. Le taux affiché porte sur ces seules "
             "sorties ; il n'est pas comparable à un taux calculé sur un historique complet."
         ),
-        "row": 17,
+        "row": 21,
         "col": 0,
         "size_x": 24,
-        "size_y": 3,
+        "size_y": 2,
     },
     {
         "name": "Taux de réadmission par service (fenêtre observable)",
@@ -248,29 +273,31 @@ _PILOTAGE_CARDS = [
             "graph.x_axis.title_text": "Service",
             "graph.y_axis.title_text": "Taux de réadmission (%)",
         },
-        "row": 20,
+        "row": 23,
         "col": 0,
         "size_x": 12,
-        "size_y": 7,
+        "size_y": 9,
     },
     {
         "name": "Couverture de l'indicateur de réadmission",
         "description": "Part des sorties sur lesquelles l'indicateur peut se prononcer.",
         "display": "table",
+        # Libellés courts : la colonne se tronque au-delà d'une quinzaine de
+        # caractères, et « aucune mesure possib… » ne veut plus rien dire.
         "sql": (
             "SELECT discharge_date AS `jour de sortie`,\n"
             "       sum(sorties_eligibles) AS sorties,\n"
-            "       max(jours_observables) AS `jours observables sur 30`,\n"
-            "       if(max(jours_observables) = 0, 'aucune mesure possible', 'partiel')\n"
+            "       max(jours_observables) AS `jours obs. / 30`,\n"
+            "       if(max(jours_observables) = 0, 'hors fenêtre', 'partiel')\n"
             "           AS `portée`\n"
             "FROM kpi_readmissions_30j\n"
             "GROUP BY `jour de sortie`\n"
             "ORDER BY `jour de sortie`"
         ),
-        "row": 20,
+        "row": 23,
         "col": 12,
         "size_x": 12,
-        "size_y": 7,
+        "size_y": 9,
     },
     # ── Bande 5 · flux et charge des services ──────────────────────────────
     {
@@ -289,28 +316,28 @@ _PILOTAGE_CARDS = [
             "graph.max_categories_enabled": False,
             "graph.max_categories": 20,
             "graph.show_values": True,
-            "graph.x_axis.title_text": "Nombre de séjours",
-            "graph.y_axis.title_text": "Flux",
+            "graph.x_axis.title_text": "Flux",
+            "graph.y_axis.title_text": "Nombre de séjours",
         },
-        "row": 27,
+        "row": 32,
         "col": 0,
         "size_x": 12,
-        "size_y": 6,
+        "size_y": 8,
     },
     {
         "name": "Activité quotidienne par service",
         "description": "Entrées, sorties, décès et charge (séjours ouverts) par service.",
         "display": "table",
         "sql": (
-            "SELECT jour, service_label AS service, admissions, sorties, deces,\n"
-            "       sejours_en_cours AS `séjours ouverts`\n"
+            "SELECT jour, service_label AS service, admissions, sorties,\n"
+            "       deces AS `décès`, sejours_en_cours AS `ouverts`\n"
             "FROM kpi_activite_service\n"
             "ORDER BY jour DESC, service"
         ),
-        "row": 27,
+        "row": 32,
         "col": 12,
         "size_x": 12,
-        "size_y": 6,
+        "size_y": 8,
     },
     # ── Bande 6 · traçabilité, ce qui distingue ce tableau de bord ──────────
     {
@@ -321,10 +348,10 @@ _PILOTAGE_CARDS = [
             "consultable dans l'entrepôt : aucun chiffre du dashboard n'est le "
             "résultat d'une suppression silencieuse."
         ),
-        "row": 33,
+        "row": 40,
         "col": 0,
         "size_x": 24,
-        "size_y": 3,
+        "size_y": 2,
     },
     {
         "name": "Contrôles qualité du dernier traitement",
@@ -342,10 +369,10 @@ _PILOTAGE_CARDS = [
             "FROM kpi_qualite_pipeline\n"
             "ORDER BY `écartées` DESC, `signalées` DESC, controle"
         ),
-        "row": 36,
+        "row": 42,
         "col": 0,
         "size_x": 24,
-        "size_y": 8,
+        "size_y": 12,
     },
     {
         "name": "Traçabilité de l'ingestion",
@@ -357,10 +384,10 @@ _PILOTAGE_CARDS = [
             "FROM kpi_ingestion\n"
             "ORDER BY `jour de dépôt` DESC, domaine"
         ),
-        "row": 44,
+        "row": 54,
         "col": 0,
         "size_x": 24,
-        "size_y": 7,
+        "size_y": 10,
     },
 ]
 
@@ -385,7 +412,7 @@ _RECHERCHE_CARDS = [
         "row": 0,
         "col": 0,
         "size_x": 24,
-        "size_y": 5,
+        "size_y": 4,
     },
     {
         "name": "Taille des cohortes par pathologie",
@@ -404,13 +431,13 @@ _RECHERCHE_CARDS = [
             "graph.max_categories_enabled": False,
             "graph.max_categories": 20,
             "graph.show_values": True,
-            "graph.x_axis.title_text": "Patients",
-            "graph.y_axis.title_text": "Pathologie (CIM-10)",
+            "graph.x_axis.title_text": "Pathologie (CIM-10)",
+            "graph.y_axis.title_text": "Patients",
         },
-        "row": 5,
+        "row": 4,
         "col": 0,
         "size_x": 12,
-        "size_y": 7,
+        "size_y": 9,
     },
     {
         "name": "Prévalence par pathologie",
@@ -431,13 +458,13 @@ _RECHERCHE_CARDS = [
             "graph.max_categories_enabled": False,
             "graph.max_categories": 20,
             "graph.show_values": True,
-            "graph.x_axis.title_text": "Prévalence (%)",
-            "graph.y_axis.title_text": "Pathologie (CIM-10)",
+            "graph.x_axis.title_text": "Pathologie (CIM-10)",
+            "graph.y_axis.title_text": "Prévalence (%)",
         },
-        "row": 5,
+        "row": 4,
         "col": 12,
         "size_x": 12,
-        "size_y": 7,
+        "size_y": 9,
     },
     {
         "name": "Distribution par âge et sexe",
@@ -463,10 +490,10 @@ _RECHERCHE_CARDS = [
             "graph.x_axis.title_text": "Tranche d'âge",
             "graph.y_axis.title_text": "Patients",
         },
-        "row": 12,
+        "row": 13,
         "col": 0,
         "size_x": 12,
-        "size_y": 7,
+        "size_y": 9,
     },
     {
         "name": "Part des femmes par pathologie",
@@ -491,27 +518,28 @@ _RECHERCHE_CARDS = [
             "graph.dimensions": ["pathologie"],
             "graph.metrics": ["part de femmes (%)"],
             "graph.show_values": True,
-            "graph.x_axis.title_text": "Part de femmes (%)",
-            "graph.y_axis.title_text": "Pathologie",
+            "graph.x_axis.title_text": "Pathologie",
+            "graph.y_axis.title_text": "Part de femmes (%)",
         },
-        "row": 12,
+        "row": 13,
         "col": 12,
         "size_x": 12,
-        "size_y": 7,
+        "size_y": 9,
     },
     {
         "name": "Description détaillée des cohortes",
         "description": "Pathologie × sexe × tranche d'âge — cellules d'au moins 5 patients.",
         "display": "table",
         "sql": (
-            "SELECT libelle AS pathologie, sexe, tranche_age AS `tranche d'âge`, nb_patients\n"
+            "SELECT libelle AS pathologie, sexe, tranche_age AS `tranche d'âge`,\n"
+            "       nb_patients AS patients\n"
             "FROM cohorte_demographie\n"
             "ORDER BY pathologie, sexe, tranche_age_debut"
         ),
-        "row": 19,
+        "row": 22,
         "col": 0,
         "size_x": 14,
-        "size_y": 9,
+        "size_y": 7,
     },
     {
         "kind": "text",
@@ -523,10 +551,10 @@ _RECHERCHE_CARDS = [
             "permettre de ré-identifier une personne.\n\n"
             "Le compteur ci-dessous mesure cet effet à chaque traitement."
         ),
-        "row": 19,
+        "row": 22,
         "col": 14,
         "size_x": 10,
-        "size_y": 6,
+        "size_y": 4,
     },
     {
         "name": "Cellules retirées de la diffusion (seuil k = 5)",
@@ -539,7 +567,7 @@ _RECHERCHE_CARDS = [
             "       seuil_k             AS `seuil k`\n"
             "FROM k_anonymat_controle"
         ),
-        "row": 25,
+        "row": 26,
         "col": 14,
         "size_x": 10,
         "size_y": 3,
@@ -550,14 +578,14 @@ _RECHERCHE_CARDS = [
         "display": "table",
         "sql": (
             "SELECT libelle AS pathologie, region_code AS `département`, sexe,\n"
-            "       tranche_age AS `tranche d'âge`, nb_patients\n"
+            "       tranche_age AS `tranche d'âge`, nb_patients AS patients\n"
             "FROM cohorte_demographie_region\n"
             "ORDER BY pathologie, `département`, sexe, tranche_age_debut"
         ),
-        "row": 28,
+        "row": 29,
         "col": 0,
         "size_x": 24,
-        "size_y": 7,
+        "size_y": 11,
     },
 ]
 
