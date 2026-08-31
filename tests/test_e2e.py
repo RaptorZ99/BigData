@@ -210,14 +210,20 @@ def test_le_k_anonymat_supprime_effectivement_des_cellules(client):
     assert supprimees == 4
 
 
-def test_la_base_recherche_ne_contient_aucun_pseudonyme_individuel(client):
-    """Minimisation : seuls des agrégats sont diffusés à la recherche."""
+@pytest.mark.parametrize("base", ["eds_gold_recherche", "eds_gold_pilotage"])
+def test_aucune_base_de_restitution_n_expose_de_pseudonyme(client, base):
+    """Minimisation à l'intérieur même de l'entrepôt.
+
+    Le pseudonyme n'est pourtant pas identifiant, mais aucun indicateur n'en a
+    besoin : il ne descend donc pas jusqu'aux bases de restitution. C'est
+    l'affirmation du modèle de menace du rapport (§4.1), ancrée ici.
+    """
     colonnes = scalar(
         client,
         "SELECT count() FROM system.columns "
-        "WHERE database = 'eds_gold_recherche' AND name = 'patient_pseudo'",
+        f"WHERE database = '{base}' AND name = 'patient_pseudo'",
     )
-    assert colonnes == 0
+    assert colonnes == 0, f"{base} expose un pseudonyme patient"
 
 
 # ── Cloisonnement ───────────────────────────────────────────────────────────

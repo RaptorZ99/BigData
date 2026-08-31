@@ -255,8 +255,44 @@ Trois propriétés justifient ce choix :
 - **Déterministe.** Le même IPP produit toujours le même pseudonyme, ce qui préserve les
   jointures entre patients et séjours, y compris entre deux jours d'ingestion différents.
 - **Non réversible sans le sel.** Le sel vit dans un fichier non versionné et n'apparaît
-  jamais dans les journaux. Le pipeline refuse de démarrer si ce sel est absent ou trop
-  court : mieux vaut ne rien ingérer qu'ingérer avec une protection faible.
+  jamais dans les journaux. Le pipeline refuse de démarrer si ce sel est absent, trop court,
+  ou s'il vaut encore la valeur d'exemple : mieux vaut ne rien ingérer qu'ingérer avec une
+  protection illusoire.
+
+**Ce que la pseudonymisation protège — et ce qu'elle ne protège pas.** Il faut être précis,
+car c'est le point sur lequel un projet de santé se juge.
+
+L'espace des identifiants du CHU est petit et prévisible : `IPP0000000` à `IPP0005999`.
+Quiconque possède le sel peut donc recalculer les 6 000 pseudonymes en une fraction de
+seconde et rétablir la correspondance intégrale. Ce n'est pas une faiblesse de HMAC — aucune
+fonction de hachage ne résiste à un espace d'entrée aussi réduit — c'est une propriété
+inhérente à la pseudonymisation.
+
+La sécurité repose donc entièrement sur le **secret du sel**, et notre modèle de menace est
+explicite :
+
+| Attaquant | Ce qu'il obtient | Pourquoi |
+|---|---|---|
+| Lecteur d'un tableau de bord | Rien d'individuel | Les tables gold sont des agrégats, avec seuil k ≥ 5 en recherche |
+| Compte SQL `chu_pilotage` ou `chu_recherche` | Rien d'individuel — **pas même un pseudonyme** | Aucune des deux bases gold n'expose de colonne `patient_pseudo` (vérifié : 0 dans `system.columns`) |
+| Compte technique du pipeline | Des pseudonymes, sans identité | Il ne peut remonter à un patient sans le sel |
+| Personne ayant accès à l'entrepôt **et** au sel | **L'identité complète** | C'est le risque résiduel assumé |
+| Personne ayant accès au dépôt Git | Rien | Ni `.env`, ni `source-filestorage/`, ni `data/` ne sont versionnés |
+
+La deuxième ligne mérite d'être soulignée : la minimisation ne s'arrête pas à la frontière de
+l'entrepôt, elle se poursuit **à l'intérieur**. Les deux comptes de restitution travaillent
+sur des agrégats, et le pseudonyme lui-même — pourtant déjà non identifiant — ne leur est
+pas exposé, faute d'usage qui le justifie.
+
+Trois conséquences opérationnelles en découlent, et elles sont appliquées : le sel n'est
+jamais journalisé ni affiché, il n'est jamais commité, et il est généré aléatoirement à
+l'installation plutôt que laissé à une valeur connue. En production, il devrait vivre dans
+un coffre-fort de secrets, avec des accès tracés (cf. §8.2).
+
+C'est précisément pour cette raison que la pseudonymisation **ne rend pas les données
+anonymes au sens du RGPD** : elles restent des données personnelles, et leur traitement
+reste soumis à base légale, analyse d'impact et registre (cf. §8.3). Ce qu'elle apporte est
+réel mais borné — elle réduit drastiquement la surface d'exposition, elle ne l'annule pas.
 
 Dans le même mouvement, le NIR, le nom et le prénom **ne sont simplement jamais écrits**,
 et la date de naissance est réduite à l'année. À la sortie de cette étape, le fichier
