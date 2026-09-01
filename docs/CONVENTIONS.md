@@ -73,7 +73,7 @@ l'une d'elles change, c'est qu'une règle a été modifiée, et cela doit être 
 | KPI | DMS 6,08 j (6,01 → 6,23 par service) · patients 5 358 · réadmission **687 / 1 421 observables = 48,3 %** (couverture 12,2 %) |
 | RGPD | k-anonymat 4 cellules retirées / 1 600 · marges 3 / 200 · 0 cellule reconstructible |
 | qualité | **18 règles** = 14 silver + 4 gold |
-| tests | **127** = 64 unitaires + 63 d'intégration |
+| tests | **162** = 99 unitaires + 63 d'intégration |
 
 ⚠ **Le taux de réadmission ne se lit jamais sur les 11 678 sorties éligibles** : seules
 1 421 ont une fenêtre d'observation non vide. Le rapport aux 11 678 donnerait 5,9 %, exact
@@ -85,7 +85,7 @@ et trompeur (cf. [`RAPPORT.md`](RAPPORT.md) §5.3).
 make demo        # démo complète de zéro (up + pipeline + provision) — ~30 s
 make pipeline    # pipeline incrémental (jours non encore ingérés)
 make quality     # les 18 contrôles qualité du dernier traitement
-make test        # 64 tests unitaires ; make test-e2e pour les 63 invariants
+make test        # 99 tests unitaires ; make test-e2e pour les 63 invariants
 make provision   # recrée connexions, permissions et dashboards Metabase
 uv run eds run --rebuild          # reconstruit silver+gold après modification du SQL
 uv run eds run --date 2026-08-27  # rejeu forcé d'un jour (reprise sur incident)

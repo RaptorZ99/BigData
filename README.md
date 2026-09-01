@@ -184,7 +184,7 @@ uv run eds --help
 │   ├── 15_bronze_load/     chargements paramétrés par jour
 │   ├── 20_silver/          constellation, règles qualité, rapport
 │   └── 30_gold/            indicateurs par usage
-├── tests/                127 tests (64 unitaires, 63 d'intégration)
+├── tests/                162 tests (99 unitaires, 63 d'intégration)
 │   ├── test_pseudo.py      pseudonymisation : stabilité, non-réversibilité
 │   ├── test_collect.py     aucune donnée identifiante ne sort de la source
 │   ├── test_config.py      détection des secrets d'exemple
@@ -192,6 +192,7 @@ uv run eds --help
 │   ├── test_warehouse.py   découpage des scripts SQL
 │   ├── test_pipeline.py    dépôt incomplet, échec partiel, couche en retard
 │   ├── test_dashboards.py  mise en page : chevauchements, titres, tables visées
+│   ├── test_data_model.py  le diagramme décrit-il encore l'entrepôt réel ?
 │   └── test_e2e.py         invariants de l'entrepôt (nécessite Docker)
 ├── docs/                 Toute la documentation
 │   ├── RAPPORT.md          dossier d'analyse et de conception (Partie 1)
@@ -221,14 +222,14 @@ commande que vous pouvez rejouer.
 | Vérification | Commande | Ce qu'elle établit |
 |---|---|---|
 | Style | `make lint` | ruff, sur `src/` et `tests/` |
-| Tests unitaires | `make test` | 64 tests, sans Docker : pseudonymisation, collecte, incrémentalité, découpage SQL, mise en page des dashboards |
+| Tests unitaires | `make test` | 99 tests, sans Docker : pseudonymisation, collecte, incrémentalité, découpage SQL, mise en page des dashboards |
 | Invariants de l'entrepôt | `make test-e2e` | 63 tests : volumétries exactes, règles qualité, k-anonymat, cloisonnement, lignage |
 | Cloisonnement | `uv run eds check-cloisonnement` | 9 scénarios réels, aux deux niveaux (moteur et interface) |
 | Rapport qualité | `make quality` | les 18 règles du dernier traitement, chiffrées |
 | Tenue en charge | `uv run benchmarks/charge_monitoring.py` | 20 M de relevés chargés par le chemin réel du pipeline |
 
 **Ce que la CI couvre, et ce qu'elle ne couvre pas.** Le workflow exécute le style et les
-**64 tests unitaires** à chaque poussée. Les **63 tests d'intégration** ne s'y exécutent que
+**99 tests unitaires** à chaque poussée. Les **63 tests d'intégration** ne s'y exécutent que
 si un jeu de données est mis à disposition du runner (`vars.EDS_SOURCE_AVAILABLE`) : le
 dépôt du CHU contient l'identité réelle des patients et n'est pas versionné. C'est un
 arbitrage assumé — nous préférons une CI partielle à un dépôt qui contiendrait des données
