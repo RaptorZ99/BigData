@@ -3,9 +3,8 @@
 Toute l'infrastructure du déploiement Azure. Rien ne se crée à la main ;
 `terraform destroy` ne laisse rien derrière.
 
-Le mode d'emploi complet est dans [`docs/CLOUD.md`](../docs/CLOUD.md) ; les choix
-d'architecture et leur justification dans
-[`docs/PLAN-CLOUD.md`](../docs/PLAN-CLOUD.md).
+Les choix d'architecture et leur justification sont résumés dans le
+[rapport](../docs/RAPPORT.md) §3.3 ; le détail opérationnel est ci-dessous.
 
 ## Démarrage
 
@@ -16,8 +15,7 @@ terraform -chdir=terraform init -backend-config=backend.hcl
 make cloud-plan && make cloud-apply
 ```
 
-Mode d'emploi détaillé, vérifications et reprise sur incident :
-[`docs/CLOUD.md`](../docs/CLOUD.md).
+Vérification, exploitation et reprise sur incident : [README](../README.md) §Exploitation.
 
 ## Organisation
 

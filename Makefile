@@ -131,7 +131,7 @@ image-push: ## Construit en amd64 et publie l'image du pipeline
 	@echo "→ Publiée : $(IMAGE):$$(git rev-parse --short HEAD)"
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  Déploiement Azure — cf. docs/CLOUD.md
+#  Déploiement Azure — cf. terraform/README.md
 # ─────────────────────────────────────────────────────────────────────────────
 # Registre public : les jobs Azure tirent l'image sans aucun identifiant.
 IMAGE := louis336/eds-chu

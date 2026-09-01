@@ -1,80 +1,43 @@
 # Entrepôt de Données de Santé du CHU — dossier de conception
 
-**M2 Big Data · épreuve E05** — Partie 1 : analyse, architecture et restitution.
+**M2 Big Data · épreuve E05** — de dépôts quotidiens de fichiers hétérogènes à deux
+tableaux de bord cloisonnés, avec pseudonymisation dès l'entrée de la zone de travail.
 
----
+> Tous les chiffres de ce dossier sont ceux de la dernière exécution, et chacun est
+> reproductible en une commande (§5.3). La mise en service et l'exploitation sont dans le
+> [README](../README.md).
 
-## Sommaire
-
-1. [Contexte et analyse du besoin](#1-contexte-et-analyse-du-besoin)
-2. [Les données sources](#2-les-données-sources)
-3. [Architecture](#3-architecture) — *dont §3.6 le déploiement cloud*
-4. [Traitements et qualité](#4-traitements-et-qualité) — *dont §4.4 pourquoi dbt*
-5. [Les indicateurs](#5-les-indicateurs)
-6. [Restitution et cloisonnement](#6-restitution-et-cloisonnement)
-7. [Gouvernance RGPD](#7-gouvernance-rgpd)
-8. [Limites et recommandations](#8-limites-et-recommandations)
-
----
-
-## 1. Contexte et analyse du besoin
-
-### 1.1 Le problème posé
-
-Le CHU dispose de données réparties dans plusieurs systèmes — dossier patient, urgences,
-laboratoire, monitoring des chambres — qui n'exportent ni dans le même format ni avec les
-mêmes conventions. Chaque jour, ces systèmes déposent leurs fichiers dans un espace commun.
-En l'état, répondre à une question aussi simple que « quelle est notre durée moyenne de
-séjour en cardiologie ? » suppose d'ouvrir plusieurs fichiers, de les rapprocher à la main
-et d'espérer que personne n'a introduit d'incohérence.
-
-> **Le laboratoire ne dépose pas encore.** Le dépôt fourni contient les patients, les
-> séjours, les diagnostics, le monitoring et les référentiels — pas de résultats
-> d'analyses. Aucun indicateur de ce dossier n'en dépend donc, et nous ne prétendons pas
-> couvrir ce système. L'architecture l'accueillerait sans réécriture : un nouveau domaine
-> se déclare dans `src/eds/collect.py` et dans `sql/15_bronze_load/`, et alimenterait une
-> quatrième étoile (`fact_resultat_labo`, au grain « un résultat d'analyse ») écrite comme
-> les autres, en modèle dbt.
-
-La direction veut deux choses de cet entrepôt, et elles ne se ressemblent pas :
-
-- **Le pilotage hospitalier** a besoin de suivre l'activité au jour le jour : combien de
-  passages aux urgences, combien de temps les patients restent, combien reviennent après
-  leur sortie, combien d'alertes sur les constantes. Ce sont des chiffres d'exploitation,
-  qui doivent être justes et disponibles rapidement.
-- **La recherche clinique** a besoin de constituer des cohortes : combien de patients pour
-  telle pathologie, quel âge, quel sexe. Ce sont des chiffres d'étude, qui doivent être
-  comparables dans le temps et surtout **anonymes**.
-
-### 1.2 Ce que cette différence implique
-
-Ces deux usages n'ont pas besoin des mêmes données, et c'est ce qui structure toute
-l'architecture. Le pilotage travaille sur l'activité : les séjours, les services, les
-constantes. La recherche travaille sur des populations : des effectifs, des tranches d'âge,
-jamais un patient identifiable.
-
-Nous en avons tiré une décision de conception : **deux bases distinctes en sortie**, avec
-deux comptes de lecture séparés. Ce n'est pas un raffinement cosmétique — c'est ce qui
-permet de garantir qu'un chercheur ne peut pas, même par accident, remonter à un séjour
-individuel, et qu'un cadre de santé ne consulte pas de données d'étude.
-
-### 1.3 La contrainte RGPD
-
-Les données de santé relèvent de l'article 9 du RGPD : leur traitement est interdit par
-principe, sauf exceptions encadrées. Concrètement, cela impose quatre obligations que nous
-avons traitées comme des contraintes de conception, pas comme une couche ajoutée à la fin :
-
-| Obligation | Traduction technique retenue |
+| § | Question |
 |---|---|
-| Pseudonymisation | L'identité est remplacée par un pseudonyme **avant** toute écriture dans notre zone de travail |
-| Minimisation | Une donnée qui ne sert aucun indicateur n'est pas conservée |
-| Cloisonnement | Les droits d'accès sont portés par le moteur de base de données, pas seulement par l'outil de visualisation |
-| Petits effectifs | Une cohorte de moins de cinq patients n'est jamais diffusée |
+| [1](#1-le-besoin) | Que veut l'hôpital ? |
+| [2](#2-les-données-sources) | Qu'y a-t-il dans les fichiers — et qu'y a-t-il de cassé ? |
+| [3](#3-architecture) | Quelle chaîne, et pourquoi celle-là ? |
+| [4](#4-qualité-des-données) | Qu'a-t-on écarté, et sur quelle règle ? |
+| [5](#5-les-indicateurs) | Que valent les chiffres publiés ? |
+| [6](#6-restitution-et-cloisonnement) | Qui voit quoi ? |
+| [7](#7-gouvernance-rgpd) | Comment tient la conformité ? |
+| [8](#8-limites-et-recommandations) | Ce qu'il ne faut pas conclure de ces données |
 
-Le fichier `patients.csv` arrive avec le NIR, le nom, le prénom et la date de naissance
-complète. Ces quatre colonnes sont, chacune, directement ou quasi-identifiantes. Notre
-première décision a été de faire en sorte qu'elles ne franchissent jamais la porte de
-l'entrepôt.
+---
+
+## 1. Le besoin
+
+Deux publics, deux besoins incompatibles — et c'est précisément ce qui structure le projet.
+
+| Public | Besoin | Ce qu'il obtient | Ce qu'il ne doit **pas** voir |
+|---|---|---|---|
+| **Direction & cadres** | Piloter l'activité | DMS par service, urgences, réadmissions, alertes de constantes, flux | Rien de nominatif ; pas les cohortes de recherche |
+| **Chercheurs cliniciens** | Constituer des cohortes | Prévalence, taille de cohorte, distribution par âge et sexe | Le détail individuel, et **toute cellule < 5 patients** |
+
+Contrainte transverse : les données de santé relèvent de l'**article 9 du RGPD**. La
+conformité n'est pas une couche ajoutée à la fin — elle décide de l'architecture. Deux
+conséquences structurantes, prises dès le premier jour :
+
+1. **L'identité est détruite avant l'entrepôt**, pas masquée dedans. Le NIR, le nom et le
+   prénom ne sont jamais copiés ; l'IPP est remplacé par un pseudonyme au moment même de la
+   copie depuis le dépôt du CHU.
+2. **Le cloisonnement est porté par le moteur**, pas par l'interface. Deux bases gold, deux
+   comptes SQL. Une requête hors périmètre est refusée par ClickHouse, pas cachée par Metabase.
 
 ---
 
@@ -82,1016 +45,377 @@ l'entrepôt.
 
 ### 2.1 Ce que le CHU dépose
 
-Trois jours de dépôt nous ont été fournis (26, 27 et 28 août 2026), organisés par domaine
-puis par jour. Nous avons commencé par profiler l'intégralité de ces fichiers avant
-d'écrire la moindre ligne de code : c'est ce profilage qui a révélé les pièges décrits
-ci-dessous, et qui a dimensionné les règles de qualité.
+Trois jours de dépôt, cinq domaines, quatre formats — en lecture seule.
 
-| Fichier | Format | Volume | Contenu |
-|---|---|---|---|
-| `patients.csv` | CSV | 16 200 lignes | ⚠ Identité en clair : IPP, NIR, nom, prénom, date de naissance, sexe, département |
-| `sejours.csv` | CSV | 15 000 lignes | Un passage à l'hôpital : dates d'admission et de sortie, service, modes d'entrée et de sortie |
-| `diagnostics.json` | JSON imbriqué | 37 380 codes | Un ou plusieurs codes CIM-10 par séjour, avec leur type (principal ou associé) |
-| `monitoring.parquet` | Parquet | 66 677 lignes | Constantes au chevet : fréquence cardiaque, saturation, température |
-| `services.csv`, `cim10.csv` | CSV | 8 et 10 lignes | Nomenclatures : code → libellé |
-
-Le monitoring est le flux qui dicte les choix techniques : sur trois jours il représente
-déjà plus de lignes que tout le reste réuni, et en production il croîtrait linéairement
-avec le nombre de lits équipés.
-
-> **CIM-10** — Classification Internationale des Maladies, 10ᵉ révision. C'est la
-> nomenclature de l'OMS utilisée pour coder les diagnostics : `I21` désigne l'infarctus du
-> myocarde, `C34` un cancer du poumon. La lettre porte le chapitre (I pour cardiovasculaire,
-> C pour tumeurs, J pour respiratoire…), les chiffres précisent la pathologie.
+| Fichier | Format | Contenu | Volume brut |
+|---|---|---|---:|
+| `patients/<jour>/patients.csv` | CSV | ⚠ **identité en clair** : IPP, NIR, nom, prénom, date de naissance, sexe, département | 16 200 |
+| `sejours/<jour>/sejours.csv` | CSV | Séjour : `stay_id`, patient, service, admission, sortie, modes | 15 000 |
+| `diagnostics/<jour>/diagnostics.json` | JSON imbriqué | 1..n codes CIM-10 par séjour | 37 380 |
+| `monitoring/<jour>/monitoring.parquet` | Parquet | Constantes au chevet : FC, SpO2, température | 66 677 |
+| `referentiels/<jour>/{services,cim10}.csv` | CSV | Nomenclatures, déposées le premier jour | 15 + 10 |
 
 ### 2.2 Ce que le profilage a révélé
 
-Cinq observations ont directement orienté la conception.
+Explorer avant de coder a évité quatre erreurs de conception. Chacune de ces observations a
+une conséquence directe dans la chaîne.
 
-**Les fichiers patients sont cumulatifs.** Le CHU ne dépose pas les nouveaux patients du
-jour : il redépose l'intégralité de sa base. On passe de 4 800 lignes le premier jour à
-5 400 puis 6 000, chaque fichier contenant tous les patients des jours précédents. Au total
-16 200 lignes pour 6 000 patients réels. Sans déduplication, chaque patient serait compté
-deux ou trois fois dans les cohortes.
-
-**Les identifiants de séjour ne se recoupent pas d'un jour à l'autre.** Chaque fichier
-apporte 5 000 séjours nouveaux. L'ingestion peut donc être strictement incrémentale.
-
-**Le monitoring déborde de son jour de dépôt.** Le fichier du 26 août contient des relevés
-allant jusqu'au 28. Ce n'est pas une erreur — ce sont les constantes futures des séjours
-ouverts ce jour-là — et surtout ce ne sont pas des doublons : aucune paire
-(séjour, horodatage) n'apparaît deux fois. Le partitionnement par jour de dépôt reste donc
-valide.
-
-**Seuls deux services sont monitorés.** Réanimation et cardiologie, soit 1 506 séjours sur
-15 000, avec un relevé toutes les trente minutes. Tout indicateur bâti sur le monitoring ne
-concerne que ces deux services, et il faut le dire explicitement pour éviter une lecture
-faussée.
-
-**Les anomalies suivent des motifs identifiables.** Les valeurs aberrantes de constantes ne
-sont pas dispersées : la fréquence cardiaque et la saturation deviennent aberrantes
-**ensemble, sur les mêmes lignes**, avec des valeurs extrêmes franches (0 ou 500 bpm, 0 ou
-120 %). C'est la signature d'une panne de capteur, pas d'un patient en détresse. La
-température, elle, reste toujours plausible.
+| Observation | Conséquence retenue |
+|---|---|
+| `patients/` est **cumulatif** — 4 800 → 5 400 → 6 000, chaque jour re-contient les précédents | Déduplication par `argMax` sur le jour d'ingestion : **16 200 lignes → 6 000 patients** |
+| ~2 % du monitoring porte FC **et** SpO2 aberrantes **sur les mêmes lignes** (0/500 bpm, 0/120 %), la température restant toujours valide | Signature d'un **capteur en panne**, pas d'un patient en détresse → rejet, et non alerte clinique |
+| 1 992 séjours ont une sortie datée mais un mode de sortie vide | Valeur manquante légitime → conservée en `NULL`, signalée, jamais rejetée |
+| 220 séjours admis **après un décès antérieur** du même patient | Anomalie de source → conservée et **marquée**, pour ne pas masquer un problème amont |
+| 520 relevés horodatés **après la sortie** du patient | Tous rattachés aux 136 séjours à sortie antérieure à l'admission → rejet **en cascade** (§4) |
+| 8 362 séjours **chevauchent** le précédent du même patient — plus de la moitié | Artefact du jeu synthétique. Les rejeter viderait l'entrepôt → conservés et documentés. **Mais cela casse un calcul de réadmission naïf** (§5.2) |
+| Le monitoring ne couvre que **REA** et **CARDIO** | Les alertes de constantes ne concernent que ces deux services — ce n'est pas une lacune de la chaîne |
 
 ---
 
 ## 3. Architecture
 
-### 3.1 Vue d'ensemble
-
-L'architecture suit le patron médaillon, avec une couche de collecte supplémentaire qui
-porte la pseudonymisation :
+### 3.1 Vue d'ensemble et justification
 
 ```
-source-filestorage  →  lake  →  bronze  →  silver  →  gold  →  Metabase
-  (lecture seule)      (copie    (tables    (faits &   (KPI par   (dashboards
-                   pseudonymisée) typées)  dimensions)  usage)     cloisonnés)
+source-filestorage/   ──▶   data/lake/   ──▶   bronze   ──▶   silver   ──▶   gold ×2   ──▶   Metabase
+ dépôt du CHU               copie              tables         constellation   indicateurs      deux tableaux
+ (lecture seule)            PSEUDONYMISÉE      typées         Kimball         par usage        cloisonnés
+ CSV · JSON · Parquet       HMAC-SHA256 salé
+                                               └───────────────────────────────────┘
+                                                SQL dans ClickHouse, piloté par dbt
+
+        ops · journal d'ingestion, historique des runs, rapport qualité chiffré
 ```
 
-> **Un écart assumé avec l'architecture conseillée.** Le sujet décrit le lake comme une
-> « copie brute, telle quelle », mais demande par ailleurs — c'est le bonus valorisé — que
-> l'identifiant patient soit pseudonymisé **dès l'entrée du lake** et que les identifiants
-> directs soient supprimés. Les deux ne peuvent pas être vrais en même temps.
->
-> Nous avons tranché en faveur de la protection : notre lake est une copie *fidèle mais
-> pseudonymisée*. Elle conserve toutes les lignes, tous les fichiers et toutes les
-> anomalies — rien n'est filtré, la sélection qualité reste l'affaire de silver — mais
-> l'identité en clair ne franchit jamais la frontière du dépôt du CHU. C'est le seul
-> arbitrage qui rende vraie la phrase « aucune donnée identifiante n'entre dans
-> l'entrepôt » ; l'alternative aurait été d'écrire le NIR et les noms sur notre disque pour
-> les effacer une étape plus loin.
+| Choix | Alternative écartée | Raison |
+|---|---|---|
+| **ClickHouse** comme entrepôt | PostgreSQL | Colonne, compressé, conçu pour l'agrégation. Le monitoring seul justifie ce choix ; il lit le Parquet directement, sans passer par Python |
+| **Pseudonymiser au lake**, pas en bronze | Charger puis anonymiser | Un chargement intermédiaire laisserait l'identité dans le moteur, ne serait-ce qu'un instant. Ici elle ne l'atteint jamais |
+| **dbt** pour silver et gold | SQL ordonné à la main | dbt déduit l'ordre d'exécution du graphe des `ref()` — plus aucune convention de nommage à respecter — et exécute **78 tests pendant** le run, pas après |
+| **Python n'orchestre que** | pandas | Sortir les données du moteur pour les transformer ne passe pas à l'échelle. Seuls les deux CSV à pseudonymiser traversent Python, en flux ligne à ligne, à mémoire constante |
+| **Deux bases gold** | Une base + des vues | Le cloisonnement devient un `GRANT`, donc une propriété du moteur, et non une règle applicative |
+| **Partition bronze par jour** | Table unique | Rejouer un jour = `DROP PARTITION` + rechargement. L'idempotence est structurelle, pas défendue par du code |
+
+ClickHouse et dbt ne sont pas concurrents : **ClickHouse stocke et calcule ; dbt envoie le
+SQL dans le bon ordre et teste le résultat.** dbt ne stocke rien et ne calcule rien.
 
 ### 3.2 Le modèle de données
 
-Voici l'entrepôt en entier — les trente-trois tables, leurs colonnes principales et les
-relations qui les lient. C'est ce schéma qui fait foi : les DDL en découlent — `sql/10_bronze/`
-pour la couche bronze, les modèles `dbt/models/` pour tout le reste — et un test refuse toute
-table présente dans l'entrepôt mais absente d'ici.
+Silver est modélisé en **constellation Kimball : trois étoiles, une par fait**, sur
+dimensions conformées.
 
 ![Modèle de données de l'entrepôt](img/eds-data-model.png)
 
-*Version vectorielle, lisible à toute échelle : [`eds-data-model.svg`](img/eds-data-model.svg)
-— source PlantUML : [`data-model.puml`](data-model.puml).*
+| Fait | Grain | Dimensions | Lignes |
+|---|---|---|---:|
+| `fact_sejour` | un séjour | `dim_patient`, `dim_service` | 14 864 |
+| `fact_diagnostic` | un code CIM-10 par séjour | `dim_patient`, `dim_cim10` | 37 040 |
+| `fact_monitoring` | un relevé (`stay_id`, `ts`) | `dim_service` | 64 799 |
 
-**Comment le lire.** Les quatre cadres colorés sont les quatre bases ClickHouse, disposées
-dans l'ordre du flux : bronze en haut à gauche, silver au centre, les deux bases gold et
-l'exploitation en bas. Les flèches épaisses entre cadres portent la nature de la
-transformation ; celles de l'intérieur de silver sont les liens dimensionnels.
+Trois propriétés à retenir :
 
-| Notation | Signification |
-|---|---|
-| `PK` | Clé du grain de la table |
-| `FK dim_x` | Clé étrangère vers la dimension conformée `dim_x` |
-| `DD` | **Dimension dégénérée** : un identifiant porté par le fait, sans table à lui |
-| Cadre jaune pâle | Dimension conformée, partagée par plusieurs étoiles |
-| Cadre rose | Table de rejets — les lignes écartées, avec leur motif |
-| `⟨—o{` | Relation un-à-plusieurs (une dimension, plusieurs faits) |
+- **Chaque fait porte les clés de ses propres dimensions**, propagées au build silver. Il
+  n'y a donc **aucune jointure fait-à-fait** dans le modèle ni dans les requêtes gold — un
+  produit croisé entre deux tables de faits gonflerait silencieusement tous les comptages.
+- **`stay_id` est la dimension dégénérée** commune aux trois faits : c'est elle qui permet
+  le *drill-across* (partir d'une alerte de constante et remonter au séjour).
+- **Les mesures non additives sont isolées.** `nb_patients` ne se somme jamais hors de son
+  grain : la pyramide des âges lit une table au grain sexe × tranche, pas la table au grain
+  CIM-10 × sexe × tranche — sinon un patient à cinq diagnostics serait compté cinq fois.
 
-**Les trois étoiles se lisent au centre.** Chaque fait est relié uniquement aux dimensions
-dont il a besoin, et à aucun autre fait :
+Source PlantUML : [`data-model.puml`](data-model.puml). Un test
+(`tests/test_data_model.py`) échoue si une table est ajoutée sans figurer au diagramme : le
+schéma ne peut pas se périmer en silence.
 
-- **`fact_sejour`** ⋆ `dim_patient` + `dim_service` — répond à la DMS, à l'activité des
-  urgences, aux réadmissions et à la charge des services ;
-- **`fact_monitoring`** ⋆ `dim_service` — répond aux alertes de constantes. Il porte
-  `service_code` directement, recopié depuis le séjour à la construction : c'est ce qui lui
-  évite de devoir passer par `fact_sejour` ;
-- **`fact_diagnostic`** ⋆ `dim_patient` + `dim_cim10` — répond à la prévalence, aux
-  cohortes et à la démographie. Même principe : `patient_pseudo` y est propagé.
+### 3.3 Déploiement cloud
 
-`stay_id` figure dans les trois faits sans jamais être une table : c'est la dimension
-dégénérée. Elle permet de relier les étoiles quand une analyse transversale le demande,
-mais aucun indicateur du dossier n'en a besoin — et c'est voulu (§3.4).
+La même chaîne tourne sur Azure, décrite en Terraform, et **les invariants ne bougent pas
+d'une unité** — c'était le critère d'acceptation. Le stockage objet remplace le dossier
+local, un job planifié remplace cron, ClickHouse lit le lake par `azureBlobStorage()`.
 
-**Ce que le schéma dit aussi de la conformité.** Trois choses s'y lisent directement :
+Le cloud ajoute un **quatrième niveau de cloisonnement** que le local ne peut pas offrir :
+les droits IAM sont attribués **par conteneur de stockage**. La machine qui héberge
+l'entrepôt n'a aucun droit sur le conteneur contenant les noms et les NIR. Ce n'est plus une
+règle de code — c'est une propriété de l'infrastructure, et `terraform plan` doit rester
+vide pour qu'elle le demeure. Détail : [`terraform/README.md`](../terraform/README.md).
 
-- **aucune colonne `nir`, `nom`, `prenom` ou `birth_date` n'apparaît nulle part**, pas même
-  en bronze : elles n'entrent jamais dans l'entrepôt (§4.1) ;
-- **`fact_monitoring` ne porte pas de `patient_pseudo`** : aucun indicateur de constantes
-  n'en a besoin, la donnée ne descend donc pas jusque-là (§7.1) ;
-- **`cellules_demographie` est rangée en silver et non en gold recherche**, alors qu'elle
-  sert exclusivement aux cohortes : elle contient les effectifs *sous* le seuil de
-  diffusion, et doit rester hors de portée des chercheurs (§7.2).
-
-### 3.3 Justification des choix
-
-| Décision | Choix retenu | Pourquoi |
-|---|---|---|
-| **Entrepôt** | ClickHouse | Base orientée colonnes, donc taillée pour l'analytique sur le flux de monitoring. Elle sait lire directement des fichiers CSV, JSON et Parquet, dispose d'une gestion fine des droits, et son SQL couvre nos besoins (fonctions de fenêtrage, `argMax`, agrégats conditionnels). |
-| **Chargement** | Le moteur lit les fichiers lui-même | Le lake est monté dans le conteneur ClickHouse ; les fichiers sont chargés par la fonction `file()`. Aucune donnée ne transite par la mémoire de Python. C'est la différence entre un pipeline qui tient la charge et un script qui s'effondre dès que le monitoring grossit. |
-| **Transformations** | SQL versionné, orchestré par **dbt** | Chaque règle métier est un modèle lisible, exécuté **par le moteur**. Faire remonter les données côté client pour les transformer en mémoire serait l'anti-pattern classique : cela ne passe pas à l'échelle et rend les calculs impossibles à auditer. dbt n'y change rien — il n'exécute aucun calcul, il envoie le SQL à ClickHouse dans l'ordre que le graphe des dépendances impose, et teste le résultat (§4.4). |
-| **Modélisation silver** | Constellation Kimball | Trois tables de faits — séjour, diagnostic, monitoring — au **grain déclaré**, chacune formant sa propre étoile avec ses dimensions directes. Les dimensions patient, service et CIM-10 sont **conformées**, donc partagées : les deux usages comptent les mêmes patients. Aucune jointure entre deux tables de faits n'est nécessaire, ce qui est précisément l'objectif du modèle dimensionnel. |
-| **Incrémentalité** | Partitionnement par jour + journal d'ingestion | Rejouer un jour revient à supprimer sa partition puis à la recharger. Le journal, indexé par empreinte du fichier source, permet de sauter ce qui n'a pas changé et de reprendre ce qui a échoué. |
-| **Silver et gold** | Reconstruites à chaque exécution | À ce volume, la reconstruction complète prend moins d'une seconde. On y gagne un déterminisme total : le même bronze produit toujours exactement les mêmes indicateurs. |
-| **Cloisonnement** | Deux comptes SQL distincts | La séparation est portée par le moteur. Un utilisateur « recherche » qui écrirait une requête SQL à la main dans Metabase se verrait refuser l'accès par ClickHouse — pas seulement masquer le lien dans l'interface. |
-| **Restitution** | Metabase, provisionné par API | Dashboards sans code pour les utilisateurs, mais définis en Python et versionnés côté projet : après un clone, tout se recrée sans un seul clic. |
-| **Orchestration** | Interface en ligne de commande ; `cron` en local, **job Container Apps planifié** sur Azure | Simple, testable, sans dépendance lourde. Le même exécutable sert aux deux : le cloud ne change que le déclencheur. La montée vers un ordonnanceur dédié est décrite en §8.2. |
-| **Déploiement** | Docker Compose en local, **Terraform** sur Azure | Une seule commande dans les deux cas, et rien qui se crée à la main. L'infrastructure cloud est décrite en 15 fichiers versionnés ; `terraform destroy` ne laisse rien derrière (§3.6). |
-
-### 3.4 Pourquoi une constellation plutôt qu'une seule étoile
-
-Le premier réflexe serait de faire du séjour la table centrale et d'y rattacher tout le
-reste. Nous ne l'avons pas fait, pour une raison précise : chaque besoin métier interroge
-un grain différent.
-
-- « Quelle est la DMS par service ? » se compte **par séjour**.
-- « Combien de relevés en alerte hier ? » se compte **par relevé**.
-- « Combien de patients atteints de BPCO ? » se compte **par diagnostic**.
-
-Chacun de ces faits porte donc directement les clés des dimensions dont il a besoin. Le
-code du service est recopié dans la table des relevés au moment de la construction, et le
-pseudonyme du patient dans la table des diagnostics. Cette propagation coûte un peu
-d'espace et évite systématiquement les jointures entre tables de faits — qui, sur des grains
-différents, produisent des comptages faux dès qu'on agrège.
-
-L'identifiant de séjour reste présent dans les trois faits en **dimension dégénérée** : il
-n'a pas de table à lui, mais il permet de relier les étoiles quand une analyse transversale
-le demande.
-
-### 3.5 Volumétrie et passage à l'échelle
-
-Le sujet impose que « l'architecture tienne la charge » pour le flux de monitoring. Nous
-avons préféré le mesurer plutôt que l'affirmer. Le banc d'essai
-[`benchmarks/charge_monitoring.py`](../benchmarks/charge_monitoring.py) fabrique des
-fichiers Parquet de taille croissante et les charge **par le chemin réel du pipeline**,
-c'est-à-dire `INSERT … SELECT FROM file()`.
-
-| Volume chargé | Fichier Parquet | Durée | Débit |
-|---:|---:|---:|---:|
-| 1 000 000 relevés | 17 Mo | 0,3 s | 3,4 M lignes/s |
-| 5 000 000 relevés | 83 Mo | 1,1 s | 4,4 M lignes/s |
-| **20 000 000 relevés** | **330 Mo** | **4,6 s** | **4,4 M lignes/s** |
-
-**Ce que le banc mesure, et ce qu'il ne mesure pas.** Il couvre le chargement bronze et des
-agrégations sur la table chargée. Il ne rejoue pas la reconstruction complète de silver et
-gold sur ces volumes : les conclusions ci-dessous portent donc sur le maillon qui domine le
-temps de traitement, pas sur la chaîne entière.
-
-Trois enseignements, qui sont autant de validations de choix d'architecture :
-
-**Le débit est stable et le temps croît linéairement.** Charger vingt fois plus de données
-prend vingt fois plus de temps, pas davantage. Il n'y a donc pas de seuil au-delà duquel la
-chaîne s'effondrerait : c'est la conséquence directe du fait que le moteur lit le fichier
-lui-même, sans que rien ne remonte côté client. Un pipeline qui rapatrierait ces 20 millions
-de lignes en mémoire Python aurait, lui, un mur.
-
-**Les agrégations restent instantanées.** Sur ces 20 millions de relevés, compter les
-alertes prend 0,04 seconde, et l'agrégation quotidienne autant. Ce sont exactement les deux
-formes de calcul dont sont faites nos couches silver et gold — un filtre conditionnel et un
-`GROUP BY` par jour et par service. La reconstruction complète à chaque run reste donc
-soutenable bien au-delà des volumes du CHU ; c'est une extrapolation raisonnée à partir de
-ces mesures, non un chronométrage direct de la reconstruction.
-
-**La compression colonne fait son travail — et le chiffre est un plancher.** 20 millions de
-relevés occupent 280 Mo sur disque, soit environ 14 octets par ligne pour cinq colonnes. Il
-faut préciser d'où vient ce gain, sous peine de l'attribuer à la mauvaise cause : le jeu de
-test tire ses constantes **au hasard et indépendamment** d'un relevé au suivant, ce qui est
-le **pire cas** pour un compresseur. L'essentiel du gain vient donc de la clé de tri
-(`stay_id`, `ts`), qui regroupe les valeurs identiques, et du typage entier compact — pas
-d'une régularité du signal. Des constantes réelles, qui dérivent lentement, se
-compresseraient **mieux** que cela. C'est précisément ce pour quoi une base orientée
-colonnes est le bon choix ici.
-
-Pour situer : **20 millions de relevés représentent 300 fois le volume des trois jours
-fournis**, soit, au rythme observé d'un relevé toutes les trente minutes, environ **420 lits
-équipés surveillés pendant un an**. À cette échelle, le chargement quotidien resterait sous
-la seconde.
-
-Deux points d'évolution restent identifiés, sans urgence à ce volume : la reconstruction
-intégrale de silver et gold devrait passer à un traitement incrémental si l'entrepôt
-dépassait la centaine de millions de lignes, et l'ingestion par fichier quotidien devrait
-céder la place à un flux continu si le CHU passait au temps réel.
-
-### 3.6 Déploiement cloud
-
-La même chaîne tourne sur Azure, décrite intégralement en Terraform. Le critère
-d'acceptation du portage était strict : **les chiffres doivent être identiques à
-l'unité près**. Ils le sont — une plateforme qui donnerait d'autres résultats n'aurait
-pas été portée, mais réécrite.
-
-```
-Stockage objet (blobs)           Container Apps              VM
-┌──────────────────────┐        ┌──────────────────┐       ┌────────────────────┐
-│ filestorage/         │───────▶│ job-eds-pipeline │──────▶│ ClickHouse         │
-│   identité en clair  │  lit   │ cron · zéro coût │  SQL  │   bronze → gold    │
-│ lake/                │◀───────│ + dbt build      │       │        ▲           │
-│   pseudonymisé       │ écrit  └──────────────────┘       │        │ SAS r/o   │
-└──────────┬───────────┘                                   │   Metabase         │
-           └───────────── azureBlobStorage() ──────────────┘   Caddy · HTTPS    │
-                                                           └────────────────────┘
-```
-
-**Ce que le cloud apporte réellement**, au-delà de l'exercice :
-
-| Apport | Concrètement |
-|---|---|
-| Un dépôt du CHU réaliste | Stockage objet **versionné**, à suppression réversible — c'est ainsi qu'un CHU dépose, et c'est la seule chose du système qui ne se reconstruise pas |
-| Un lake qui survit à la machine | Détruire la VM ne détruit rien : elle est du bétail, tout s'y reconstruit en dix minutes |
-| Une planification managée | Le `cron` devient un job serverless, journalisé, réessayable, déclenchable à la main pour la reprise sur incident — et **gratuit** : 60 s/jour contre 180 000 vCPU-s offerts par mois |
-| Des secrets hors des fichiers | `.env` devient Key Vault, lu par identité gérée. Aucun mot de passe sur le disque de la VM, ni dans le dépôt |
-| **Un quatrième niveau de cloisonnement** | Voir ci-dessous — c'est l'apport le plus fort |
-
-#### Le cloisonnement devient une propriété de l'infrastructure
-
-En local, « l'identité ne descend jamais sous la collecte » est une propriété **du
-code**, garantie par `FORBIDDEN_COLUMNS` et par les tests. Sur Azure, elle devient en
-plus une propriété **de l'IAM** : les droits sont attribués au conteneur, pas au compte.
-
-| Identité | `filestorage` (identité en clair) | `lake` | Bases gold |
-|---|---|---|---|
-| Job du pipeline | lecture | lecture / écriture | — |
-| **VM (ClickHouse, Metabase)** | **aucun droit** | lecture seule, jeton daté | — |
-| `chu_pilotage` / `chu_recherche` | aucun droit | aucun droit | leur seule base |
-
-La machine qui héberge l'entrepôt **ne peut pas** lire le conteneur qui contient les
-noms et les NIR. Pas « ne le fait pas » : ne le peut pas. Le seul composant qui touche
-l'identité en clair est le job de collecte, qui la lit en flux, la pseudonymise en
-mémoire et n'écrit jamais que le résultat.
-
-#### Ce que le déploiement réel a imposé
-
-Un déploiement ne se conçoit pas sur le papier. Le plan initial visait une machine de
-2 Gio en France Central, à 20 €/mois, lisant un stockage ADLS Gen2 par identité gérée.
-**Aucune de ces quatre hypothèses n'a survécu au contact de l'abonnement.** Les quatre
-faits qui les ont remplacées ont été vérifiés en interrogeant Azure et le moteur, et ce
-sont eux qui dictent l'architecture livrée :
-
-1. **Le choix de la région ne nous appartient pas.** Une policy d'abonnement
-   (« Allowed resource deployment regions ») restreint le déploiement à cinq régions,
-   dont la France ne fait pas partie ; et parmi ces cinq, deux seulement proposent des
-   VM de série B — les autres n'offrent rien en dessous de 70 €/mois. Le déploiement
-   tourne donc en **Suède**, dans l'Union européenne, donc dans le champ du RGPD.
-   L'hébergement en France redevient possible sur un abonnement payant, en changeant
-   une variable. À noter, parce que c'est contre-intuitif : le **quota** annonçait des
-   vCPU de série B disponibles en France — il ne dit rien de la disponibilité réelle.
-2. **ClickHouse 26.3 ne sait pas utiliser l'identité gérée d'une machine virtuelle**
-   pour lire un stockage objet : sans identifiants, il tente `WorkloadIdentityCredential`,
-   qui n'existe que dans Kubernetes. D'où le jeton SAS, limité au conteneur `lake`, en
-   lecture seule et daté — un compromis explicite, documenté, et strictement plus
-   restrictif qu'une clé de compte.
-3. **ClickHouse exige un système de fichiers, pas un partage réseau** : renommages
-   atomiques et liens durs. C'est ce qui interdit de l'héberger dans un conteneur
-   managé — le seul volume persistant qu'offre Container Apps est un partage réseau,
-   sur lequel le moteur échoue. La même contrainte avait imposé un volume Docker nommé
-   en local.
-4. **Le stockage hiérarchique (ADLS Gen2) interdit le versioning des blobs.** Il fallait
-   choisir. Le conteneur du dépôt du CHU étant la seule source de vérité du système,
-   l'historique des versions l'emporte sur des répertoires POSIX dont nos droits ne se
-   servent pas — ils sont attribués au conteneur, pas au dossier. Effet de bord bienvenu :
-   le moteur lit alors un compte de blobs classique, le cas le mieux éprouvé.
-
-S'y ajoutent sept pièges de configuration qu'aucune documentation n'annonce — ClickHouse
-qui cesse d'écouter dès qu'on monte sa propre configuration, un plancher non documenté sur
-la taille de ses pools, le provider Terraform qui lit un compte de stockage avant que sa
-clé soit utilisable. Le détail de ces vérifications, avec les commandes et les messages
-d'erreur exacts, figure en §5 de [`PLAN-CLOUD.md`](PLAN-CLOUD.md) et dans les conventions
-du dépôt. **Aucun n'a fait bouger un seul des chiffres publiés** : c'était le critère
-d'acceptation du portage, et c'est ce qui distingue un portage d'une réécriture.
+Coût mesuré : ~30 €/mois allumé, ~5 € en pause.
 
 ---
 
-## 4. Traitements et qualité
+## 4. Qualité des données
 
-### 4.1 La pseudonymisation, à l'entrée du lake
+Principe constant : **on écarte, on trace, on ne corrige jamais en silence.** Toute ligne
+rejetée part dans une table `*_rejets` avec son motif, et reste consultable.
 
-C'est le traitement le plus important du projet, et il intervient au tout premier moment
-utile : pendant la copie depuis le dépôt du CHU.
+Trois natures de règles, à ne pas confondre :
 
-```python
-def pseudonymize_id(patient_id: str, salt: str) -> str:
-    digest = hmac.new(salt.encode(), patient_id.encode(), hashlib.sha256).hexdigest()
-    return f"P{digest[:16]}"
-```
-
-Trois propriétés justifient ce choix :
-
-- **HMAC plutôt qu'un hachage simple.** Un `sha256(sel + identifiant)` naïf est vulnérable
-  aux attaques par extension de longueur ; HMAC est la construction standard pour
-  authentifier une valeur avec une clé.
-- **Déterministe.** Le même IPP produit toujours le même pseudonyme, ce qui préserve les
-  jointures entre patients et séjours, y compris entre deux jours d'ingestion différents.
-- **Non réversible sans le sel.** Le sel vit dans un fichier non versionné et n'apparaît
-  jamais dans les journaux. Le pipeline refuse de démarrer si ce sel est absent, trop court,
-  ou s'il vaut encore la valeur d'exemple : mieux vaut ne rien ingérer qu'ingérer avec une
-  protection illusoire.
-
-**Ce que la pseudonymisation protège — et ce qu'elle ne protège pas.** Il faut être précis,
-car c'est le point sur lequel un projet de santé se juge.
-
-L'espace des identifiants du CHU est petit et prévisible : `IPP0000000` à `IPP0005999`.
-Quiconque possède le sel peut donc recalculer les 6 000 pseudonymes en une fraction de
-seconde et rétablir la correspondance intégrale. Ce n'est pas une faiblesse de HMAC — aucune
-fonction de hachage ne résiste à un espace d'entrée aussi réduit — c'est une propriété
-inhérente à la pseudonymisation.
-
-La sécurité repose donc entièrement sur le **secret du sel**, et notre modèle de menace est
-explicite :
-
-| Attaquant | Ce qu'il obtient | Pourquoi |
-|---|---|---|
-| Lecteur d'un tableau de bord | Rien d'individuel | Les tables gold sont des agrégats, avec seuil k ≥ 5 en recherche |
-| Compte SQL `chu_pilotage` ou `chu_recherche` | Rien d'individuel — **pas même un pseudonyme** | Aucune des deux bases gold n'expose de colonne `patient_pseudo` (vérifié : 0 dans `system.columns`) |
-| Compte technique du pipeline | Des pseudonymes, sans identité | Il ne peut remonter à un patient sans le sel |
-| Personne ayant accès à l'entrepôt **et** au sel | **L'identité complète** | C'est le risque résiduel assumé |
-| Personne ayant accès au dépôt Git | Rien | Ni `.env`, ni `source-filestorage/`, ni `data/` ne sont versionnés |
-
-La deuxième ligne mérite d'être soulignée : la minimisation ne s'arrête pas à la frontière de
-l'entrepôt, elle se poursuit **à l'intérieur**. Les deux comptes de restitution travaillent
-sur des agrégats, et le pseudonyme lui-même — pourtant déjà non identifiant — ne leur est
-pas exposé, faute d'usage qui le justifie.
-
-Trois conséquences opérationnelles en découlent, et elles sont appliquées : le sel n'est
-jamais journalisé ni affiché, il n'est jamais commité, et il est généré aléatoirement à
-l'installation plutôt que laissé à une valeur connue. En production, il devrait vivre dans
-un coffre-fort de secrets, avec des accès tracés (cf. §8.2).
-
-C'est précisément pour cette raison que la pseudonymisation **ne rend pas les données
-anonymes au sens du RGPD** : elles restent des données personnelles, et leur traitement
-reste soumis à base légale, analyse d'impact et registre (cf. §8.3). Ce qu'elle apporte est
-réel mais borné — elle réduit drastiquement la surface d'exposition, elle ne l'annule pas.
-
-Dans le même mouvement, le NIR, le nom et le prénom **ne sont simplement jamais écrits**,
-et la date de naissance est réduite à l'année. À la sortie de cette étape, le fichier
-`patients.csv` du lake contient quatre colonnes : pseudonyme, année de naissance, sexe,
-département.
-
-### 4.2 Les règles de qualité
-
-Le principe est simple et constant : **on écarte, on trace, on ne corrige jamais en
-silence.** Toute ligne rejetée part dans une table dédiée avec son motif, et reste
-consultable.
-
-Trois natures de règles cohabitent, et les confondre rendrait le rapport illisible :
-
-- **Rejet** — la ligne quitte l'entrepôt et se retrouve dans une table `*_rejets` ;
-- **Signalement** — la ligne est **conservée** mais marquée, parce qu'elle est légitime ou
-  parce que l'anomalie relève de la source ;
+- **Rejet** — la ligne quitte l'entrepôt ;
+- **Signalement** — la ligne est **conservée** mais marquée (anomalie légitime, ou de la source) ;
 - **Contrôle** — vérification attendue à zéro, dont le passage au vert est l'information.
-
-Les chiffres ci-dessous sont ceux de la dernière exécution. Le tableau regroupe les cinq
-contrôles Q6 sur une ligne et laisse de côté les quatre contrôles RGPD de la couche gold
-(§7.2) : la table `ops.quality_report` compte donc **dix-huit règles** — quatorze en silver,
-quatre en gold — recalculées à chaque run et consultables depuis le tableau de bord de
-pilotage.
 
 | Règle | Nature | Lues | Conservées | Écartées | Signalées |
 |---|---|---:|---:|---:|---:|
 | **Q1** Patients redéposés chaque jour | Déduplication | 16 200 | 6 000 | 10 200 | — |
 | **Q2** Sortie antérieure à l'admission | Rejet | 15 000 | 14 864 | 136 | — |
 | **Q4** Constantes hors plage physiologique | Rejet | 66 677 | 64 799 | 1 369 | — |
-| **C1** Relevé dont le séjour est écarté | Rejet en cascade | 66 677 | 64 799 | 520 | — |
-| **C2** Diagnostic dont le séjour est écarté | Rejet en cascade | 37 380 | 37 040 | 340 | — |
+| **C1** Relevé dont le séjour est écarté | Cascade | 66 677 | 64 799 | 520 | — |
+| **C2** Diagnostic dont le séjour est écarté | Cascade | 37 380 | 37 040 | 340 | — |
 | **Q3** Séjour sans date de sortie | Signalement | 14 864 | 14 864 | 0 | 1 190 |
-| **Q5** Sortie datée mais mode non renseigné | Signalement | 14 864 | 14 864 | 0 | 1 975 |
+| **Q5** Sortie datée, mode non renseigné | Signalement | 14 864 | 14 864 | 0 | 1 975 |
 | **Q7** Admission après un décès antérieur | Signalement | 14 864 | 14 864 | 0 | 192 |
 | **Q8** Relevé postérieur à la sortie | Contrôle | 64 799 | 64 799 | 0 | **0** |
 | **Q6** Formats et intégrité référentielle (5 règles) | Contrôle | — | — | 0 | **0** |
 
-Les deux règles de rejet du monitoring se recoupent partiellement. Comme chaque ligne
-écartée porte **tous** ses motifs, concaténés, le recoupement se vérifie directement :
+Avec les quatre contrôles RGPD de la couche gold (§7), `ops.quality_report` compte
+**dix-huit règles**, recalculées à chaque run et affichées au bas du tableau de bord de
+pilotage.
 
-| Motif de rejet | Lignes |
-|---|---:|
-| `hr_out_of_range+spo2_out_of_range` | 1 358 |
-| `parent_stay_rejected` | 509 |
-| `hr_out_of_range+spo2_out_of_range+parent_stay_rejected` | 11 |
-| **Total écarté** | **1 878** |
+Trois décisions à défendre :
 
-Soit 1 369 relevés hors plage (1 358 + 11) et 520 en cascade (509 + 11), pour **64 799
-relevés conservés** sur 66 677.
+- **Une sortie non renseignée n'est pas une anomalie** — c'est un patient encore
+  hospitalisé. Les 1 190 séjours concernés sont conservés, marqués, et exclus du seul calcul
+  où ils fausseraient le résultat : la DMS.
+- **Les cascades ne sont pas cosmétiques.** Un relevé dont le séjour parent est écarté ne
+  peut pas recevoir son code de service — ce code vient du séjour. Le garder produirait une
+  ligne inexploitable.
+- **Q8 est passé de 520 à zéro, et c'est un résultat.** Ces 520 relevés « post-sortie »
+  appartenaient **tous** aux 136 séjours dont la sortie précède l'admission : une telle
+  sortie rend mécaniquement tout relevé postérieur à la sortie. Q8 n'était qu'un symptôme de
+  Q2. Le contrôle est conservé, désormais attendu à zéro.
 
-Ce tableau confirme aussi l'hypothèse formulée au profilage : **la fréquence cardiaque et
-la saturation sont toujours aberrantes ensemble**, jamais l'une sans l'autre, et la
-température ne l'est jamais. C'est la signature d'un capteur défaillant, non d'un patient
-en détresse — ce qui justifie de les écarter plutôt que de les traiter comme des alertes.
-
-Quelques décisions méritent d'être explicitées.
-
-**Une sortie non renseignée n'est pas une anomalie.** C'est un patient encore hospitalisé.
-Le sujet le signalait, et le profilage le confirme : 1 190 séjours sont dans ce cas. Ils
-sont conservés, marqués comme en cours, et exclus du seul calcul où ils fausseraient le
-résultat — la durée moyenne de séjour.
-
-**Les cascades sont nécessaires, pas cosmétiques.** Un relevé de constantes dont le séjour
-parent a été écarté ne peut pas recevoir son code de service, puisque ce code vient du
-séjour. Le conserver produirait une ligne inexploitable. Il part donc en rejet, avec le
-motif `parent_stay_rejected`.
-
-**Une découverte du profilage vaut d'être signalée.** Nous avions relevé 520 relevés de
-constantes horodatés après la sortie du patient, et prévu de les signaler comme anomalie.
-Après implémentation, ce compteur est tombé à zéro — et l'explication est instructive : ces
-520 relevés appartenaient **tous** aux 136 séjours dont la date de sortie précède
-l'admission. Une sortie antérieure à l'admission rend mécaniquement tout relevé
-« postérieur à la sortie ». L'anomalie Q8 n'était donc qu'un symptôme de Q2. Nous avons
-conservé le contrôle, désormais attendu à zéro : c'est son passage au vert qui a de la
-valeur.
-
-**Un cas a été délibérément écarté du rejet.** Le profilage montre que 8 362 séjours
-chevauchent le séjour précédent du même patient. Sur des données réelles, ce serait une
-incohérence majeure. Ici, cela concerne plus de la moitié des séjours : il s'agit d'un
-artefact du jeu synthétique. Les rejeter viderait l'entrepôt. Nous les conservons, et nous
-le documentons — mais cet artefact a une conséquence directe sur un indicateur, décrite
-en §5.3.
-
-### 4.3 Traçabilité
-
-Chaque ligne de bronze et de silver — les quatorze tables, dimensions comprises — porte trois
-colonnes de lignage : le fichier dont elle provient, le jour de dépôt correspondant, et
-l'horodatage de son traitement. Les tables gold, qui sont des agrégats, n'ont pas de ligne
-individuelle à tracer : elles se rattachent à leur exécution par `ops.quality_report`.
-
-Chaque exécution du pipeline est enregistrée avec son identifiant, son statut et les jours
-traités ; `ops.ingest_log` relie chaque fichier au run qui l'a chargé. Chaque règle de
-qualité produit un comptage.
-
-Concrètement, cela permet de répondre à « d'où sort ce 14 864 ? » sans ouvrir un seul
-fichier : le tableau de bord de pilotage affiche le rapport qualité, et le journal
-d'ingestion indique quel fichier a fourni combien de lignes.
-
-### 4.4 Pourquoi dbt, et ce que dbt ne remplace pas
-
-Les couches silver et gold sont écrites en **dbt** : 27 modèles, 78 tests. Le choix
-n'est pas décoratif — il résout trois problèmes que la version en scripts SQL numérotés
-portait réellement.
-
-**L'ordre d'exécution cesse d'être une convention de nommage.** Il reposait sur le
-préfixe des fichiers, au point qu'il fallait écrire dans les conventions du projet que
-`05_pilotage_qualite.sql` devait s'exécuter en dernier « car il recopie
-`ops.quality_report` ». Une règle vraie, invisible du code, et qu'une renumérotation
-maladroite aurait brisée en silence. Avec `ref()`, dbt **déduit** cet ordre ; un test
-statique interdit d'écrire une base en dur, ce qui empêche le piège de revenir.
-
-**La déduplication n'est plus copiée-collée.** La CTE `argMax` des séjours était écrite
-deux fois — dans le fait et dans sa table de rejets — et celle du monitoring aussi.
-Deux copies qui devaient rester identiques sans qu'aucun mécanisme ne le garantisse.
-Elles sont devenues deux modèles éphémères, écrits une fois, que dbt inline dans chaque
-consommateur.
-
-**Les tests entrent dans le pipeline.** `dbt build` construit et teste en une passe,
-selon le graphe : un `fact_sejour` dont la clé n'est plus unique fait échouer le run,
-donc suspend la publication — exactement comme un fichier en échec. La qualité devient
-une **condition de publication**, et non un contrôle *a posteriori*.
-
-**Ce que dbt ne remplace pas.** Un test dbt répond « ça passe ou ça casse » ;
-`ops.quality_report` répond « 15 000 lignes lues, 14 864 conservées, 136 écartées par la
-règle Q2 ». Le second est ce qui permet de justifier un chiffre devant un métier, et
-aucun mécanisme dbt ne le rend. Le rapport qualité a donc été conservé — et, plutôt que
-d'être séquencé à la main, il est devenu lui-même un modèle du graphe. C'est ce qui a
-supprimé la règle d'ordre évoquée plus haut.
-
-Les deux dispositifs coexistent avec des rôles distincts : **78 tests dbt** pendant le
-run, qui bloquent ; **63 tests d'intégration** après, qui vérifient ce que dbt ne voit
-pas — Metabase, le cloisonnement, la mise en page des tableaux de bord.
+**Traçabilité.** Chaque ligne de bronze et de silver porte son fichier d'origine, son jour
+de dépôt et son horodatage de traitement. Chaque exécution est enregistrée dans
+`ops.pipeline_runs` ; `ops.ingest_log` relie chaque fichier au run qui l'a chargé.
 
 ---
 
 ## 5. Les indicateurs
 
-Chaque indicateur est calculé dans l'entrepôt et exposé sous forme de table agrégée. Les
-requêtes des tableaux de bord se réduisent à des `SELECT` simples : aucun calcul métier
-n'est enfoui dans l'outil de visualisation, et tout chiffre affiché est reproductible en SQL.
+Tous sont calculés dans l'entrepôt et exposés en tables agrégées. Les requêtes des tableaux
+de bord se réduisent à des `SELECT` : aucun calcul métier n'est enfoui dans Metabase.
 
-### 5.1 Durée moyenne de séjour
+### 5.1 Définitions et résultats
 
-**Définition.** Moyenne, par service et par jour de sortie, de la durée écoulée entre
-l'admission et la sortie, exprimée en jours.
+| Indicateur | Définition retenue | Résultat |
+|---|---|---|
+| **DMS par service** | Moyenne de `sortie − admission`, par service et jour de sortie. **Séjours en cours exclus** — une durée partielle tirerait la moyenne vers le bas et simulerait une amélioration | **6,08 j** (6,01 cardio → 6,23 urgences) |
+| **Activité des urgences** | Deux acceptions légitimes, **publiées côte à côte** : séjours dont le *service* est URGENCES, et admissions en *mode* urgence tous services. La seconde vaut 2,7× la première | 581→639 /j et 1 627→1 721 /j |
+| **Réadmission à 30 j** | Existe-t-il, pour le même patient, **une** admission dans les 30 jours suivant sa sortie ? Dénominateur : sorties **vivantes** — un patient décédé ne peut pas être réadmis | **687 / 1 421 = 48,3 %** (§5.2) |
+| **Alertes de constantes** | FC hors [40 ; 130] **ou** SpO2 < 90 % **ou** T ≥ 38,5 °C. Distinct des rejets : une FC à 500 bpm est un capteur en panne, écartée en amont | **3 053 / 64 799 = 4,7 %** |
+| **Taille de cohorte** | Nombre de **patients distincts** portant un diagnostic — pas de séjours. Un patient hospitalisé trois fois compte une fois | 2 689 → 2 764 |
+| **Prévalence** | Part des 5 358 patients ayant au moins un séjour. Dénominateur calculé comme scalaire indépendant, **jamais par jointure** entre deux faits | cf. §8 |
 
-**Hypothèse assumée : seuls les séjours terminés entrent dans le calcul.** Un patient encore
-hospitalisé a une durée partielle par construction ; l'inclure tirerait la moyenne vers le
-bas et donnerait l'illusion d'une amélioration de la performance. Les 1 190 séjours en cours
-sont donc exclus du numérateur comme du dénominateur.
+Les seuils d'alerte sont des **hypothèses de travail**, à valider avec les équipes
+soignantes avant tout usage réel.
 
-**Résultat.** DMS globale de **6,08 jours**, très homogène entre services (de 6,01 en
-cardiologie à 6,23 aux urgences).
+### 5.2 Le taux de réadmission : l'indicateur qui demandait le plus de soin
 
-### 5.2 Activité des urgences
+Deux pièges, dont un qui aurait produit un chiffre faux publié en toute confiance.
 
-Cet indicateur a la particularité d'admettre **deux définitions légitimes**, qui ne donnent
-pas le même chiffre :
+**Piège 1 — la fonction de fenêtrage.** La première implémentation regardait l'admission
+chronologiquement *suivante*. Sur des données normales, c'est équivalent. Ici, avec 8 362
+séjours qui se chevauchent (§2.2), l'admission « suivante » est souvent un séjour concurrent
+commencé **avant** la sortie considérée, qui masque la réadmission réelle survenue plus
+tard. Le comptage tombait de **687 à 370** — près de la moitié perdue. Correction : tester
+**l'ensemble** des admissions du patient. C'est aussi la définition cliniquement correcte.
 
-- le nombre de séjours **dont le service est URGENCES** (unité d'hospitalisation) ;
-- le nombre d'admissions **en mode urgence**, tous services confondus (mode d'entrée).
-
-Sur ces données, la seconde est environ 2,7 fois supérieure à la première : beaucoup de
-patients entrent en urgence directement dans un service spécialisé. Plutôt que de trancher
-à la place du métier, nous exposons **les deux côte à côte** sur le même graphique. C'est
-le type d'ambiguïté qui, laissée implicite, produit deux services qui ne parlent pas des
-mêmes chiffres.
-
-### 5.3 Taux de réadmission à 30 jours
-
-C'est l'indicateur qui a demandé le plus de soin, et celui où une définition naïve donne un
-résultat faux.
-
-**Définition retenue.** Un séjour est suivi d'une réadmission s'il existe, pour le même
-patient, **une** admission postérieure à sa sortie et survenant dans les trente jours.
-Dénominateur : les sorties vivantes uniquement — un patient décédé ne peut pas être
-réadmis, et l'inclure minorerait artificiellement le taux.
-
-**Le piège.** Notre première implémentation regardait l'admission chronologiquement
-suivante, via une fonction de fenêtrage. Sur des données normales, cela revient au même.
-Ici, avec 8 362 séjours qui se chevauchent (§4.2), l'admission « suivante » est très souvent
-un séjour concurrent commencé **avant** la sortie considérée — et elle masquait alors la
-réadmission réelle survenue plus tard. Le comptage passait de 687 à 370, soit près de la
-moitié des réadmissions perdues.
-
-Nous avons donc changé de logique : plutôt que la seule admission suivante, on teste
-**l'ensemble des admissions du patient**. C'est aussi la définition cliniquement correcte.
-
-**La limite qui commande tout le reste : la fenêtre d'observation.** C'est le point sur
-lequel cet indicateur mérite d'être défendu, ou concédé.
-
-Une réadmission ne peut être constatée que si l'entrepôt couvre la période où elle
-surviendrait. Or nos admissions s'arrêtent au 28 août — dernier jour déposé — tandis que les
-sorties s'étalent jusqu'au 9 septembre. Une sortie du 3 septembre a donc une probabilité
-**structurellement nulle** d'être suivie d'une réadmission observable :
+**Piège 2 — la fenêtre d'observation, et c'est celui qui commande le chiffre publié.** Nos
+admissions s'arrêtent au 28 août ; les sorties s'étalent jusqu'au 9 septembre.
 
 | Jour de sortie | Sorties | Réadmissions | Taux | Fenêtre observable |
 |---|---:|---:|---:|---:|
-| 26 août | 133 | 115 | 86,5 % | 3 jours sur 30 |
-| 27 août | 474 | 323 | 68,1 % | 2 jours sur 30 |
-| 28 août | 814 | 249 | 30,6 % | 1 jour sur 30 |
+| 26 août | 133 | 115 | 86,5 % | 3 j sur 30 |
+| 27 août | 474 | 323 | 68,1 % | 2 j sur 30 |
+| 28 août | 814 | 249 | 30,6 % | 1 j sur 30 |
 | 29 août → 9 septembre | 10 257 | 0 | 0 % | **aucune** |
 
-Agréger ces lignes ensemble reviendrait à publier un taux de **5,9 %** dont **88 % du
-dénominateur ne mesure rien**. Le chiffre serait arithmétiquement exact et parfaitement
-trompeur — exactement ce que le sujet proscrit en demandant des indicateurs « fiables ».
-
-**Ce que nous publions.** Chaque ligne de `kpi_readmissions_30j` porte désormais
-`jours_observables` : la part de la fenêtre de trente jours réellement couverte. La tuile de
-synthèse ne retient que les sorties dont cette fenêtre n'est pas vide, et le tableau de bord
-affiche la couverture :
-
-- **687 réadmissions sur 1 421 sorties observables, soit 48,3 %** ;
-- ces 1 421 sorties représentent **12,2 % du total** ;
-- **aucune** sortie ne dispose des trente jours complets.
-
-Le tableau de bord porte l'avertissement **au-dessus** des deux cartes, et affiche la
-couverture jour par jour à côté du taux : chaque sortie postérieure au 28 août est
-explicitement marquée « hors fenêtre ».
+Agréger ces lignes donnerait **5,9 %** — arithmétiquement exact, et parfaitement trompeur :
+**88 % du dénominateur ne mesure rien.** Nous publions donc **687 / 1 421 sorties
+observables = 48,3 %**, avec la couverture affichée à côté (12,2 % des sorties ; aucune ne
+dispose des 30 jours complets), et l'avertissement placé **au-dessus** des graphiques qu'il
+qualifie — un avertissement sous le chiffre qu'il corrige n'est pas lu.
 
 ![Réadmissions et couverture de l'indicateur](img/pilotage-readmissions.jpg)
 
-Ce 48,3 % n'est pas non plus un « taux de réadmission à 30 jours » au sens clinique : il
-porte sur une fenêtre de un à trois jours. Il est publié parce qu'il mesure quelque chose de
-réel, accompagné de sa couverture, plutôt que dilué dans un chiffre qui n'en mesure aucun.
+Ce 48,3 % n'est pas non plus un taux de réadmission à 30 jours au sens clinique : il porte
+sur une fenêtre de un à trois jours. Il est publié parce qu'il mesure quelque chose de réel,
+accompagné de sa portée, plutôt que dilué dans un chiffre qui n'en mesure aucun.
 
-**Conséquence pratique.** Le classement des services par ce taux est à manier avec
-précaution : les services diffèrent autant par leur profil de sortie dans la fenêtre
-observable que par leur comportement de réadmission. Un tableau de bord de production
-attendrait au minimum soixante jours d'historique avant de publier cet indicateur — c'est la
-recommandation portée en §8.1.
-
-### 5.4 Surveillance des constantes
-
-**Seuils retenus** — ce sont des hypothèses de travail, à valider avec les équipes
-soignantes avant tout usage réel :
-
-| Constante | Seuil d'alerte | Motif clinique |
-|---|---|---|
-| Fréquence cardiaque | < 40 ou > 130 bpm | Bradycardie ou tachycardie |
-| Saturation en oxygène | < 90 % | Désaturation |
-| Température | ≥ 38,5 °C | Fièvre |
-
-**À distinguer des rejets de qualité.** Une valeur à 500 bpm n'est pas une alerte clinique :
-c'est un capteur en panne, et elle est écartée en amont (règle Q4). Les alertes ne portent
-que sur des mesures physiologiquement plausibles.
-
-**Résultat.** **3 053 relevés en alerte sur 64 799**, soit 4,7 %. Ne concerne que la
-réanimation et la cardiologie, seuls services équipés.
-
-### 5.5 Cohortes et prévalence
-
-**Taille de cohorte.** Nombre de **patients distincts** — et non de séjours — portant un
-diagnostic donné. Un patient hospitalisé trois fois pour la même pathologie compte une fois.
-
-**Prévalence.** Part des patients de l'entrepôt concernés par la pathologie. Le dénominateur
-(5 358 patients ayant au moins un séjour) est calculé comme un agrégat indépendant, jamais
-par jointure entre deux tables de faits.
-
-**Description démographique.** Croisement pathologie × sexe × tranche d'âge de dix ans.
-L'âge est calculé à partir de la seule année de naissance disponible : c'est une
-approximation d'un an au plus, conséquence directe et assumée de la minimisation.
-
-Toutes ces tables appliquent le seuil de diffusion décrit en §7.
-
-### 5.6 Retrouver n'importe quel chiffre
-
-Le sujet demande de pouvoir « justifier chaque chiffre ». Voici le chemin exact, du nombre
-affiché à l'expression SQL qui le produit — chaque ligne est vérifiable en copiant la
-requête dans la console ClickHouse : `http://localhost:8123/play` en local, et par tunnel
-SSH sur le déploiement Azure, où l'entrepôt n'est pas exposé (cf. [`CLOUD.md`](CLOUD.md) §7).
+### 5.3 Retrouver n'importe quel chiffre
 
 | Chiffre affiché | Valeur | Table gold | Expression déterminante |
 |---|---:|---|---|
 | Séjours pris en charge | 14 864 | `kpi_synthese` | `count()` sur `fact_sejour` |
 | Patients suivis | 5 358 | `kpi_synthese` | `uniqExact(patient_pseudo)` |
 | DMS globale | 6,08 j | `kpi_synthese` | `avg(duree_jours)` **où** `discharge_ts IS NOT NULL` |
-| DMS par service | 6,01 → 6,23 j | `kpi_dms_service` | `sum(dms_jours * nb_sorties) / sum(nb_sorties)` — moyenne **repondérée**, une moyenne de moyennes serait fausse |
-| Passages aux urgences | 581 → 639 /j | `kpi_urgences_jour` | `countIf(is_service_urgences)` |
-| Admissions en mode urgence | 1 627 → 1 721 /j | `kpi_urgences_jour` | `countIf(is_admission_urgence)` |
-| Réadmissions à 30 jours | 687 / 1 421 observables | `kpi_readmissions_30j` | `arrayExists(adm -> adm > discharge_ts AND adm <= discharge_ts + INTERVAL 30 DAY, admissions_du_patient)` |
-| Relevés en alerte | 3 053 / 64 799 | `kpi_alertes_monitoring` | `countIf(is_alert)`, soit FC hors [40;130] **ou** SpO2 < 90 **ou** T ≥ 38,5 |
-| Séjours en cours | 1 190 | `kpi_synthese` | `countIf(is_ongoing)`, soit `discharge_ts IS NULL` |
-| Taille des cohortes | 2 689 → 2 764 | `cohorte_pathologie` | `uniqExact(patient_pseudo)` **par code CIM-10**, `HAVING >= 5` |
-| Prévalence | % de 5 358 | `prevalence_pathologie` | dénominateur calculé comme scalaire indépendant, jamais par jointure |
+| DMS par service | 6,01 → 6,23 j | `kpi_dms_service` | `sum(dms × nb_sorties) / sum(nb_sorties)` — moyenne **repondérée** ; une moyenne de moyennes serait fausse |
+| Réadmissions | 687 / 1 421 | `kpi_readmissions_30j` | `arrayExists(adm -> adm > discharge_ts AND adm <= discharge_ts + INTERVAL 30 DAY, admissions_du_patient)` |
+| Relevés en alerte | 3 053 / 64 799 | `kpi_alertes_monitoring` | `countIf(is_alert)` |
+| Séjours en cours | 1 190 | `kpi_synthese` | `countIf(is_ongoing)` |
 | Pyramide des âges | total 5 358 | `cohorte_demographie_globale` | grain sexe × tranche : un patient compté **une** fois |
-| Cellules supprimées (k<5) | 4 / 1 600 | `k_anonymat_controle` | cellules calculées − cellules diffusées, au même périmètre |
+| Cellules supprimées (k<5) | 4 / 1 600 | `k_anonymat_controle` | cellules calculées − cellules diffusées |
 
-Trois vérifications que le jury peut faire lui-même en une commande :
-
-```bash
-make quality              # les 18 contrôles qualité du dernier traitement
-make test-e2e             # les 63 invariants, dont chacun de ces chiffres
-uv run eds check-cloisonnement   # les deux barrières de cloisonnement
-```
-
-Sur le déploiement Azure, les mêmes preuves se rejouent sans se connecter à la machine :
-
-```bash
-make cloud-check          # le job de contrôle du cloisonnement, dans le cloud
-make cloud-logs           # le rapport qualité du dernier traitement planifié
-```
-
-La suite d'intégration **ancre ces valeurs** : modifier une règle sans le vouloir ferait
-échouer un test nommé, pas dériver un chiffre en silence.
+Trois commandes rejouent l'ensemble : `make quality` (les 18 règles), `make test-e2e` (les
+63 invariants, dont chacun de ces chiffres), `uv run eds check-cloisonnement`. **La suite
+d'intégration ancre ces valeurs** : modifier une règle sans le vouloir fait échouer un test
+nommé, cela ne fait pas dériver un chiffre en silence.
 
 ---
 
 ## 6. Restitution et cloisonnement
 
-### 6.1 Deux tableaux de bord, deux publics
-
-**🏥 Pilotage hospitalier** se lit de haut en bas, par bandes qui répondent chacune à une
-question :
-
-| Bande | Contenu | Question à laquelle elle répond |
-|---|---|---|
-| Chiffres clés | Séjours · DMS · réadmission 30 j · alertes (%) · séjours en cours | Où en est-on ? |
-| Activité | DMS par service · activité des urgences (deux acceptions) | L'activité est-elle normale ? |
-| Surveillance | Alertes de constantes par jour · nature des alertes par service | Faut-il s'inquiéter d'un patient ? |
-| Réadmissions | Encart de portée, **puis** taux par service et couverture | Combien de patients reviennent — et sur quelle base ? |
-| Flux et charge | Modes d'admission et de sortie · activité quotidienne par service | Comment les patients circulent-ils ? |
-| Fiabilité | Rapport qualité du dernier traitement · journal d'ingestion | D'où sortent ces chiffres ? |
-
-Deux points de conception méritent d'être signalés. D'abord, l'**encart sur la portée du
-taux de réadmission précède les graphiques qu'il qualifie** : un avertissement placé sous le
-chiffre qu'il corrige n'est pas lu. Ensuite, la dernière bande — rapport qualité et journal
-d'ingestion — est ce qui distingue ce tableau de bord d'un tableau de bord ordinaire : un
-utilisateur qui doute d'un chiffre voit, sans quitter l'interface et sans accès à la base
-d'exploitation, combien de lignes ont été écartées et par quelle règle.
-
-**La mise en page est du code, pas un réglage d'interface.** Les deux tableaux de bord sont
-provisionnés en pleine largeur, leurs cartes pavent exactement la grille de vingt-quatre
-colonnes, et chacune est dimensionnée pour son contenu — les dix-huit règles de qualité
-tiennent sans défilement interne. Quatre défauts que seul l'écran révèle sont vérifiés par
-des tests (`tests/test_dashboards.py`), donc avant même de provisionner : cartes qui se
-chevauchent, ligne de grille incomplète, titre trop long pour sa carte, requête visant une
-table gold inexistante. Les nombres suivent enfin la convention française — « 14 864 » et
-« 6,08 », pas « 14,864 » et « 6.08 », qu'un lecteur francophone lirait de travers.
-
-![Tableau de bord de pilotage](img/dashboard-pilotage.jpg)
-
-Le bas du tableau de bord porte cette traçabilité. Les **dix-huit règles** y figurent en
-entier, du rejet le plus volumineux au contrôle attendu à zéro, avec pour chacune les lignes
-lues, conservées, écartées et signalées :
+**🏥 Pilotage** se lit par bandes : chiffres clés → activité → surveillance → réadmissions →
+flux → **fiabilité**. Cette dernière bande distingue ce tableau de bord d'un tableau de bord
+ordinaire : un utilisateur qui doute d'un chiffre voit, sans quitter l'interface et sans
+accès à la base d'exploitation, combien de lignes ont été écartées et par quelle règle.
 
 ![Rapport qualité et journal d'ingestion](img/rapport-qualite-dashboard.jpg)
 
-**🔬 Recherche clinique** présente les tailles de cohortes, la prévalence par pathologie, la
-distribution par âge et sexe, et le détail par département. Un encart explique le seuil de
-diffusion, et un compteur affiche son effet réel. L'en-tête porte deux avertissements
-d'égale importance : le seuil de cinq patients, et le fait que ces cohortes proviennent d'un
-jeu synthétique dont les prévalences n'ont aucune valeur clinique (§8.1).
+**🔬 Recherche** présente cohortes, prévalence, distribution par âge et sexe. L'en-tête porte
+deux avertissements d'égale importance : le seuil de cinq patients, et le fait que ces
+prévalences n'ont **aucune valeur clinique** (§8).
 
 ![Tableau de bord de recherche](img/dashboard-recherche.jpg)
 
-### 6.2 Le cloisonnement, à quatre niveaux
+La mise en page est **du code**, pas un réglage d'interface : quatre défauts que seul l'écran
+révèle (chevauchement, grille incomplète, titre trop long, requête visant une table absente)
+sont vérifiés par des tests avant même de provisionner.
+
+### Le cloisonnement, à quatre niveaux
 
 | Niveau | Mécanisme | Effet |
 |---|---|---|
-| **Infrastructure** *(déploiement Azure)* | Droits IAM attribués **au conteneur de stockage**, pas au compte | La machine qui héberge l'entrepôt n'a aucun droit sur le conteneur qui contient les noms et les NIR |
-| **Base de données** | Deux comptes SQL, chacun avec le seul droit de lecture sur sa base gold | Un accès hors périmètre est refusé **par le moteur** |
-| **Connexions Metabase** | Une connexion par usage, utilisant le compte SQL correspondant | Aucune requête ne peut viser l'autre base |
-| **Contenu Metabase** | Une collection par usage, visible du seul groupe concerné | Chaque utilisateur ne voit que son tableau de bord |
+| **Infrastructure** *(Azure)* | Droits IAM par **conteneur**, pas par compte | La machine de l'entrepôt n'a aucun droit sur le conteneur contenant les NIR |
+| **Base de données** | Deux comptes SQL, chacun `SELECT` sur sa seule base gold | Un accès hors périmètre est refusé **par le moteur** |
+| **Connexion Metabase** | Une connexion par usage, avec le compte SQL correspondant | Aucune requête ne peut viser l'autre base |
+| **Contenu Metabase** | Une collection par usage, visible du seul groupe concerné | Chaque utilisateur ne voit qu'un tableau de bord |
 
-Les deux derniers organisent l'interface. Les deux premiers opposent un refus réel : le
-niveau base de données à une requête SQL écrite à la main, le niveau infrastructure à la
-machine elle-même — et celui-là ne dépend d'aucune ligne de code (§3.6). Il n'existe que
-sur le déploiement Azure ; en local, la protection équivalente est une propriété du code,
-garantie par `FORBIDDEN_COLUMNS` et par les tests de collecte.
+Les deux derniers organisent l'interface ; les deux premiers opposent un refus réel.
 
-Le résultat se constate directement. Voici ce que voit un utilisateur connecté avec le
-compte **pilotage** : une seule collection dans sa barre latérale, un seul tableau de bord.
+Ce que voit un utilisateur **pilotage** — une seule collection, une seule base. Il n'y a
+**pas de contenu grisé** : l'autre usage n'existe pas de son point de vue.
 
 ![Ce que voit un utilisateur pilotage](img/cloisonnement-vue-pilotage.jpg)
 
-Et une seule connexion dans l'explorateur de données — celle de son usage :
-
-![Une seule base de données accessible](img/cloisonnement-bases-pilotage.jpg)
-
-Il n'y a **pas de contenu grisé ni de connexion inaccessible** : l'autre usage n'existe
-simplement pas de son point de vue. C'est une propriété plus forte qu'un masquage, et elle
-est vérifiée par la suite d'intégration, qui interroge l'API avec les identifiants de
-chaque utilisateur et exige exactement une entrée dans chaque liste.
-
-S'il devine l'adresse de l'espace de recherche et la saisit à la main, il est refusé — la
-barre latérale montre bien que c'est le compte pilotage qui se voit opposer ce refus :
+S'il devine l'adresse de l'espace de recherche, il est refusé. Metabase répond « page
+introuvable » et non « accès refusé » : un refus explicite confirmerait l'existence de la
+ressource et permettrait de l'énumérer par essais successifs.
 
 ![Accès refusé hors périmètre](img/cloisonnement-acces-refuse.jpg)
 
-**Un détail qui va dans le bon sens.** Sur un tableau de bord hors périmètre, Metabase ne
-répond pas « accès refusé » mais « page introuvable ». La nuance n'est pas cosmétique : un
-refus explicite confirmerait l'existence de la ressource, et permettrait d'énumérer par
-essais successifs ce que contient l'espace de recherche. Ici, l'utilisateur n'apprend même
-pas que ce tableau de bord existe.
+**Une capture se périme et ne prouve rien.** La démonstration qui compte est
+`uv run eds check-cloisonnement` : elle se connecte réellement avec chaque compte et rejoue
+**9 scénarios** aux deux niveaux, sur l'installation de celui qui la lance. Les mêmes 9 sont
+exécutés par `make test-e2e` — une régression du cloisonnement ne peut pas passer inaperçue.
 
-**Une précaution qui ne relève pas de la confidentialité mais de la disponibilité.** Les
-deux comptes autorisent le SQL libre depuis Metabase. Le `GRANT SELECT` empêche toute
-écriture, mais rien n'empêcherait une requête maladroite de saturer la mémoire du moteur et
-de priver l'autre usage de son tableau de bord. Un profil de réglages (`readonly = 2`,
-temps d'exécution et mémoire bornés) et un quota horaire sont donc attachés aux deux
-comptes. Les seuils sont très au-dessus d'un usage normal : ils n'interdisent rien, ils
-arrêtent une boucle emballée.
-
-**Démonstration.** Les captures ci-dessus montrent le résultat, mais une capture se périme
-et ne prouve rien d'un état courant. La démonstration qui compte est donc **rejouable en une
-commande** : `uv run eds check-cloisonnement` se connecte réellement avec chaque compte et
-teste les deux barrières, sur l'installation de celui qui la lance :
-
-```
-            Cloisonnement des accès (ClickHouse)
-┏━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━┓
-┃ Compte        ┃ Base cible         ┃ Attendu ┃ Résultat  ┃
-┡━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━┩
-│ chu_pilotage  │ eds_gold_pilotage  │ lecture │ ✓ lecture │
-│ chu_pilotage  │ eds_gold_recherche │ refus   │ ✓ refusé  │
-│ chu_recherche │ eds_gold_recherche │ lecture │ ✓ lecture │
-│ chu_recherche │ eds_gold_pilotage  │ refus   │ ✓ refusé  │
-│ chu_recherche │ eds_silver         │ refus   │ ✓ refusé  │
-└───────────────┴────────────────────┴─────────┴───────────┘
-
-                 Cloisonnement du contenu (Metabase)
-┏━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━┓
-┃ Utilisateur         ┃ Tableau de bord         ┃ Attendu ┃ Résultat ┃
-┡━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━┩
-│ pilotage@chu.local  │ 🏥 Pilotage hospitalier │ accès   │ ✓ accès  │
-│ pilotage@chu.local  │ 🔬 Recherche clinique   │ refus   │ ✓ refusé │
-│ recherche@chu.local │ 🏥 Pilotage hospitalier │ refus   │ ✓ refusé │
-│ recherche@chu.local │ 🔬 Recherche clinique   │ accès   │ ✓ accès  │
-└─────────────────────┴─────────────────────────┴─────────┴──────────┘
-
-✓ Cloisonnement conforme aux deux niveaux : l'entrepôt refuse la requête,
-  et l'interface ne montre pas le contenu.
-```
-
-Les neuf scénarios sont également exécutés par la suite d'intégration (`make test-e2e`) :
-une régression du cloisonnement ferait échouer les tests, elle ne pourrait pas passer
-inaperçue. Sur le déploiement Azure, la même preuve se rejoue par un job dédié
-(`make cloud-check`) : le contrôle n'est pas une capture d'écran, c'est un exécutable.
-
-Ni l'un ni l'autre compte n'a accès aux couches bronze, silver ou d'exploitation : celles-ci
-restent réservées au compte technique du pipeline.
+Dernière précaution, de disponibilité et non de confidentialité : les deux comptes
+autorisent le SQL libre. Un profil (`readonly = 2`, temps et mémoire bornés) et un quota
+horaire empêchent une requête emballée de priver l'autre usage de son tableau de bord.
 
 ---
 
 ## 7. Gouvernance RGPD
 
-### 7.1 Minimisation, colonne par colonne
+### 7.1 Minimisation
 
-| Donnée source | Devenir | Justification |
+| Donnée source | Traitement | Motif |
 |---|---|---|
-| `nir` | **Supprimée** | Identifiant national direct, aucun usage analytique |
-| `nom`, `prenom` | **Supprimées** | Identifiants directs |
-| `patient_id` (IPP) | **Pseudonymisé** | Nécessaire aux jointures, jamais à l'identification |
-| `birth_date` | **Réduite à l'année** | L'année suffit aux tranches d'âge ; jour et mois sont des quasi-identifiants inutiles |
-| `sex`, `region_code` | Conservés | Requis par la description de cohorte |
+| `nir`, `nom`, `prenom` | **Jamais copiés** | Directement identifiants, et aucun indicateur n'en a besoin |
+| `patient_id` (IPP) | `HMAC-SHA256(sel, IPP)` dès la copie vers le lake | Stable — les jointures tiennent — et non réversible sans le sel, qui n'est ni versionné ni journalisé |
+| `birth_date` | Généralisée en `birth_year` | Suffit à l'âge en tranches ; le jour et le mois sont ré-identifiants |
+| Constantes (`fact_monitoring`) | Ne porte **même pas** le pseudonyme | Le service et le séjour suffisent aux alertes |
 
-La minimisation s'applique aussi **à l'intérieur** de l'entrepôt : la table des constantes
-ne porte pas de pseudonyme patient. Aucun indicateur n'en a besoin — les alertes se comptent
-par jour et par service — donc la donnée ne descend pas jusque-là.
+Un test d'intégration vérifie qu'aucune colonne nommée `nir`, `nom`, `prenom`,
+`birth_date` ou `patient_id` n'existe dans **aucune** base de l'entrepôt.
 
-### 7.2 Protection des petits effectifs
+### 7.2 Petits effectifs : le seuil ne suffit pas
 
-Toute table diffusée à la recherche applique `HAVING uniqExact(patient_pseudo) >= 5` sur
-chaque cellule, et les âges sont publiés en tranches de dix ans.
+Toute table diffusée à la recherche applique `HAVING uniqExact(patient_pseudo) >= 5`, et les
+âges sont publiés en tranches de dix ans. Aux grains courants, les cohortes comptent des
+centaines de patients : le mécanisme resterait invisible. D'où une vue au grain le plus fin
+— pathologie × sexe × tranche × département — où la règle mord réellement.
 
-Cette règle ne doit pas rester théorique. Aux grains courants (pathologie, ou pathologie ×
-sexe × âge), les cohortes de ce jeu de données comptent plusieurs centaines de patients :
-aucune cellule ne tombe sous le seuil, et le mécanisme resterait invisible. Nous avons donc
-ajouté une vue au grain le plus fin — **pathologie × sexe × tranche d'âge × département** —
-où la règle mord réellement.
-
-**Mais appliquer le seuil ne suffit pas.** C'est le piège classique du contrôle statistique
-de la divulgation, et nous y sommes tombés avant de le corriger.
-
-Publier à la fois une vue agrégée et sa décomposition, en appliquant le seuil séparément aux
-deux, laisse fuiter les cellules supprimées :
+**Et c'est là que le piège classique apparaît.** Publier une vue agrégée **et** sa
+décomposition, en appliquant le seuil séparément aux deux, laisse fuiter les cellules
+supprimées :
 
 ```
    total de la marge  −  somme des cellules fines diffusées  =  cellule cachée
 ```
 
-Concrètement, une simple jointure entre nos deux tables — avec le seul compte chercheur,
-sans aucun privilège particulier — reconstituait la pathologie, le sexe, la tranche d'âge,
-le département **et l'effectif exact** de patients censés être protégés. Notre table
-`k_anonymat_controle`, conçue comme preuve du dispositif, aggravait même le cas en indiquant
-combien de cellules chercher.
+Une simple jointure entre nos deux tables, **avec le seul compte chercheur et sans aucun
+privilège particulier**, reconstituait la pathologie, le sexe, la tranche d'âge, le
+département et l'effectif exact des patients censés être protégés.
 
-La parade appliquée est la **suppression complémentaire** : une marge n'est diffusée que si
-toute sa décomposition l'est. Dès qu'une cellule fine tombe sous le seuil, la ligne agrégée
-correspondante disparaît elle aussi — il n'y a alors plus rien à soustraire.
+Parade appliquée : la **suppression complémentaire** — une marge n'est diffusée que si toute
+sa décomposition l'est. Dès qu'une cellule fine tombe sous le seuil, la ligne agrégée
+disparaît aussi ; il n'y a plus rien à soustraire.
 
-| Vue | Cellules calculées | Diffusées | Supprimées | Motif |
+| Vue | Calculées | Diffusées | Supprimées | Motif |
 |---|---:|---:|---:|---|
 | Grain fin (× département) | 1 600 | 1 596 | **4** | seuil k ≥ 5 |
 | Marge (pathologie × sexe × âge) | 200 | 197 | **3** | décomposition incomplète |
 
-Le coût est de trois lignes agrégées sur deux cents, et il est assumé : une donnée dont la
-diffusion permettrait d'en déduire une autre ne se diffuse pas, même agrégée.
-
-Le dispositif est exposé aux chercheurs eux-mêmes — l'encart explique la règle, le compteur
-en mesure l'effet à chaque traitement :
+Coût assumé : trois lignes agrégées sur deux cents. Une donnée dont la diffusion permettrait
+d'en déduire une autre ne se diffuse pas, même agrégée.
 
 ![Protection des petits effectifs et son effet mesuré](img/recherche-k-anonymat.jpg)
 
-Une précaution supplémentaire en découle : la table de travail qui porte les effectifs sous
-le seuil vit dans `eds_silver`, **hors de portée des comptes de restitution**. La ranger
-dans la base des chercheurs exposerait directement ce que toute cette mécanique protège.
-
-L'attaque est rejouée à chaque exécution de la suite d'intégration : un test la reproduit et
-exige qu'elle ne rende rien.
+Deux précautions en découlent : la table de travail qui porte les effectifs sous le seuil vit
+en `eds_silver`, **hors de portée des comptes de restitution** ; et **l'attaque est rejouée à
+chaque exécution** de la suite d'intégration, qui exige qu'elle ne rende rien.
 
 ### 7.3 Contrôles automatiques
 
-Quatre règles RGPD tournent à chaque run, au même titre que les contrôles de qualité, et
-sont chiffrées dans `ops.quality_report` :
+Quatre règles RGPD tournent à chaque run, chiffrées dans `ops.quality_report` au même titre
+que les contrôles de qualité :
 
 | Règle | Ce qu'elle mesure | Attendu |
 |---|---|---|
-| `RGPD_k_anonymat` | Cellules retirées par le seuil k ≥ 5, au grain le plus fin | 4 sur 1 600 |
-| `RGPD_suppression_complementaire` | Marges retirées parce que leur décomposition est incomplète | 3 sur 200 |
-| `RGPD_cohortes_diffusees` | Cohortes par pathologie effectivement diffusées | 10 sur 10 |
-| `RGPD_minimisation` | Colonnes identifiantes **ou pseudonyme** présentes dans la base de recherche | **0** |
-
-Ces contrôles sont doublés de tests d'intégration exécutables par `make test-e2e`, qui
-vérifient en outre qu'aucune colonne nommée `nir`, `nom`, `prenom`, `birth_date` ou
-`patient_id` n'existe dans **aucune** base de l'entrepôt, et rejouent l'attaque par
-différenciation décrite en §7.2.
-
-Sur le déploiement Azure s'y ajoute un contrôle d'une autre nature, porté par
-l'infrastructure : `terraform plan` doit rester vide. Une attribution de rôle ajoutée à la
-main — un droit de lecture donné à la machine sur le dépôt du CHU, par exemple — apparaîtrait
-comme une dérive à corriger, et non comme un état acceptable.
+| `RGPD_k_anonymat` | Cellules retirées par le seuil, au grain le plus fin | 4 / 1 600 |
+| `RGPD_suppression_complementaire` | Marges retirées, décomposition incomplète | 3 / 200 |
+| `RGPD_cohortes_diffusees` | Cohortes par pathologie effectivement diffusées | 10 / 10 |
+| `RGPD_minimisation` | Colonnes identifiantes **ou pseudonyme** dans la base recherche | **0** |
 
 ### 7.4 Registre des hypothèses
 
-Ce que nous avons décidé sans que le sujet le tranche, et qu'il faudrait valider avec le
-métier :
+Ce que nous avons tranché sans que le sujet le fasse, et qu'il faudrait valider :
 
-1. Les seuils d'alerte des constantes (§5.4).
-2. L'exclusion des patients décédés du dénominateur des réadmissions.
-3. L'exclusion des séjours en cours du calcul de la DMS.
-4. Le maintien des séjours qui se chevauchent, jugés artefacts du jeu de données.
-5. Le seuil k = 5, retenu d'après l'énoncé ; certaines autorités recommandent un seuil plus
-   élevé selon la sensibilité des données.
+1. Les seuils d'alerte des constantes (§5.1) ;
+2. l'exclusion des patients décédés du dénominateur des réadmissions ;
+3. l'exclusion des séjours en cours du calcul de la DMS ;
+4. le maintien des séjours chevauchants, jugés artefacts du jeu de données ;
+5. le seuil k = 5, retenu d'après l'énoncé — certaines autorités en recommandent un plus élevé.
 
 ---
 
 ## 8. Limites et recommandations
 
-### 8.1 Limites tenant aux données
+**⚠ La limite qui prime toutes les autres.** Les diagnostics du jeu de données sont tirés au
+hasard : les dix pathologies ont chacune ~51 % de prévalence, pour une somme de **508,9 %**
+(≈ 5 diagnostics par patient), **sans corrélation** avec le service, l'âge ou le sexe. Les
+cohortes valident la chaîne de traitement, **pas** une conclusion épidémiologique. Cet
+avertissement figure en tête du tableau de bord de recherche, pas seulement ici.
 
-**Les données sont synthétiques, et cela se voit.** Les séjours qui se chevauchent (plus de
-la moitié) et les 192 admissions postérieures à un décès du même patient sont impossibles
-en réalité. Nous les avons conservés — les rejeter viderait l'entrepôt — mais ils rendent
-certains indicateurs peu interprétables cliniquement. Le taux de réadmission, en
-particulier, est correct au sens de sa définition mais reposerait sur des données
-incohérentes en production.
-
-**Les prévalences ne veulent rien dire, et il faut le dire.** Les dix pathologies du
-référentiel affichent chacune une prévalence comprise entre 50,2 % et 51,6 %, soit une somme
-de **508,9 %**. Autrement dit, chaque patient porte en moyenne cinq diagnostics distincts,
-répartis de façon uniforme : les codes CIM-10 ont manifestement été tirés au hasard, sans
-corrélation avec le service, l'âge ni le sexe. Aucune conclusion épidémiologique n'est donc
-tirable de ces cohortes — ni sur le poids relatif des pathologies, ni sur leur profil
-démographique. C'est précisément pourquoi le tableau de bord de recherche porte cet
-avertissement en tête, plutôt qu'en note de bas de page : un graphique où dix barres sont
-égales invite à conclure qu'elles se valent, alors qu'il indique en réalité que la donnée
-est artificielle. Ce que ces cohortes valident, c'est la **chaîne de traitement** —
-déduplication, k-anonymat, suppression complémentaire — et cela, elles le valident bien.
-
-**Trois jours de profondeur, pour un indicateur à trente jours.** C'est la limite la plus
-lourde du projet, et il faut la nommer sans l'atténuer : le taux de réadmission à 30 jours
-**n'est pas calculable** sur ces données. Aucune sortie ne dispose de sa fenêtre complète,
-et 88 % d'entre elles n'en ont aucune (cf. §5.3). Nous publions un taux restreint aux
-sorties observables, assorti de sa couverture, plutôt qu'un chiffre agrégé qui serait exact
-au sens arithmétique et faux au sens métier.
-
-En production, cet indicateur ne devrait être publié qu'après **au moins soixante jours
-d'historique** : trente pour la fenêtre, trente pour disposer d'un échantillon de sorties
-dont la fenêtre est complète. Le marqueur `fenetre_complete` déjà présent dans la table
-permettra ce basculement sans changer une ligne de code — il suffira de filtrer dessus.
-
-**Le monitoring ne couvre que deux services.** Tout indicateur bâti dessus est
-structurellement partiel, ce que les tableaux de bord signalent explicitement.
-
-**Le déploiement de démonstration n'est pas hébergé en France.** Ce n'est pas un choix :
-l'offre étudiante utilisée l'interdit (§3.6). Les données restent dans l'Union européenne,
-donc dans le champ du RGPD, mais un entrepôt de santé français réel devrait être hébergé
-sur le territoire national, chez un hébergeur certifié HDS — une exigence que ni Azure
-West Europe ni Sweden Central ne couvrent en l'état. Sur un abonnement payant, le
-changement se réduit à une variable Terraform ; la certification HDS, elle, relève d'une
-décision contractuelle, pas technique.
-
-### 8.2 Limites techniques
-
-| Point | État actuel | Recommandation |
+| Limite | Portée | Recommandation |
 |---|---|---|
-| Base applicative de Metabase | H2 embarqué | PostgreSQL en production : H2 ne supporte ni la sauvegarde à chaud ni la montée en charge |
-| Secrets | `.env` en local ; **Key Vault en déploiement Azure**, lu par identité gérée | Rotation automatisée et tracée ; le sel reste l'élément irremplaçable |
-| Durée de conservation | Un an sur `ops.quality_report` (TTL) ; aucune sur les données | À arrêter avec le délégué à la protection des données (§8.3), puis à appliquer par partition |
-| Ordonnancement | cron en local ; **job Container Apps planifié** sur Azure, avec journalisation centralisée et déclenchement manuel | Airflow ou Dagster dès que les dépendances entre traitements se complexifient |
-| Reconstruction silver et gold | Intégrale à chaque run | Traitement incrémental (moteur `ReplacingMergeTree`) si le volume devient conséquent |
-| Blocage des données dans Metabase | Restriction du droit de requête | Le blocage complet est réservé aux éditions payantes ; ici c'est ClickHouse qui porte l'interdiction réelle, ce qui suffit |
-| Ingestion du monitoring | Par fichier quotidien | Ingestion en continu si le CHU passe à un flux temps réel |
-| Empreinte des fichiers sources | SHA-256 recalculé à chaque passage | Voie rapide sur l'`ETag` du blob : à l'échelle d'un CHU, ne pas télécharger ce qui n'a pas changé |
-| Haute disponibilité du déploiement Azure | Une seule VM — quota de 6 vCPU sur l'offre étudiante | Cluster ClickHouse Keeper à trois nœuds, Metabase répliqué derrière une passerelle applicative |
-| Résidence des données | `swedencentral` : la France est exclue par une policy d'abonnement, et n'offre de toute façon aucune VM de série B | `francecentral` sur un abonnement payant — une seule variable Terraform à changer |
-| Authentification de ClickHouse au stockage | Jeton SAS de conteneur, lecture seule, daté | Identité gérée dès que ClickHouse la prendra en charge depuis une VM (§3.6) |
-| Certificat TLS | Auto-signé par défaut : Let's Encrypt sature sur `*.cloudapp.azure.com` | Nom de domaine propre du CHU, ou DuckDNS pour une démonstration |
+| Fenêtre d'observation de 1 à 3 jours | Le taux de réadmission ne couvre que 12,2 % des sorties | Attendre **60 jours d'historique** avant de publier cet indicateur en production |
+| 8 362 séjours chevauchants | Artefact synthétique, mais il a déjà cassé un calcul (§5.2) | Vérifier sur données réelles ; si le chevauchement persiste, c'est un problème du système source |
+| Âge dérivé de la seule année | Approximation d'un an au plus | Conséquence assumée de la minimisation — ne pas revenir sur `birth_year` pour la corriger |
+| Monitoring limité à REA et CARDIO | Les alertes ne couvrent pas tout l'hôpital | Étendre l'équipement, ou afficher la couverture à côté du taux |
+| Trois jours de dépôt | Volumétrie de démonstration | Le banc d'essai (`benchmarks/`) valide 20 M de relevés par le chemin réel du pipeline |
+| Seuils d'alerte non validés cliniquement | Le nombre d'alertes en dépend directement | Faire arbitrer par les équipes soignantes avant tout usage |
 
-### 8.3 Recommandations de gouvernance
+**Trois recommandations de gouvernance**, qui relèvent de l'organisation et non du code :
 
-**Le sel de pseudonymisation ne peut pas être changé à la légère.** Le modifier invalide
-tous les pseudonymes existants et casse les jointures. Une rotation suppose de re-collecter
-et de reconstruire l'intégralité de l'entrepôt depuis le dépôt du CHU. La procédure est
-décrite dans le document d'exploitation ; elle doit être considérée comme une opération
-exceptionnelle.
-
-**Prévoir une durée de conservation.** Le sujet ne l'aborde pas, mais un entrepôt de santé
-doit définir une durée au-delà de laquelle les données sont purgées ou archivées. Le
-mécanisme est déjà en place là où la décision nous appartenait : `ops.quality_report` porte
-un TTL d'un an, largement suffisant pour auditer un exercice. Sur les données de santé
-elles-mêmes, la durée relève d'une décision de gouvernance et non d'un choix technique —
-elle reste donc à arrêter. Le partitionnement par jour rend la purge triviale le moment venu
-(cf. document d'exploitation, §6.5).
-
-**Associer le délégué à la protection des données.** La pseudonymisation ne rend pas les
-données anonymes au sens du RGPD : elles restent des données personnelles, et leur
-traitement suppose une base légale, une analyse d'impact et une inscription au registre.
-
-**Documenter les définitions auprès du métier.** Le cas de l'activité des urgences (§5.2)
-montre qu'un même mot recouvre deux chiffres différents. Un glossaire partagé, adossé aux
-définitions SQL, éviterait les désaccords ultérieurs.
+1. Conserver le sel de pseudonymisation dans un coffre, avec une procédure de rotation
+   documentée — le changer casse toutes les jointures historiques : c'est une décision, pas
+   une manipulation.
+2. Faire valider le seuil k = 5 par le délégué à la protection des données.
+3. Revoir les hypothèses de §7.4 à chaque évolution du besoin métier.
 
 ---
 
-## Annexes
-
-- [Modèle de données détaillé](img/eds-data-model.png) — commenté en §3.2, également en
-  [vectoriel](img/eds-data-model.svg), lisible à toute échelle à l'impression
-- [Documentation d'exploitation](EXPLOITATION.md)
-- [Plan d'implémentation et profilage complet](PLAN.md)
-- [Plan de déploiement Azure et faits techniques vérifiés](PLAN-CLOUD.md)
-- [Mode d'emploi du déploiement Azure](CLOUD.md)
+*Énoncé de l'épreuve : [`FICHE-SUJET.md`](FICHE-SUJET.md) · Mise en service et exploitation :
+[`README`](../README.md) · Infrastructure Azure : [`terraform/README.md`](../terraform/README.md)*

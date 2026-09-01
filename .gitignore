@@ -29,7 +29,8 @@ dbt/dbt_packages/
 terraform/terraform.tfvars
 terraform/backend.hcl
 
-# OS / IDE
+# OS / IDE / outillage
 .DS_Store
 .idea/
 .vscode/
+.claude/

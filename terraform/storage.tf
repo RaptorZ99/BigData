@@ -34,8 +34,8 @@ resource "azurerm_storage_account" "eds" {
 
   # La clé de compte reste activée : c'est elle qui signe le jeton SAS confié à
   # ClickHouse. Le moteur ne sait pas utiliser une identité gérée (sa version
-  # 26.3 tente `WorkloadIdentityCredential`, réservé à Kubernetes) — cf.
-  # docs/PLAN-CLOUD.md §5.2. Le pipeline, lui, n'utilise que l'identité gérée.
+  # 26.3 tente `WorkloadIdentityCredential`, réservé à Kubernetes).
+  # Le pipeline, lui, n'utilise que l'identité gérée.
   shared_access_key_enabled = true
 
   blob_properties {

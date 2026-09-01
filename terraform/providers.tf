@@ -35,7 +35,7 @@ provider "azurerm" {
 
     virtual_machine {
       # Le disque OS suit la VM : il ne contient que du reconstructible
-      # (cf. docs/PLAN-CLOUD.md §16.5), le laisser derrière ne ferait que coûter.
+      # le laisser derrière ne ferait que coûter.
       delete_os_disk_on_deletion = true
     }
   }

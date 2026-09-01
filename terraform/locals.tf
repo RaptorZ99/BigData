@@ -21,7 +21,7 @@ locals {
 
   # Nom de domaine servi par Caddy. Sans nom propre, on prend celui d'Azure et un
   # certificat interne : Let's Encrypt sature sur `*.cloudapp.azure.com`, dont le
-  # quota d'émission est partagé entre tous les clients (cf. PLAN-CLOUD.md §5.5).
+  # quota d'émission est partagé entre tous les clients Azure, et saturé.
   hote_azure = "${local.nom_dns}.${var.location}.cloudapp.azure.com"
   hote_site  = var.acme_hostname != "" ? var.acme_hostname : local.hote_azure
   # Directive TLS de Caddy : vide = certificat Let's Encrypt automatique.

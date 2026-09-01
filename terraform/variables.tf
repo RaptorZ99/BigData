@@ -200,7 +200,7 @@ variable "metabase_allowed_cidrs" {
 variable "expose_clickhouse_to_admin" {
   description = <<-TXT
     Ouvre le port 8123 aux adresses d'administration. Faux par défaut : la console
-    `/play` s'atteint par tunnel SSH (cf. docs/CLOUD.md). Un entrepôt de santé n'a
+    `/play` s'atteint par tunnel SSH. Un entrepôt de santé n'a
     pas à écouter sur Internet.
   TXT
   type        = bool

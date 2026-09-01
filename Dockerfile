@@ -5,7 +5,7 @@
 # que le tag de l'image désigne.
 #
 # Python 3.13 et non 3.14 : dbt-core 1.11 ne démarre pas sur 3.14 (mashumaro,
-# UnserializableField sur JSONObjectSchema.schema). Cf. docs/PLAN-CLOUD.md §5.6.
+# UnserializableField sur JSONObjectSchema.schema).
 
 FROM python:3.13-slim AS build
 

@@ -5,7 +5,7 @@ description = "Entrepôt de Données de Santé (EDS) du CHU — pipeline médail
 readme = "README.md"
 # dbt-core 1.11 ne démarre pas sur Python 3.14 (mashumaro : UnserializableField sur
 # JSONObjectSchema.schema). La borne haute est donc une contrainte d'outillage, pas
-# de langage — cf. docs/PLAN-CLOUD.md §5.6.
+# de langage.
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "clickhouse-connect>=0.8.0",
