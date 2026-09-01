@@ -1,0 +1,129 @@
+version: 2
+
+models:
+  - name: kpi_dms_service
+    description: >
+      Durée moyenne de séjour par service et jour de sortie. Séjours terminés
+      uniquement : une durée partielle tirerait la moyenne vers le bas.
+    columns:
+      - name: service_code
+        description: "Service d'hospitalisation"
+        data_tests: [not_null]
+      - name: discharge_date
+        description: "Jour de sortie"
+      - name: nb_sorties
+        description: "Nombre de séjours terminés ce jour-là dans ce service"
+      - name: dms_jours
+        description: "Durée moyenne de séjour, en jours"
+      - name: duree_mediane_jours
+        description: "Durée médiane — à lire avec la moyenne, les distributions sont asymétriques"
+
+  - name: kpi_urgences_jour
+    description: >
+      Activité quotidienne des urgences, selon les deux définitions possibles :
+      passages dans l'unité URGENCES, et admissions en mode urgence tous services
+      confondus. Elles ne donnent pas le même chiffre ; les deux sont exposées.
+    columns:
+      - name: admission_date
+        data_tests: [not_null]
+      - name: nb_passages_service_urgences
+        description: "Séjours dont le service d'hospitalisation est URGENCES"
+      - name: nb_admissions_mode_urgence
+        description: "Séjours entrés en mode urgence, quel que soit le service"
+
+  - name: kpi_readmissions_30j
+    description: >
+      Taux de réadmission à 30 jours par service et jour de sortie. Chaque ligne porte
+      sa fenêtre d'observation : une sortie postérieure à la dernière admission connue
+      ne peut rien constater, et son taux de 0 % ne mesure rien.
+    columns:
+      - name: jours_observables
+        description: "Jours de la fenêtre de 30 jours réellement couverts par les données"
+        data_tests: [not_null]
+      - name: fenetre_complete
+        description: "Les 30 jours sont-ils intégralement couverts ?"
+      - name: sorties_eligibles
+        description: "Sorties vivantes — un patient décédé ne peut pas être réadmis"
+      - name: readmissions_30j
+        description: "Sorties suivies d'une nouvelle admission du même patient sous 30 jours"
+      - name: taux_readmission_pct
+        description: "Ne jamais lire sans jours_observables > 0"
+
+  - name: kpi_activite_service
+    description: >
+      Activité quotidienne par service : entrées, sorties, décès et séjours ouverts.
+      Les séjours ouverts sont calculés par cumul sur le calendrier, jamais par produit
+      croisé jour × séjour — ce dernier devient quadratique avec l'historique.
+    columns:
+      - name: jour
+        data_tests: [not_null]
+      - name: sejours_en_cours
+        description: "Séjours ouverts à la fin de la journée : la charge réelle du service"
+
+  - name: kpi_flux
+    description: "Répartition quotidienne des modes d'admission et de sortie, en format long."
+    columns:
+      - name: sens
+        description: "admission ou sortie"
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["admission", "sortie"]
+      - name: mode
+        description: "Mode d'entrée ou de sortie ; 'non renseigne' quand la source est muette"
+
+  - name: kpi_alertes_monitoring
+    description: >
+      Relevés de constantes en alerte, par jour et par service. Le monitoring ne couvre
+      que la réanimation et la cardiologie.
+    columns:
+      - name: releve_date
+        data_tests: [not_null]
+      - name: nb_alertes
+        description: "Relevés portant au moins une constante en alerte"
+      - name: pct_alertes
+        description: "Part des relevés en alerte"
+
+  - name: kpi_synthese
+    description: >
+      Chiffres clés pour les tuiles de tête du tableau de bord. Table à une seule ligne :
+      les mesures y sont déjà au grain de l'établissement.
+    columns:
+      - name: nb_sejours
+        data_tests: [not_null]
+      - name: nb_patients
+        description: "Patients distincts ayant au moins un séjour — mesure NON additive"
+      - name: dms_globale_jours
+        description: "DMS tous services confondus"
+      - name: nb_sorties_observables
+        description: "Sorties dont la fenêtre de réadmission n'est pas vide"
+      - name: pct_sorties_observables
+        description: "Couverture de l'indicateur de réadmission"
+      - name: _built_at
+        description: "Horodatage de construction de gold — comparé à celui de silver pour détecter un retard"
+
+  - name: kpi_qualite_pipeline
+    description: >
+      Les contrôles qualité du dernier traitement, exposés au métier : lignes lues,
+      conservées, écartées (retirées) et signalées (conservées mais marquées).
+    columns:
+      - name: rule
+        description: "Identifiant technique du contrôle"
+        data_tests: [not_null]
+      - name: nature
+        description: "rejet, signalement ou conforme"
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["rejet", "signalement", "conforme"]
+
+  - name: kpi_ingestion
+    description: "Traçabilité de l'ingestion : fichier source, jour de dépôt, volumétrie, statut."
+    columns:
+      - name: fichier_source
+        data_tests: [not_null]
+      - name: statut
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["success", "failed"]

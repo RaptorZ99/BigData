@@ -25,6 +25,18 @@ SQL_DIR = PROJECT_ROOT / "sql"
 _LINE_COMMENT = re.compile(r"--[^\n]*")
 
 
+class Sql(str):
+    """Fragment SQL déjà formé, inséré tel quel par `render`.
+
+    `render` échappe les apostrophes de ses paramètres : c'est ce qu'il faut pour
+    une valeur qui atterrit dans un littéral. Mais certains paramètres **sont** du
+    SQL — l'appel de fonction de table qui dit au moteur où lire le lake, par
+    exemple, et qui contient ses propres littéraux. Les échapper produirait un
+    `''lake/...''` invalide. Ce type marque la différence de façon visible, plutôt
+    que de la deviner sur le nom du paramètre.
+    """
+
+
 class WarehouseError(RuntimeError):
     """Erreur d'exécution côté entrepôt."""
 
@@ -107,11 +119,15 @@ def render(script: str, params: dict[str, str] | None = None) -> str:
 
     Les valeurs proviennent de la configuration ou de chemins internes, jamais
     d'une saisie utilisateur : le risque d'injection est nul ici, mais on
-    échappe tout de même les apostrophes par principe.
+    échappe tout de même les apostrophes par principe. Un paramètre marqué `Sql`
+    y échappe — c'est un fragment de requête, pas une donnée.
     """
     if not params:
         return script
-    safe = {key: str(value).replace("'", "''") for key, value in params.items()}
+    safe = {
+        key: value if isinstance(value, Sql) else str(value).replace("'", "''")
+        for key, value in params.items()
+    }
     return script.format(**safe)
 
 

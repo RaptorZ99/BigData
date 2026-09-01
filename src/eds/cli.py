@@ -247,6 +247,28 @@ def provision_metabase_command() -> None:
     metabase.provision(config)
 
 
+@app.command("publish-dbt-docs")
+def publish_dbt_docs_command() -> None:
+    """Génère la documentation dbt et la publie sur le site statique du stockage.
+
+    Le fichier produit est autonome : graphe des 27 modèles, descriptions de
+    colonnes et tests attachés. Il ne contient aucune donnée patient — des
+    métadonnées et des comptages de lignes.
+    """
+    from eds import storage, transform
+
+    config = _bootstrap()
+    page = transform.dbt_docs(config.dbt_target)
+
+    if config.storage_backend != "azure":
+        # En local il n'y a pas de site à alimenter : on dit où lire le fichier.
+        console.print(f"[green]✓[/] Documentation dbt générée : [bold]{page}[/]")
+        return
+
+    url = storage.publish_file(config.storage_account, config.web_container, "index.html", page)
+    console.print(f"[green]✓[/] Documentation dbt publiée : [bold]{url}[/]")
+
+
 @app.command("check-cloisonnement")
 def check_cloisonnement_command() -> None:
     """Vérifie que chaque compte de restitution ne voit que sa propre base."""

@@ -1,0 +1,29 @@
+version: 2
+
+sources:
+  - name: bronze
+    schema: eds_bronze
+    description: >
+      Couche bronze : les fichiers du lake typés, sans règle métier, partitionnés par
+      jour d'ingestion. Alimentée par `eds run` (Python + `INSERT ... SELECT`), hors dbt :
+      charger un fichier n'est pas une transformation.
+    tables:
+      - name: patients
+        description: "Patients tels que déposés — fichiers cumulatifs, un patient revient chaque jour"
+      - name: sejours
+        description: "Séjours hospitaliers tels que déposés, typés sans filtrage"
+      - name: diagnostics
+        description: "Diagnostics CIM-10, JSON imbriqué aplati à une ligne par code"
+      - name: monitoring
+        description: "Constantes au chevet — le flux le plus volumineux (REA et CARDIO)"
+      - name: services
+        description: "Référentiel des services hospitaliers"
+      - name: cim10
+        description: "Référentiel CIM-10 : code diagnostic → libellé"
+
+  - name: ops
+    schema: ops
+    description: "Exploitation : écrite par l'orchestrateur Python, lue par les modèles de traçabilité."
+    tables:
+      - name: ingest_log
+        description: "Journal d'ingestion : un enregistrement par (domaine, jour, fichier)"

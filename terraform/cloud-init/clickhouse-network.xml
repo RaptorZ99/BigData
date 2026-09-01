@@ -1,0 +1,22 @@
+<clickhouse>
+    <!--
+        Sans ce fichier, ClickHouse n'écoute que sur la boucle locale et le job du
+        pipeline reçoit un « Connection refused » sur l'IP privée de la machine.
+
+        Pourquoi : l'image Docker fournit `config.d/docker_related_config.xml`, qui
+        rend le serveur joignable de l'extérieur. Monter notre propre `config.d`
+        depuis l'hôte **remplace tout le répertoire**, ce fichier compris.
+
+        Le symptôme est trompeur : le conteneur est déclaré « healthy », parce que sa
+        sonde interroge localhost, et `docker exec clickhouse-client` fonctionne. Seule
+        une connexion venue de l'extérieur échoue.
+
+        Les deux familles d'adresses sont déclarées, et dans cet ordre. `::` seul ne
+        suffit pas : la VM Azure n'a pas d'IPv6, la liaison échoue, `listen_try` la
+        tolère — et il ne reste alors **aucun** écouteur. ClickHouse s'arrête sur
+        « No servers started » (code 139), après avoir pourtant démarré normalement.
+    -->
+    <listen_host>::</listen_host>
+    <listen_host>0.0.0.0</listen_host>
+    <listen_try>1</listen_try>
+</clickhouse>

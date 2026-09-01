@@ -5,6 +5,9 @@
 -- `JSONExtractArrayRaw` + `arrayJoin` déplient ensuite le tableau `diagnostics`
 -- de chaque séjour. Aucun parsing côté Python : le fichier ne transite pas par
 -- la mémoire de l'orchestrateur.
+-- Le lecteur du lake est injecté par `load_bronze.py` : `file(...)` en cible locale,
+-- `azureBlobStorage(...)` en cible Azure. Un seul script pour les deux — les deux
+-- fonctions de table n'ont pas la même signature, mais elles rendent la même chose.
 INSERT INTO eds_bronze.diagnostics
 SELECT
     JSONExtractString(json, 'stay_id')      AS stay_id,
@@ -18,5 +21,5 @@ FROM
     SELECT
         json,
         arrayJoin(JSONExtractArrayRaw(json, 'diagnostics')) AS diag
-    FROM file('{source_file}', 'JSONAsString', 'json String')
+    FROM {lake_source}
 );

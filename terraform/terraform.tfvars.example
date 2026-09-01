@@ -1,0 +1,25 @@
+# Copier en `terraform.tfvars` puis renseigner. Seul `subscription_id` est requis.
+
+subscription_id = "00000000-0000-0000-0000-000000000000"
+
+# ── Recommandé ──────────────────────────────────────────────────────────────
+# Sans destinataire, aucune alerte de budget n'est créée.
+budget_contact_emails = ["prenom.nom@efrei.net"]
+
+# ── Optionnel ───────────────────────────────────────────────────────────────
+# Certificat de confiance plutôt qu'auto-signé : créer un sous-domaine gratuit
+# sur duckdns.org, le faire pointer vers l'IP publique, puis renseigner ici.
+# acme_hostname = "eds-chu.duckdns.org"
+# acme_email    = "prenom.nom@efrei.net"
+
+# Plus de mémoire si un conteneur redémarre en boucle (divise l'autonomie par deux).
+# vm_size = "Standard_B2s_v2"
+
+# Extinction nocturne : 35 €/mois -> 23 €/mois.
+# auto_shutdown_time = "2200"
+
+# Restreindre l'accès aux tableaux de bord (defaut : ouvert, pour la demonstration).
+# metabase_allowed_cidrs = ["203.0.113.4/32"]
+
+# Image epinglee sur un commit precis plutot que sur `latest`.
+# eds_image = "louis336/eds-chu:8fe156b"

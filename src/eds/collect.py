@@ -4,29 +4,27 @@ C'est ici — et nulle part ailleurs — que la pseudonymisation a lieu : le lak
 contient déjà plus aucune donnée directement identifiante, et tout ce qui suit
 (bronze, silver, gold, dashboards) travaille sur des pseudonymes.
 
-Les fichiers sont traités **en flux, ligne à ligne** : la mémoire reste
-constante quelle que soit la taille du dépôt.
+Les fichiers sont traités **en flux, ligne à ligne, de la source vers le lake** :
+la mémoire reste constante quelle que soit la taille du dépôt, et surtout
+l'identité en clair ne devient jamais un fichier intermédiaire. Le module ne sait
+pas si les deux zones sont des dossiers ou des conteneurs de stockage objet —
+c'est le rôle de `storage.py`.
 """
 
 from __future__ import annotations
 
 import csv
-import hashlib
-import os
-import re
-import shutil
+import io
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from pathlib import Path
+from typing import IO
 
 from eds.config import Config
 from eds.logging_setup import get_logger
 from eds.pseudo import generalize_birth_date, pseudonymize_id
+from eds.storage import SourceFile, Storage, copy_stream
 
 log = get_logger(__name__)
-
-DAY_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_CHUNK_SIZE = 1024 * 1024
 
 # Colonnes directement ou indirectement identifiantes : elles ne sont jamais
 # écrites dans le lake. La liste sert de garde-fou vérifié — `_verifier_sortie`
@@ -35,65 +33,20 @@ FORBIDDEN_COLUMNS = ("nir", "nom", "prenom", "birth_date", "patient_id")
 
 
 @dataclass(frozen=True, slots=True)
-class SourceFile:
-    """Un fichier déposé par le CHU, pour un domaine et un jour donnés."""
-
-    domain: str
-    ingest_date: str
-    path: Path
-    relative_name: str
-
-    @property
-    def label(self) -> str:
-        return f"{self.domain}/{self.ingest_date}/{self.relative_name}"
-
-
-@dataclass(frozen=True, slots=True)
 class CollectResult:
     """Résultat de la copie pseudonymisée d'un fichier vers le lake."""
 
     source: SourceFile
-    lake_path: Path
     rows: int
 
 
-def checksum(source: SourceFile) -> str:
+def checksum(source: SourceFile, storage: Storage) -> str:
     """Empreinte du fichier source : clé d'idempotence de l'ingestion.
 
     Calculée **avant** toute copie, pour pouvoir décider s'il y a lieu de
     travailler : un fichier inchangé ne doit être ni recopié ni repseudonymisé.
     """
-    digest = hashlib.sha256()
-    with source.path.open("rb") as handle:
-        while chunk := handle.read(_CHUNK_SIZE):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _atomic_write(target: Path, write: Callable[[Path], int]) -> int:
-    """Écrit via un fichier temporaire puis renomme : jamais de fichier tronqué.
-
-    Un crash en cours d'écriture laisse le lake dans son état précédent plutôt
-    qu'avec un fichier partiel qui serait chargé silencieusement.
-    """
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_suffix(target.suffix + ".tmp")
-    try:
-        rows = write(tmp)
-        os.replace(tmp, target)
-        return rows
-    finally:
-        tmp.unlink(missing_ok=True)
-
-
-def _copy_verbatim(source: Path, target: Path) -> int:
-    """Copie sans transformation (aucune donnée identifiante dans ces fichiers)."""
-
-    def write(tmp: Path) -> int:
-        shutil.copyfile(source, tmp)
-        return -1  # comptage délégué à ClickHouse au chargement
-
-    return _atomic_write(target, write)
+    return storage.fingerprint(source)
 
 
 def _verifier_sortie(fieldnames: list[str]) -> None:
@@ -111,33 +64,38 @@ def _verifier_sortie(fieldnames: list[str]) -> None:
 
 
 def _transform_csv(
-    source: Path,
-    target: Path,
+    entree: IO[bytes],
+    sortie: IO[bytes],
     fieldnames: list[str],
     transform: Callable[[dict[str, str]], dict[str, object] | None],
 ) -> int:
-    """Réécrit un CSV ligne à ligne en appliquant `transform`."""
+    """Réécrit un CSV ligne à ligne en appliquant `transform`.
+
+    Les deux flux sont habillés en texte sans tampon intermédiaire : une ligne
+    lue est une ligne transformée puis écrite. Rien n'accumule.
+    """
     _verifier_sortie(fieldnames)
 
-    def write(tmp: Path) -> int:
-        rows = 0
-        with (
-            source.open("r", encoding="utf-8", newline="") as fin,
-            tmp.open("w", encoding="utf-8", newline="") as fout,
-        ):
-            writer = csv.DictWriter(fout, fieldnames=fieldnames, lineterminator="\n")
-            writer.writeheader()
-            for record in csv.DictReader(fin):
-                transformed = transform(record)
-                if transformed is not None:
-                    writer.writerow(transformed)
-                    rows += 1
-        return rows
+    lecteur = io.TextIOWrapper(entree, encoding="utf-8", newline="")
+    ecrivain = io.TextIOWrapper(sortie, encoding="utf-8", newline="", write_through=True)
+    writer = csv.DictWriter(ecrivain, fieldnames=fieldnames, lineterminator="\n")
+    writer.writeheader()
 
-    return _atomic_write(target, write)
+    rows = 0
+    for record in csv.DictReader(lecteur):
+        transformed = transform(record)
+        if transformed is not None:
+            writer.writerow(transformed)
+            rows += 1
+
+    ecrivain.flush()
+    # `detach` évite que la fermeture du wrapper ferme le flux sous-jacent :
+    # c'est au `Storage` de décider quand le fichier est publié.
+    ecrivain.detach()
+    return rows
 
 
-def _collect_patients(source: Path, target: Path, config: Config) -> int:
+def _collect_patients(entree: IO[bytes], sortie: IO[bytes], config: Config) -> int:
     """Pseudonymise l'identité patient et généralise la date de naissance.
 
     Sortie : patient_pseudo, birth_year, sex, region_code.
@@ -153,11 +111,11 @@ def _collect_patients(source: Path, target: Path, config: Config) -> int:
         }
 
     return _transform_csv(
-        source, target, ["patient_pseudo", "birth_year", "sex", "region_code"], transform
+        entree, sortie, ["patient_pseudo", "birth_year", "sex", "region_code"], transform
     )
 
 
-def _collect_sejours(source: Path, target: Path, config: Config) -> int:
+def _collect_sejours(entree: IO[bytes], sortie: IO[bytes], config: Config) -> int:
     """Remplace la référence patient par le même pseudonyme (jointure préservée)."""
     fieldnames = [
         "stay_id",
@@ -176,11 +134,11 @@ def _collect_sejours(source: Path, target: Path, config: Config) -> int:
         row["patient_pseudo"] = pseudonymize_id(record["patient_id"], config.salt)
         return row
 
-    return _transform_csv(source, target, fieldnames, transform)
+    return _transform_csv(entree, sortie, fieldnames, transform)
 
 
 # Un domaine = un motif de fichiers déposés + la façon de les amener au lake.
-_COLLECTORS: dict[str, Callable[[Path, Path, Config], int]] = {
+_COLLECTORS: dict[str, Callable[[IO[bytes], IO[bytes], Config], int]] = {
     "patients": _collect_patients,
     "sejours": _collect_sejours,
 }
@@ -194,18 +152,18 @@ EXPECTED_FILES: dict[str, tuple[str, ...]] = {
 }
 
 
-def discover(config: Config) -> Iterator[SourceFile]:
+def discover(storage: Storage) -> Iterator[SourceFile]:
     """Parcourt le dépôt du CHU et énumère les fichiers présents, par jour.
 
     L'ordre est déterministe (domaine, puis jour) pour des runs reproductibles.
     Les fichiers attendus mais absents sont signalés par `missing_files`.
     """
-    for domain, day, path, filename, present in _scan(config):
+    for source, present in _scan(storage):
         if present:
-            yield SourceFile(domain, day, path, filename)
+            yield source
 
 
-def missing_files(config: Config) -> list[str]:
+def missing_files(storage: Storage) -> list[str]:
     """Fichiers attendus pour un jour déposé, mais absents du dépôt.
 
     Un jour partiellement déposé n'est pas un run normal : l'entrepôt serait
@@ -213,46 +171,34 @@ def missing_files(config: Config) -> list[str]:
     échec, afin que le code de sortie alerte plutôt que de laisser croire à une
     exécution nominale.
     """
-    return [
-        f"{domain}/{day}/{filename}"
-        for domain, day, _path, filename, present in _scan(config)
-        if not present
-    ]
+    return [source.label for source, present in _scan(storage) if not present]
 
 
-def _scan(config: Config) -> Iterator[tuple[str, str, Path, str, bool]]:
+def _scan(storage: Storage) -> Iterator[tuple[SourceFile, bool]]:
     """Énumère tous les fichiers attendus, présents ou non."""
     for domain in sorted(EXPECTED_FILES):
-        domain_dir = config.source_dir / domain
-        if not domain_dir.is_dir():
+        jours = storage.days(domain)
+        if not jours:
             log.warning("Domaine absent du dépôt : %s", domain)
             continue
 
-        for day_dir in sorted(p for p in domain_dir.iterdir() if p.is_dir()):
-            if not DAY_PATTERN.match(day_dir.name):
-                log.warning("Dossier ignoré (nom de jour invalide) : %s", day_dir)
-                continue
-
+        for day in jours:
             for filename in EXPECTED_FILES[domain]:
-                path = day_dir / filename
-                yield domain, day_dir.name, path, filename, path.is_file()
+                source = SourceFile(domain, day, filename)
+                yield source, storage.exists(source)
 
 
-def collect(source: SourceFile, config: Config) -> CollectResult:
+def collect(source: SourceFile, depot: Storage, lake: Storage, config: Config) -> CollectResult:
     """Copie un fichier vers le lake en appliquant la pseudonymisation requise."""
-    lake_path = config.lake_dir / source.domain / source.ingest_date / source.relative_name
-
     collector = _COLLECTORS.get(source.domain)
-    if collector is None:
-        rows = _copy_verbatim(source.path, lake_path)
-        log.debug("Copie brute : %s", source.label)
-    else:
-        rows = collector(source.path, lake_path, config)
-        log.debug("Copie pseudonymisée : %s (%s lignes)", source.label, rows)
 
-    return CollectResult(source=source, lake_path=lake_path, rows=rows)
+    with depot.open_read(source) as entree, lake.open_write(source) as sortie:
+        if collector is None:
+            copy_stream(entree, sortie)
+            rows = -1  # comptage délégué à ClickHouse au chargement
+            log.debug("Copie brute : %s", source.label)
+        else:
+            rows = collector(entree, sortie, config)
+            log.debug("Copie pseudonymisée : %s (%s lignes)", source.label, rows)
 
-
-def lake_relative_path(source: SourceFile) -> str:
-    """Chemin du fichier tel que ClickHouse le voit sous `user_files/`."""
-    return f"lake/{source.domain}/{source.ingest_date}/{source.relative_name}"
+    return CollectResult(source=source, rows=rows)

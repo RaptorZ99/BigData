@@ -50,42 +50,10 @@ ALTER TABLE ops.pipeline_runs
     ADD COLUMN IF NOT EXISTS updated_at DateTime DEFAULT now()
     COMMENT 'Version : la dernière écriture gagne';
 
--- Rapport qualité : combien de lignes lues, gardées, écartées, par règle.
--- C'est ce qui permet de justifier chaque chiffre des dashboards.
--- Quatre compteurs distincts, parce qu'une règle de rejet et une règle de
--- signalement ne disent pas la même chose : « écartées » retire des lignes de
--- l'entrepôt, « signalées » les conserve en les marquant. Les confondre rendrait
--- le rapport ambigu — or c'est lui qui justifie chaque chiffre publié.
-CREATE TABLE IF NOT EXISTS ops.quality_report
-(
-    run_id        String,
-    layer         LowCardinality(String),
-    table_name    LowCardinality(String),
-    rule          LowCardinality(String),
-    rule_label    String,
-    rows_in       Int64 COMMENT 'Lignes examinées par la règle',
-    rows_kept     Int64 COMMENT 'Lignes conservées dans la table cible',
-    rows_rejected Int64 COMMENT 'Lignes écartées, consultables dans une table de rejets',
-    rows_flagged  Int64 DEFAULT 0 COMMENT 'Lignes conservées mais marquées par un signalement',
-    details       String   DEFAULT '',
-    checked_at    DateTime DEFAULT now()
-)
-ENGINE = MergeTree
-ORDER BY (run_id, layer, table_name, rule)
--- Le rapport s'écrit à chaque exécution (une vingtaine de lignes) : sans durée
--- de conservation, la table croîtrait indéfiniment. Un an couvre largement
--- l'audit d'un exercice, et met en pratique la recommandation de gouvernance du
--- rapport (§8.3). Les dashboards ne lisent de toute façon que le dernier run.
-TTL checked_at + INTERVAL 1 YEAR
-COMMENT 'Contrôles qualité par run : lignes lues, conservées, écartées, signalées';
-
--- Migrations : `CREATE TABLE IF NOT EXISTS` ne fait rien sur une table déjà
--- créée, donc les évolutions de schéma doivent être rejouées explicitement.
--- Le provisionnement reste ainsi convergent sur un entrepôt existant.
-ALTER TABLE ops.quality_report
-    ADD COLUMN IF NOT EXISTS rows_flagged Int64 DEFAULT 0
-    COMMENT 'Lignes conservées mais marquées par un signalement'
-    AFTER rows_rejected;
-
-ALTER TABLE ops.quality_report
-    MODIFY TTL checked_at + INTERVAL 1 YEAR;
+-- `ops.quality_report` n'est PAS créée ici : c'est un modèle dbt
+-- (`dbt/models/ops/quality_report.sql`), matérialisé en incrémental avec son TTL
+-- d'un an. Un seul propriétaire par table — deux DDL concurrentes finiraient par
+-- diverger, et c'est dbt qui sait dans quel ordre la remplir.
+--
+-- `ingest_log` et `pipeline_runs` restent ici : elles décrivent l'orchestration,
+-- que Python écrit directement, et non la transformation.

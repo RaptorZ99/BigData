@@ -1,0 +1,40 @@
+<clickhouse>
+    <!--
+        Bornes mémoire du serveur.
+
+        Sans ce fichier, ClickHouse dimensionne ses caches sur la mémoire visible
+        de la machine : le seul cache de marques vaut 5 Gio par défaut, soit plus
+        que la RAM totale de cette VM. Le noyau finirait par arrêter le processus,
+        sans message exploitable.
+
+        Se borner soi-même permet à l'inverse de rendre une erreur explicite —
+        « MEMORY_LIMIT_EXCEEDED » se lit et se corrige, un OOM kill ne se lit pas.
+    -->
+    <max_server_memory_usage>${max_server_memory}</max_server_memory_usage>
+    <mark_cache_size>${mark_cache}</mark_cache_size>
+
+    <!-- Caches sans intérêt à ce volume : autant rendre la mémoire aux requêtes. -->
+    <uncompressed_cache_size>0</uncompressed_cache_size>
+    <mmap_cache_size>0</mmap_cache_size>
+    <compiled_expression_cache_size>0</compiled_expression_cache_size>
+
+    <!--
+        Ne PAS réduire `background_pool_size`. ClickHouse vérifie au démarrage que le
+        pool peut absorber ses tâches de fond, et refuse de démarrer sinon — code 36,
+        BAD_ARGUMENTS, sans un mot sur la sortie standard : le message n'existe que
+        dans `clickhouse-server.err.log`, à l'intérieur d'un conteneur qui vient de
+        mourir. Deux contraintes s'enchaînent :
+
+            number_of_free_entries_in_pool_to_execute_mutation            (20)
+            number_of_free_entries_in_pool_to_execute_optimize_entire_partition (25)
+              <= background_pool_size × background_merges_mutations_concurrency_ratio
+
+        Le ratio valant 2, le plancher est 13. On garde la valeur par défaut (16) :
+        elle est choisie pour satisfaire ces invariants, et ces pools coûtent des
+        threads au repos, pas de la mémoire. Les vrais leviers sont les caches
+        ci-dessus, réduits d'un facteur vingt.
+    -->
+    <background_pool_size>16</background_pool_size>
+    <background_schedule_pool_size>16</background_schedule_pool_size>
+    <max_concurrent_queries>16</max_concurrent_queries>
+</clickhouse>

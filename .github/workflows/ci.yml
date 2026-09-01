@@ -26,6 +26,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+          python-version: "3.13"
 
       - name: Installer les dépendances
         run: uv sync --all-extras --dev
@@ -37,6 +38,61 @@ jobs:
 
       - name: Tests unitaires
         run: uv run pytest -m "not integration" -q
+
+  dbt:
+    name: Modèles dbt
+    runs-on: ubuntu-latest
+    # `dbt parse` compile tout le projet — Jinja, `ref()`, `source()`, macros — et
+    # échoue sur une dépendance introuvable ou un cycle. C'est le contrôle qui
+    # remplace la relecture de l'ordre des scripts numérotés, et il ne demande
+    # aucune donnée : le dépôt du CHU n'est pas versionné.
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:26.3
+        ports: ["8123:8123"]
+        env:
+          CLICKHOUSE_USER: chu_etl
+          CLICKHOUSE_PASSWORD: ci_seulement_pour_le_service
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    env:
+      CLICKHOUSE_ETL_PASSWORD: ci_seulement_pour_le_service
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - name: Installer les dépendances
+        run: uv sync --all-extras --dev
+
+      - name: Compiler le projet dbt
+        run: uv run dbt parse --project-dir dbt --profiles-dir dbt --target local
+
+      - name: Contrôler la cohérence du projet dbt
+        run: uv run pytest tests/test_dbt_project.py -q
+
+  terraform:
+    name: Infrastructure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.5"
+
+      - name: Format
+        run: terraform -chdir=terraform fmt -check -recursive
+
+      - name: Validation
+        # `-backend=false` : la validation n'a pas à joindre le compte de stockage
+        # qui héberge l'état, et la CI n'a pas de secret Azure.
+        run: |
+          terraform -chdir=terraform init -backend=false
+          terraform -chdir=terraform validate
 
   entrepot:
     name: Invariants de l'entrepôt

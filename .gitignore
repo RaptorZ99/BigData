@@ -16,6 +16,19 @@ __pycache__/
 logs/
 *.log
 
+# dbt : manifeste, artefacts compilés, journaux
+dbt/target/
+dbt/logs/
+dbt/dbt_packages/
+
+# Terraform : l'état contient les mots de passe générés et l'URL SAS du lake.
+# `terraform/.gitignore` couvre le détail ; ces motifs sont la ceinture.
+*.tfstate
+*.tfstate.*
+.terraform/
+terraform/terraform.tfvars
+terraform/backend.hcl
+
 # OS / IDE
 .DS_Store
 .idea/

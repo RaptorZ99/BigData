@@ -1,0 +1,20 @@
+# Données de santé — ne doivent jamais entrer dans une image publiée.
+source-filestorage/
+data/
+.env
+logs/
+
+.git/
+.github/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+dbt/target/
+dbt/logs/
+docs/
+benchmarks/
+tests/
+terraform/
+.DS_Store

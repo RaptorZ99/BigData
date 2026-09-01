@@ -21,10 +21,14 @@
 --
 -- `readonly = 2` et non `1` : le niveau 1 interdirait aussi de changer un
 -- paramètre de session, ce que le pilote JDBC de Metabase fait à la connexion.
+--
+-- `max_memory_usage` est paramétré et non figé : 4 Go conviennent sur un poste,
+-- mais la VM cloud n'a que 2 Gio de RAM au total. Une requête libre écrite dans
+-- Metabase y tuerait le moteur — et donc le tableau de bord de l'autre usage.
 CREATE SETTINGS PROFILE OR REPLACE restitution SETTINGS
     readonly            = 2,
     max_execution_time  = 60,
-    max_memory_usage    = 4000000000,
+    max_memory_usage    = {max_memory_usage},
     max_result_rows     = 1000000,
     max_result_bytes    = 200000000,
     result_overflow_mode = 'throw';

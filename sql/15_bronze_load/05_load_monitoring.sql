@@ -2,6 +2,9 @@
 -- Le schéma est lu nativement par ClickHouse ; les valeurs aberrantes sont
 -- conservées telles quelles à ce stade — elles seront écartées et tracées en
 -- silver, jamais supprimées en silence.
+-- Le lecteur du lake est injecté par `load_bronze.py` : `file(...)` en cible locale,
+-- `azureBlobStorage(...)` en cible Azure. Un seul script pour les deux — les deux
+-- fonctions de table n'ont pas la même signature, mais elles rendent la même chose.
 INSERT INTO eds_bronze.monitoring
 SELECT
     stay_id,
@@ -12,4 +15,4 @@ SELECT
     '{source_file}'         AS _source_file,
     toDate('{ingest_date}') AS _ingest_date,
     now()                   AS _loaded_at
-FROM file('{source_file}', 'Parquet');
+FROM {lake_source};

@@ -1,0 +1,37 @@
+version: 2
+
+models:
+  - name: quality_report
+    description: >
+      Rapport qualité par exécution : 18 règles, quatre compteurs. C'est ce qui permet
+      de justifier chaque chiffre publié et de prouver qu'aucune ligne ne disparaît
+      sans motif. Modèle incrémental en ajout : l'historique des runs est conservé un an.
+    columns:
+      - name: run_id
+        description: "Exécution de `eds run` — relie le rapport aux journaux et à ops.pipeline_runs"
+        data_tests: [not_null]
+      - name: layer
+        description: "Couche contrôlée"
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["silver", "gold"]
+      - name: table_name
+        description: "Table ou base visée par la règle"
+      - name: rule
+        description: "Identifiant technique de la règle"
+        data_tests: [not_null]
+      - name: rule_label
+        description: "Énoncé de la règle, tel qu'affiché au métier"
+      - name: rows_in
+        description: "Lignes examinées par la règle"
+      - name: rows_kept
+        description: "Lignes conservées dans la table cible"
+      - name: rows_rejected
+        description: "Lignes écartées, consultables dans une table de rejets"
+      - name: rows_flagged
+        description: "Lignes conservées mais marquées par un signalement"
+      - name: details
+        description: "Précision de lecture, affichée dans le tableau de bord"
+      - name: checked_at
+        description: "Horodatage du contrôle — porte le TTL d'un an"

@@ -1,6 +1,9 @@
 -- Chargement d'un jour de séjours depuis le lake.
 -- `discharge_ts` vide est légitime (patient encore hospitalisé) : on le convertit
 -- en NULL plutôt que d'échouer. Idem pour `discharge_mode`, souvent absent.
+-- Le lecteur du lake est injecté par `load_bronze.py` : `file(...)` en cible locale,
+-- `azureBlobStorage(...)` en cible Azure. Un seul script pour les deux — les deux
+-- fonctions de table n'ont pas la même signature, mais elles rendent la même chose.
 INSERT INTO eds_bronze.sejours
 SELECT
     trim(stay_id)                                    AS stay_id,
@@ -13,9 +16,4 @@ SELECT
     '{source_file}'                                  AS _source_file,
     toDate('{ingest_date}')                          AS _ingest_date,
     now()                                            AS _loaded_at
-FROM file(
-    '{source_file}',
-    'CSVWithNames',
-    'stay_id String, patient_pseudo String, service_code String, admission_ts String,
-     discharge_ts String, admission_mode String, discharge_mode String'
-);
+FROM {lake_source};

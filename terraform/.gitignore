@@ -1,0 +1,8 @@
+# L'état contient les mots de passe générés et l'URL SAS : jamais dans Git.
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+terraform.tfvars
+backend.hcl
+crash.log

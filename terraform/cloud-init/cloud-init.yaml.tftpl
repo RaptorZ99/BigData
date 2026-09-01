@@ -1,0 +1,110 @@
+#cloud-config
+# Mise en service de la VM de restitution.
+#
+# Principe : rien n'est fait à la main, et rien de secret n'est écrit ici. Les
+# fichiers de configuration sont déposés par ce document ; les mots de passe et
+# l'URL SAS sont récupérés au démarrage dans Key Vault, par l'identité gérée de la
+# machine. `custom_data` est lisible par quiconque a un accès en lecture sur la VM
+# — et il finit dans l'état Terraform : il ne doit donc contenir aucun secret.
+
+package_update: true
+packages:
+  - jq
+  - curl
+  - ca-certificates
+
+write_files:
+  - path: /opt/eds/docker-compose.yml
+    encoding: b64
+    content: ${compose}
+    permissions: "0644"
+
+  - path: /opt/eds/caddy/Caddyfile
+    encoding: b64
+    content: ${caddyfile}
+    permissions: "0644"
+
+  - path: /opt/eds/clickhouse/config.d/limits.xml
+    encoding: b64
+    content: ${ch_limits}
+    permissions: "0644"
+
+  - path: /opt/eds/clickhouse/config.d/masking.xml
+    encoding: b64
+    content: ${ch_masking}
+    permissions: "0644"
+
+  - path: /opt/eds/clickhouse/config.d/network.xml
+    encoding: b64
+    content: ${ch_network}
+    permissions: "0644"
+
+  - path: /opt/eds/clickhouse/users.d/zz-etl.xml
+    encoding: b64
+    content: ${ch_users}
+    permissions: "0644"
+
+  - path: /opt/eds/fetch-secrets.sh
+    encoding: b64
+    content: ${fetch}
+    permissions: "0750"
+
+  # La pile est un service : elle remonte seule après un `az vm start`, avec un
+  # jeton SAS à jour. Sans cela, redémarrer la VM laisserait ClickHouse incapable
+  # de lire le lake dès la première rotation du jeton.
+  - path: /etc/systemd/system/eds-stack.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Pile EDS CHU (ClickHouse, Metabase, Caddy)
+      After=docker.service network-online.target
+      Requires=docker.service
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      WorkingDirectory=/opt/eds
+      # Les secrets sont relus à chaque démarrage : rotation du SAS et changement
+      # de mot de passe sont pris en compte par un simple redémarrage.
+      ExecStartPre=/opt/eds/fetch-secrets.sh
+      ExecStart=/usr/bin/docker compose --env-file /opt/eds/.env up -d --remove-orphans
+      ExecStop=/usr/bin/docker compose down
+      TimeoutStartSec=900
+      # ClickHouse met une dizaine de secondes à devenir sain, et Metabase deux
+      # minutes. Si le démarrage arrive trop tôt après celui de Docker, compose
+      # abandonne sur « dependency failed to start ». Réessayer vaut mieux que
+      # laisser la pile à terre en attendant une intervention humaine.
+      Restart=on-failure
+      RestartSec=30
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  # Fichier d'échange : marge de sécurité pour la JVM de Metabase et les pics de
+  # ClickHouse. `swappiness` bas — on veut un filet, pas un usage courant.
+  - |
+    if [ ! -f /swapfile ] && [ ${swap_size_gb} -gt 0 ]; then
+      fallocate -l ${swap_size_gb}G /swapfile
+      chmod 600 /swapfile
+      mkswap /swapfile
+      swapon /swapfile
+      echo '/swapfile none swap sw 0 0' >> /etc/fstab
+      sysctl -w vm.swappiness=10
+      echo 'vm.swappiness=10' > /etc/sysctl.d/99-eds.conf
+    fi
+
+  # Docker CE depuis le dépôt officiel : le paquet Ubuntu n'embarque pas le
+  # greffon `compose` v2, dont le projet dépend.
+  - curl -fsSL https://get.docker.com | sh
+
+  # ClickHouse ouvre beaucoup de descripteurs ; le défaut d'Ubuntu est trop bas.
+  - |
+    mkdir -p /etc/systemd/system/docker.service.d
+    printf '[Service]\nLimitNOFILE=262144\n' > /etc/systemd/system/docker.service.d/nofile.conf
+    systemctl daemon-reload
+    systemctl restart docker
+
+  - chown -R root:root /opt/eds
+  - systemctl enable --now eds-stack.service

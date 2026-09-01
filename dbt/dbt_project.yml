@@ -1,0 +1,49 @@
+# Projet dbt de l'EDS CHU — couches silver et gold.
+#
+# Ce qui est ici et ce qui n'y est pas :
+#   * bronze reste hors de dbt : c'est de l'ingestion (DROP PARTITION + INSERT depuis
+#     le lake), pas de la transformation. dbt ne sait pas charger un fichier.
+#   * silver et gold sont intégralement des modèles : l'ordre d'exécution découle des
+#     `ref()`, plus du préfixe numérique des fichiers.
+#   * `ops.quality_report` est un modèle incrémental. Le rapport qualité devient donc
+#     un nœud du graphe, ce qui supprime la règle fragile « ce script en dernier ».
+#
+# `ops.ingest_log` et `ops.pipeline_runs` restent écrits par Python : ils décrivent
+# l'orchestration, pas la transformation.
+
+name: eds
+version: "1.0.0"
+config-version: 2
+profile: eds
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+# `run_id` relie chaque ligne du rapport qualité à une exécution de `eds run`, donc
+# aux journaux et à `ops.pipeline_runs`. Défaut lisible pour un `dbt build` à la main.
+vars:
+  run_id: manual
+  # Seuil de k-anonymat. Une constante nommée plutôt que six « 5 » disséminés :
+  # le jour où la gouvernance le relève, il y a un seul endroit à changer.
+  seuil_k: 5
+
+models:
+  eds:
+    +materialized: table
+    +engine: "MergeTree()"
+    # Les descriptions du YAML deviennent des COMMENT dans ClickHouse : la
+    # documentation vit au même endroit que le modèle, et l'entrepôt la porte.
+    +persist_docs:
+      relation: true
+      columns: true
+    silver:
+      +schema: eds_silver
+    gold_pilotage:
+      +schema: eds_gold_pilotage
+    gold_recherche:
+      +schema: eds_gold_recherche
+    ops:
+      +schema: ops

@@ -6,6 +6,22 @@
 >
 > 1. **Le taux de réadmission ne se lit pas sans sa fenêtre d'observation.** Le plan prévoyait « 687 / 11 678 = 5,9 % ». Ce ratio est arithmétiquement exact et métier faux : 88 % du dénominateur est constitué de sorties postérieures à la dernière admission connue, qui ne peuvent structurellement rien constater. Le chiffre publié est **687 / 1 421 sorties observables = 48,3 %**, assorti de sa couverture de 12,2 % (rapport §5.3).
 > 2. **Le k-anonymat appelait une suppression complémentaire.** Appliquer le seuil séparément à une marge et à sa décomposition laisse retrouver la cellule cachée par soustraction (rapport §7.2).
+>
+> **⚠ Ce plan décrit l'implémentation d'origine, en scripts SQL numérotés.** Le projet a
+> depuis migré ses couches silver et gold vers **dbt**, et s'est doté d'un déploiement
+> Azure. Ce qui reste vrai ici : le profilage (§2), les décisions d'architecture (§3), le
+> modèle dimensionnel (§8), les définitions des indicateurs (§9). Ce qui a **déménagé** :
+>
+> | Ce que ce plan décrit | Où cela vit désormais |
+> |---|---|
+> | `sql/20_silver/` (§8) | `dbt/models/silver/` — mêmes règles, mêmes chiffres |
+> | `sql/30_gold/` (§9) | `dbt/models/gold_pilotage/` et `gold_recherche/` |
+> | Le rapport qualité, inséré par `transform.py` | `dbt/models/ops/quality_report.sql`, modèle incrémental |
+> | `transform.py` exécute les dossiers `sql/` dans l'ordre | `transform.py` lance `dbt build` ; l'ordre découle des `ref()` |
+> | 162 tests (99 + 63) | 179 pytest (116 + 63) **et** 78 tests dbt |
+>
+> Le pourquoi de cette migration est en §4.4 du [rapport](RAPPORT.md), son plan détaillé
+> dans [`PLAN-CLOUD.md`](PLAN-CLOUD.md) §7.
 
 ---
 
@@ -20,6 +36,7 @@ Filestorage (RO) → Lake (copie pseudonymisée) → Bronze (tables typées) →
 Deux usages, **cloisonnés** : pilotage hospitalier et recherche clinique.
 
 **Stack** : ClickHouse (Docker) = entrepôt · Python (uv) = orchestrateur · Metabase (Docker) = dashboards.
+*(Depuis livraison : **dbt** orchestre le SQL de silver et gold, et **Terraform** décrit un déploiement Azure — cf. l'avertissement en tête.)*
 
 **Principes non négociables** (détaillés dans [`CONVENTIONS.md`](CONVENTIONS.md)) :
 - Toute transformation bronze→silver→gold est du **SQL exécuté dans ClickHouse**. Python copie des fichiers et envoie des requêtes, rien d'autre. Pas de pandas.
@@ -171,9 +188,9 @@ Le modèle de données complet (bronze typé, **silver en constellation** — 3 
 │   ├── 00_init/               # databases, tables ops, profil + quota + users chu_* (templaté)
 │   ├── 10_bronze/             # DDL des tables bronze uniquement
 │   ├── 15_bronze_load/        # requêtes d'insert paramétrées par (fichier, jour)
-│   ├── 20_silver/             # constellation : 3 dims + 3 faits, rejets, rapport qualité
-│   └── 30_gold/               # kpi_* pilotage, cohorte_* recherche, contrôles RGPD
-├── tests/                     # 162 tests : 99 unitaires + 63 d'intégration
+│   ├── 20_silver/             # → migré vers dbt/models/silver/
+│   └── 30_gold/               # → migré vers dbt/models/gold_*/
+├── tests/                     # 179 tests : 116 unitaires + 63 d'intégration
 │   ├── conftest.py            # fixtures : jeu de données miniature entièrement inventé
 │   ├── test_pseudo.py         # déterminisme, non-réversibilité, format, généralisation
 │   ├── test_collect.py        # aucune colonne identifiante ne sort de la source
@@ -555,8 +572,8 @@ Documenter dans EXPLOITATION.md : installation (`crontab -e`), supervision (exit
 
 ## 12. Étape 7 — Tests (`tests/`)
 
-**162 tests au total : 99 unitaires (`make test`, sans Docker) et 63 d'intégration
-(`make test-e2e`).** Le jeu de données des tests unitaires est entièrement inventé et vit
+**179 tests au total : 116 unitaires (`make test`, sans Docker) et 63 d'intégration
+(`make test-e2e`)**, auxquels s'ajoutent 78 tests dbt exécutés pendant le run. Le jeu de données des tests unitaires est entièrement inventé et vit
 dans `conftest.py` — aucune donnée réelle n'entre dans le dépôt.
 
 *Unitaires :*

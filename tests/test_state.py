@@ -7,15 +7,12 @@ branches de décision sont couvertes ici, sans dépendre de l'entrepôt.
 
 from __future__ import annotations
 
-from pathlib import Path
-
-from eds.collect import SourceFile
 from eds.state import IngestedFile, needs_ingestion
+from eds.storage import SourceFile
 
 SOURCE = SourceFile(
     domain="sejours",
     ingest_date="2026-08-27",
-    path=Path("/dev/null"),
     relative_name="sejours.csv",
 )
 CLE = ("sejours", "2026-08-27", "sejours.csv")
@@ -63,7 +60,7 @@ def test_le_journal_d_un_autre_jour_n_influence_pas_la_decision():
 
 def test_un_meme_fichier_dans_un_autre_domaine_est_distinct():
     """Deux référentiels partagent un jour : ils ne doivent pas se confondre."""
-    services = SourceFile("referentiels", "2026-08-26", Path("/dev/null"), "services.csv")
+    services = SourceFile("referentiels", "2026-08-26", "services.csv")
     journal = {
         ("referentiels", "2026-08-26", "cim10.csv"): IngestedFile(
             "referentiels", "2026-08-26", "cim10.csv", EMPREINTE, "success"

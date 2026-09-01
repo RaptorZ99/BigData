@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from eds import storage
 from eds.collect import discover, missing_files
 from eds.config import Config
 
@@ -22,7 +23,7 @@ def _vider(chemin: Path) -> None:
 
 
 def test_un_depot_complet_ne_signale_aucun_manque(config: Config):
-    assert missing_files(config) == []
+    assert missing_files(storage.for_source(config)) == []
 
 
 def test_un_fichier_absent_est_signale(config: Config, source_dir: Path):
@@ -33,11 +34,11 @@ def test_un_fichier_absent_est_signale(config: Config, source_dir: Path):
     """
     _vider(source_dir / "sejours" / "2026-08-26" / "sejours.csv")
 
-    manquants = missing_files(config)
+    manquants = missing_files(storage.for_source(config))
     assert manquants == ["sejours/2026-08-26/sejours.csv"]
 
     # Le fichier disparaît aussi de l'énumération : rien ne sera chargé pour lui.
-    assert all(s.relative_name != "sejours.csv" for s in discover(config))
+    assert all(s.relative_name != "sejours.csv" for s in discover(storage.for_source(config)))
 
 
 def test_un_jour_entierement_absent_n_est_pas_un_manque(config: Config, source_dir: Path):
@@ -45,7 +46,7 @@ def test_un_jour_entierement_absent_n_est_pas_un_manque(config: Config, source_d
     import shutil
 
     shutil.rmtree(source_dir / "sejours" / "2026-08-26")
-    assert missing_files(config) == []
+    assert missing_files(storage.for_source(config)) == []
 
 
 def test_les_manques_sont_listes_par_domaine_et_par_jour(config: Config, source_dir: Path):
@@ -53,7 +54,7 @@ def test_les_manques_sont_listes_par_domaine_et_par_jour(config: Config, source_
     _vider(source_dir / "patients" / "2026-08-26" / "patients.csv")
     _vider(source_dir / "sejours" / "2026-08-26" / "sejours.csv")
 
-    assert sorted(missing_files(config)) == [
+    assert sorted(missing_files(storage.for_source(config))) == [
         "patients/2026-08-26/patients.csv",
         "sejours/2026-08-26/sejours.csv",
     ]

@@ -30,6 +30,10 @@ PLACEHOLDER_SALT = "remplace-moi-par-openssl-rand-hex-32"
 # l'air d'un vrai (« AdminChu2026! ») passerait inaperçu et finirait en production.
 PLACEHOLDER_PASSWORD_MARKER = "change_me"
 
+# Cibles de stockage prises en charge. `local` est le défaut : `make demo` ne
+# doit jamais dépendre d'un compte cloud.
+SUPPORTED_BACKENDS = ("local", "azure")
+
 
 class ConfigError(RuntimeError):
     """Configuration absente ou invalide."""
@@ -57,6 +61,23 @@ class Config:
     metabase_pilotage_password: str
     recherche_email: str
     metabase_recherche_password: str
+
+    # ── Cible d'exécution ────────────────────────────────────────────────────
+    # `local` : lake sur disque, lu par file(). `azure` : lake en stockage objet,
+    # lu par azureBlobStorage(). Un seul code, deux cibles — le backend décide de
+    # la fonction de table, pas les scripts SQL.
+    storage_backend: str = "local"
+    storage_account: str = ""
+    source_container: str = "filestorage"
+    lake_container: str = "lake"
+    web_container: str = "$web"
+    dbt_target: str = "local"
+
+    # Plafond mémoire du profil `restitution`, en octets. 4 Go conviennent sur un
+    # poste ; sur la VM cloud (2 Gio), une requête libre écrite dans Metabase
+    # pourrait tuer le moteur — la valeur descend alors à 400 Mo. Le GRANT protège
+    # la confidentialité, cette borne protège la disponibilité.
+    restitution_max_memory: int = 4_000_000_000
 
     @property
     def weak_password_settings(self) -> tuple[str, ...]:
@@ -135,8 +156,23 @@ def load_config() -> Config:
             "Générez un sel propre à votre installation : openssl rand -hex 32"
         )
 
+    backend = os.environ.get("EDS_STORAGE_BACKEND", "local").strip().lower()
+    if backend not in SUPPORTED_BACKENDS:
+        raise ConfigError(
+            f"EDS_STORAGE_BACKEND invalide : {backend!r}. "
+            f"Valeurs acceptées : {', '.join(SUPPORTED_BACKENDS)}."
+        )
+    if backend == "azure" and not os.environ.get("EDS_STORAGE_ACCOUNT", "").strip():
+        raise ConfigError(
+            "EDS_STORAGE_ACCOUNT manquant alors que EDS_STORAGE_BACKEND vaut 'azure'. "
+            "Renseignez le nom du compte de stockage (sans suffixe)."
+        )
+
     source_dir = _resolve(os.environ.get("EDS_SOURCE_DIR", "./source-filestorage"))
-    if not source_dir.is_dir():
+    # Le dépôt du CHU n'est un dossier que sur la cible locale : en cible azure,
+    # c'est un conteneur de stockage objet, dont l'existence est vérifiée à la
+    # connexion. Exiger un dossier ici ferait échouer le job pour rien.
+    if backend == "local" and not source_dir.is_dir():
         raise ConfigError(
             f"Dépôt source introuvable : {source_dir}. "
             "Vérifiez EDS_SOURCE_DIR (le dossier du CHU est en lecture seule)."
@@ -161,4 +197,13 @@ def load_config() -> Config:
         metabase_pilotage_password=_require("MB_PILOTAGE_PASSWORD", hint),
         recherche_email=os.environ.get("MB_RECHERCHE_EMAIL", "recherche@chu.local"),
         metabase_recherche_password=_require("MB_RECHERCHE_PASSWORD", hint),
+        storage_backend=backend,
+        storage_account=os.environ.get("EDS_STORAGE_ACCOUNT", ""),
+        source_container=os.environ.get("EDS_SOURCE_CONTAINER", "filestorage"),
+        lake_container=os.environ.get("EDS_LAKE_CONTAINER", "lake"),
+        web_container=os.environ.get("EDS_WEB_CONTAINER", "$web"),
+        # dbt et le stockage partagent la même notion de cible : les dissocier
+        # permettrait de transformer sur un entrepôt sans savoir d'où il lit.
+        dbt_target=os.environ.get("DBT_TARGET", backend),
+        restitution_max_memory=int(os.environ.get("EDS_RESTITUTION_MAX_MEMORY", "4000000000")),
     )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+from eds import storage
 from eds.collect import checksum, collect, discover
 from eds.config import Config
 from eds.pseudo import PSEUDO_PATTERN, pseudonymize_id
@@ -11,12 +12,18 @@ from eds.pseudo import PSEUDO_PATTERN, pseudonymize_id
 IPP_PATTERN = re.compile(r"IPP\d+")
 
 
+def _zones(config: Config):
+    """Les deux zones de la cible locale : dépôt du CHU et lake."""
+    return storage.for_source(config), storage.for_lake(config)
+
+
 def _collect_all(config: Config) -> dict[str, str]:
     """Exécute la collecte et renvoie le contenu du lake par domaine."""
+    depot, lake = _zones(config)
     contents = {}
-    for source in discover(config):
-        result = collect(source, config)
-        contents[source.domain] = result.lake_path.read_text(encoding="utf-8")
+    for source in discover(depot):
+        collect(source, depot, lake, config)
+        contents[source.domain] = lake.read_text(source)
     return contents
 
 
@@ -83,7 +90,8 @@ def test_les_anomalies_ne_sont_pas_filtrees_a_la_collecte(config: Config):
 
 def test_le_checksum_source_est_calcule(config: Config):
     """Il sert de clé d'idempotence dans ops.ingest_log."""
-    empreintes = [checksum(source) for source in discover(config)]
+    depot, _ = _zones(config)
+    empreintes = [checksum(source, depot) for source in discover(depot)]
     assert all(len(e) == 64 for e in empreintes)
     assert len(set(empreintes)) == len(empreintes)
 
@@ -94,8 +102,9 @@ def test_le_checksum_ne_depend_pas_de_la_collecte(config: Config):
     C'est ce qui rend un run sans nouveau dépôt réellement gratuit — ni copie,
     ni repseudonymisation.
     """
-    source = next(iter(discover(config)))
-    avant = checksum(source)
-    collect(source, config)
-    assert checksum(source) == avant
+    depot, lake = _zones(config)
+    source = next(iter(discover(depot)))
+    avant = checksum(source, depot)
+    collect(source, depot, lake, config)
+    assert checksum(source, depot) == avant
     assert not (config.lake_dir / "inexistant").exists()

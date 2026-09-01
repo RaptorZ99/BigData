@@ -5,16 +5,18 @@ fichier est chargé automatiquement par Claude Code, via le `CLAUDE.md` de la ra
 l'importe. Une vue d'ensemble du projet est dans le [README](../README.md) ; le dossier de
 conception dans [`RAPPORT.md`](RAPPORT.md).
 
-Projet fil rouge M2 Big Data (épreuve E05) : construire l'Entrepôt de Données de Santé d'un CHU à partir de dépôts quotidiens de fichiers hétérogènes (`source-filestorage/`), selon une architecture médaillon **Filestorage → Lake → Bronze → Silver → Gold → Dashboards**, avec ClickHouse (Docker) comme entrepôt, Python comme orchestrateur et Metabase (Docker) pour la restitution.
+Projet fil rouge M2 Big Data (épreuve E05) : construire l'Entrepôt de Données de Santé d'un CHU à partir de dépôts quotidiens de fichiers hétérogènes (`source-filestorage/`), selon une architecture médaillon **Filestorage → Lake → Bronze → Silver → Gold → Dashboards**, avec ClickHouse comme entrepôt, **dbt** pour la transformation, Python comme orchestrateur et Metabase pour la restitution. La chaîne tourne à l'identique en local (Docker Compose) et sur **Azure** (Terraform) — cf. [`CLOUD.md`](CLOUD.md).
 
 **Silver est modélisé en constellation Kimball : 3 étoiles, une par fait** — exigence pédagogique validée avec le professeur : `fact_sejour` ⋆ (dim_patient, dim_service), `fact_monitoring` ⋆ (dim_service), `fact_diagnostic` ⋆ (dim_patient, dim_cim10), au grain déclaré, sur dimensions conformées. Chaque fait porte les FK directes de **ses** dimensions (propagées au build silver) — **aucune jointure fact-to-fact** dans le modèle ni dans les requêtes gold ; `stay_id` est la **dimension dégénérée** commune aux 3 faits (drill-across). Les libellés restent dans les dimensions ; chaque besoin métier mappe sur un fait (cf. PLAN.md §9.0). Le diagramme de référence est [`data-model.puml`](data-model.puml) (rendu : [`img/eds-data-model.png`](img/eds-data-model.png)) — il fait foi pour les DDL.
 
 Le plan d'implémentation complet et autosuffisant est dans **[`PLAN.md`](PLAN.md)** — le lire intégralement avant toute implémentation. Le sujet officiel est dans [`FICHE-SUJET.md`](FICHE-SUJET.md).
 
+L'extension cloud — déploiement Azure décrit en Terraform et migration de la transformation sous dbt — **a été réalisée et déployée**. Son plan et les faits vérifiés qui l'ont dictée sont dans **[`PLAN-CLOUD.md`](PLAN-CLOUD.md)** (§5 : onze pièges vérifiés) ; le mode d'emploi dans **[`CLOUD.md`](CLOUD.md)**. `make demo` en local reste la cible de référence, et **les invariants chiffrés de l'entrepôt ne bougent pas d'une unité** entre les deux — c'était le critère d'acceptation du portage.
+
 ## Règles impératives du projet
 
 1. **RGPD — aucune donnée identifiante n'entre dans l'entrepôt.** `nir`, `nom`, `prenom` sont supprimés et `patient_id` est pseudonymisé (**HMAC-SHA256** avec le sel `EDS_SALT`, jamais commité) **dès la copie vers le lake**, dans `patients` ET `sejours` (même pseudonyme → jointures préservées). `birth_date` est généralisée en `birth_year`. Aucun code ne doit jamais charger l'identité en clair dans ClickHouse, un log, un dashboard ou un commit.
-2. **Les transformations bronze→silver→gold s'exécutent en SQL dans ClickHouse.** Python ne fait que copier des fichiers et envoyer des requêtes. Interdiction de sortir les données du moteur pour les transformer en pandas — c'est l'anti-pattern explicitement sanctionné par le sujet. L'étape de pseudonymisation à l'entrée du lake se fait en **stdlib pure** (`csv`, `json`, `hmac`), en streaming ligne à ligne.
+2. **Les transformations bronze→silver→gold s'exécutent en SQL dans ClickHouse**, orchestrées par **dbt** (`dbt/`, 27 modèles). Python ne fait que copier des fichiers et lancer `dbt build`. Interdiction de sortir les données du moteur pour les transformer en pandas — c'est l'anti-pattern explicitement sanctionné par le sujet. L'étape de pseudonymisation à l'entrée du lake se fait en **stdlib pure** (`csv`, `json`, `hmac`), en streaming ligne à ligne.
 3. **`source-filestorage/` est en lecture seule.** Ne jamais le modifier, le déplacer ou y écrire. Il est gitignoré (il contient l'identité en clair), tout comme `data/` (lake + volumes) et `.env`.
 4. **Idempotence obligatoire.** Bronze est partitionné par jour d'ingestion ; rejouer un jour = `DROP PARTITION` puis rechargement. Relancer le pipeline deux fois ne doit jamais dupliquer une ligne. L'état d'ingestion vit dans `ops.ingest_log` (checksum des fichiers).
 5. **On écarte, on ne corrige pas.** Les lignes en anomalie (séjour avec `discharge_ts < admission_ts`, constantes hors plage physiologique) partent dans des tables `*_rejets` avec une colonne `reject_reason` — jamais supprimées silencieusement. Exception métier : `discharge_ts` vide = séjour en cours, **légitime**, à conserver. Les patients rejoués chaque jour (fichiers cumulatifs) se dédupliquent par `argMax` sur le jour d'ingestion dans `dim_patient`.
@@ -43,7 +45,7 @@ Le plan d'implémentation complet et autosuffisant est dans **[`PLAN.md`](PLAN.m
 - **Metabase** : le jeton de setup reste exposé après configuration — se fier à `has-user-setup`. Le blocage complet des données (`view-data: blocked`) est payant ; en OSS on combine `create-queries: "no"` et les permissions de collection, l'interdiction réelle venant des GRANT ClickHouse.
 - **Réadmission** : ne jamais utiliser `leadInFrame` ici (cf. PLAN.md §9.1).
 - **Découpage SQL** : le découpeur respecte les chaînes — un `;` dans un libellé métier ne sépare pas deux instructions. Ne pas revenir à un `split(";")` naïf.
-- **Ordre du gold** : `05_pilotage_qualite.sql` s'exécute en dernier car il recopie `ops.quality_report`, alimenté par `04_quality.sql`. Le placer plus tôt n'exposerait que les règles silver.
+- **Ordre des couches dérivées** : plus aucune convention de nommage. dbt le déduit des `ref()`, et `tests/test_dbt_project.py` interdit d'écrire une base en dur — c'est ce qui empêche le piège de revenir. `kpi_qualite_pipeline` référence `quality_report`, donc s'exécute après lui, contrôles RGPD compris.
 - **Mesures non additives** : `nb_patients` ne se somme jamais hors de son grain. La pyramide des âges lit `cohorte_demographie_globale` (grain sexe × tranche), pas `cohorte_demographie` (grain CIM-10 × sexe × tranche) — sinon un patient à 5 diagnostics est compté 5 fois.
 - **Provisionnement convergent** : `CREATE USER OR REPLACE` côté ClickHouse et réalignement du mot de passe côté Metabase. `IF NOT EXISTS` ne met pas à jour un compte existant, donc changer `.env` n'aurait aucun effet. Même logique pour le schéma : `CREATE TABLE IF NOT EXISTS` ne rejoue pas une évolution, d'où les `ALTER … ADD COLUMN IF NOT EXISTS` / `MODIFY TTL` explicites dans `02_ops.sql`.
 - **Secrets hors des logs** : ne jamais imprimer un mot de passe sur stdout — la sortie du provisionnement finit dans `logs/cron.log`. Corollaire : tout secret d'exemple porte la marque `change_me`, seul motif que `Config.weak_password_settings` sait détecter. Ne jamais mettre dans `.env.example` une valeur qui *ressemble* à un vrai mot de passe : elle passerait le contrôle en silence.
@@ -62,6 +64,30 @@ Le plan d'implémentation complet et autosuffisant est dans **[`PLAN.md`](PLAN.m
 - **PlantUML prend toute ligne contenant des parenthèses pour une méthode** et la relègue dans un compartiment séparé, coupant les entités au hasard. Préfixer par `{field}`.
 - **Metabase répond 404, pas 403, sur un dashboard hors périmètre** (403 sur une collection). Ce n'est pas un bug : un refus explicite confirmerait l'existence de la ressource et permettrait de l'énumérer. Ne pas « corriger » ce comportement en cherchant un message d'erreur plus bavard.
 
+## Pièges du déploiement cloud (vérifiés — détail dans PLAN-CLOUD.md §5)
+
+- **Deux filtres se cumulent sur le choix de région, et aucun n'est un quota.** (1) Une policy d'abonnement — « Allowed resource deployment regions » — n'autorise que `uaenorth`, `spaincentral`, `italynorth`, `swedencentral`, `germanywestcentral` ; ailleurs, `RequestDisallowedByAzure`. (2) Parmi celles-là, seules **`swedencentral`** et `spaincentral` proposent la série B (`az vm list-skus`) ; `italynorth` et `germanywestcentral` n'en proposent aucune. → **`swedencentral`**, la moins chère des deux, et dans l'Union européenne. Lire les régions autorisées : `az policy assignment list --query "[?displayName=='Allowed resource deployment regions'].parameters"`.
+- **Ne jamais conclure d'un quota à une disponibilité.** `az vm list-usage` affiche `Standard BS Family vCPUs = 4` en France Central, où **aucune** VM de série B n'est déployable. Seul `az vm list-skus --all` fait foi, et il faut y lire le **type** de restriction : `Location` est rédhibitoire, `Zone` ne l'est pas si l'on déploie sans zone.
+- **L'API tarifaire renvoie des compteurs Windows et Linux pour la même taille** (35,85 € contre 30,09 € pour un B2ls_v2). Filtrer sur `productName`, sans quoi l'estimation est fausse de 20 %.
+- **ClickHouse 26.3 ne sait pas utiliser l'identité gérée d'une VM** pour Azure Blob : sans identifiants, il tente `WorkloadIdentityCredential`, qui n'existe que dans Kubernetes. `extra_credentials(client_id, tenant_id)` n'y change rien. → **jeton SAS de conteneur**, en lecture seule et daté.
+- **Monter son propre `config.d` dans ClickHouse remplace celui de l'image**, et avec lui `docker_related_config.xml` — le fichier qui fait écouter le serveur ailleurs que sur la boucle locale. Symptôme trompeur : le conteneur est déclaré *healthy* (sa sonde interroge localhost), `docker exec clickhouse-client` fonctionne, et seules les connexions venues de l'extérieur échouent en `Connection refused`. Il faut redéclarer `listen_host` soi-même.
+- **`<listen_host>::</listen_host>` seul ne suffit pas sur une VM Azure** : elle n'a pas d'IPv6, la liaison échoue, `listen_try` la tolère — et il ne reste **aucun** écouteur. ClickHouse s'arrête alors sur `No servers started` (code 139). Déclarer aussi `0.0.0.0`.
+- **Ne pas réduire `background_pool_size`.** ClickHouse impose `number_of_free_entries_in_pool_to_execute_optimize_entire_partition (25) <= background_pool_size × ratio (2)`, soit un plancher de 13. En dessous : refus de démarrer, code 36 `BAD_ARGUMENTS`, **sans un mot sur la sortie standard** — le message n'existe que dans `clickhouse-server.err.log`, dans un conteneur qui vient de mourir. Garder le défaut (16) : ces pools coûtent des threads, pas de la mémoire.
+- **`azureBlobStorage()` à 5 arguments positionnels est un piège** : le cinquième est lu comme une *compression*, et la structure est alors inférée en silence — le typage explicite de bronze disparaîtrait sans erreur. Utiliser une **collection nommée** avec arguments nommés (`blob_path=`, `format=`, `structure=`).
+- **Une collection nommée exige `named_collection_control` et `show_named_collections`** dans `users.d/` : sans eux, `ACCESS_DENIED` sur `NAMED COLLECTION ON lake`. Et un `GRANT` ne rattraperait rien — `chu_etl` est défini en XML, ClickHouse refuse de le modifier (`ACCESS_STORAGE_READONLY`).
+- **`config.d` et `users.d` se montent en écriture**, jamais en `:ro` : le point d'entrée de l'image y écrit `default-user.xml` au démarrage, et le conteneur meurt sinon sur « Read-only file system ». Les `&` du jeton SAS doivent être échappés en `&amp;` dans le XML.
+- **Let's Encrypt est inutilisable sur `*.cloudapp.azure.com`** : ce domaine n'est pas sur la Public Suffix List, son quota d'émission est partagé entre tous les clients Azure et saturé. `duckdns.org` y figure — chaque sous-domaine y a son propre quota. Défaut : `tls internal`.
+- **dbt ne démarre pas sur Python 3.14** (`mashumaro : UnserializableField` sur `JSONObjectSchema.schema`). Le dépôt est figé sur **3.13** (`.python-version`, `requires-python = ">=3.12,<3.14"`).
+- **`render()` échappe les apostrophes** : un paramètre qui *est* du SQL — l'appel de fonction de table du lake — doit être marqué `Sql(...)`, sinon ses propres littéraux sont doublés et la requête devient invalide.
+- **AzureRM 5.0** : `resource_provider_registrations` vaut `none` par défaut (d'où `make cloud-bootstrap`), `static_website` est sorti du compte de stockage pour devenir une ressource à part, et `azurerm_storage_container.resource_manager_id` a disparu — c'est désormais `.id`.
+- **ADLS Gen2 (`is_hns_enabled`) interdit le versioning des blobs.** Il faut choisir. Le conteneur `filestorage` étant la seule source de vérité du système, l'historique des versions l'emporte sur des répertoires POSIX dont les droits ne se servent pas (ils sont attribués au conteneur). Effet de bord bienvenu : `azureBlobStorage()` lit alors un compte de blobs classique, le cas le mieux éprouvé côté ClickHouse.
+- **Le provider lit le plan de données du compte de stockage juste après l'avoir créé**, avant que la clé ne soit utilisable : `AuthenticationFailed`. Terraform marque alors la ressource *tainted*, et l'`apply` suivant la détruit puis la recrée — la boucle se referme. Sortie : `terraform untaint azurerm_storage_account.eds` puis réessayer une minute plus tard. `data_plane_available = false` ne suffit pas : le chemin d'encodage de l'identifiant l'ignore.
+- **Container Apps : déclarer explicitement le profil `Consumption`**, sur l'environnement comme sur chaque job. Azure l'ajoute d'office et, s'il n'est pas déclaré, Terraform veut le retirer à chaque plan — un « diff perpétuel », le genre de bruit qui finit par faire ignorer les plans. Et `log_analytics_workspace_id` exige `logs_destination = "log-analytics"`.
+- **Le backend Terraform en `use_azuread_auth` exige un rôle de données.** Être propriétaire de l'abonnement ne donne pas accès aux blobs : sans `Storage Blob Data Contributor` sur le compte d'état, `terraform init` échoue en 403 `AuthorizationPermissionMismatch` alors qu'on a tous les droits sur la ressource. `make cloud-bootstrap` l'attribue.
+- **`DBT_TARGET_PATH` doit être honoré par le code.** L'image du pipeline redirige les artefacts dbt vers `/tmp` (le répertoire applicatif n'est pas garanti inscriptible) ; chercher `static_index.html` dans `dbt/target/` faisait échouer la publication de la documentation alors que dbt avait réussi.
+- **L'image du pipeline se construit en `linux/amd64`.** Container Apps n'exécute pas d'arm64, et un Mac Apple Silicon en produit par défaut : le job échouerait au démarrage sans message clair. `make image-push` force la plateforme.
+- **La propagation d'une attribution de rôle n'est pas instantanée** : sans une attente explicite, le premier `terraform apply` échoue en écrivant les secrets et le second passe. Un déploiement qui ne marche qu'à la deuxième tentative n'est pas reproductible.
+
 ## État livré — chiffres de référence
 
 Le projet est **complet et fonctionnel**. Ces valeurs sont ancrées par `make test-e2e` : si
@@ -74,8 +100,8 @@ l'une d'elles change, c'est qu'une règle a été modifiée, et cela doit être 
 | flags | post_mortem 192 · after_discharge **0** (contrôle) · is_alert 3 053 · is_ongoing 1 190 |
 | KPI | DMS 6,08 j (6,01 → 6,23 par service) · patients 5 358 · réadmission **687 / 1 421 observables = 48,3 %** (couverture 12,2 %) |
 | RGPD | k-anonymat 4 cellules retirées / 1 600 · marges 3 / 200 · 0 cellule reconstructible |
-| qualité | **18 règles** = 14 silver + 4 gold |
-| tests | **162** = 99 unitaires + 63 d'intégration |
+| qualité | **18 règles** = 14 silver + 4 gold (modèle `ops/quality_report`) |
+| tests | **179 pytest** = 116 unitaires + 63 d'intégration · **78 tests dbt** (69 génériques + 9 singuliers) |
 
 ⚠ **Le taux de réadmission ne se lit jamais sur les 11 678 sorties éligibles** : seules
 1 421 ont une fenêtre d'observation non vide. Le rapport aux 11 678 donnerait 5,9 %, exact
@@ -87,15 +113,29 @@ et trompeur (cf. [`RAPPORT.md`](RAPPORT.md) §5.3).
 make demo        # démo complète de zéro (up + pipeline + provision) — ~30 s
 make pipeline    # pipeline incrémental (jours non encore ingérés)
 make quality     # les 18 contrôles qualité du dernier traitement
-make test        # 99 tests unitaires ; make test-e2e pour les 63 invariants
+make test        # 116 tests unitaires ; make test-e2e pour les 63 invariants
 make provision   # recrée connexions, permissions et dashboards Metabase
-uv run eds run --rebuild          # reconstruit silver+gold après modification du SQL
+uv run eds run --rebuild          # reconstruit silver+gold après modification d'un modèle dbt
 uv run eds run --date 2026-08-27  # rejeu forcé d'un jour (reprise sur incident)
 uv run eds check-cloisonnement    # prouve le cloisonnement aux deux niveaux
+make dbt-test    # rejoue les seuls tests dbt sur l'entrepôt en place
+make dbt-docs    # documentation dbt : graphe des 27 modèles
+```
+
+Déploiement Azure (cf. [`CLOUD.md`](CLOUD.md)) :
+
+```bash
+make cloud-bootstrap   # fournisseurs + backend d'état (une fois)
+make image-push        # publie l'image du pipeline, en linux/amd64
+make cloud-apply       # terraform apply
+make cloud-seed        # dépose source-filestorage/ dans le conteneur du CHU
+make cloud-provision   # entrepôt, Metabase, documentation dbt
+make cloud-run         # déclenche le pipeline ; make cloud-status pour suivre
+make cloud-stop        # met en pause : 30 €/mois -> 5 €/mois
 ```
 
 **Après toute modification** : `uv run ruff check src tests && uv run ruff format src tests`,
-puis `uv run eds run --rebuild` (si le SQL a changé) ou `uv run eds provision-metabase` (si
-les dashboards ont changé), puis `uv run pytest -q`. Une modification du provisionnement
+puis `uv run eds run --rebuild` (si un modèle dbt a changé) ou `uv run eds provision-metabase`
+(si les dashboards ont changé), puis `uv run pytest -q`. Une modification du provisionnement
 Metabase se valide sur une instance **neuve** (`make reset && make demo`) : plusieurs
 défauts ne se voient que là (cf. `width` ci-dessus).

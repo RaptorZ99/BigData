@@ -19,7 +19,7 @@ from datetime import datetime
 from clickhouse_connect.driver.client import Client
 
 from eds import collect as collect_module
-from eds import load_bronze, state, transform
+from eds import load_bronze, state, storage, transform
 from eds.config import Config
 from eds.logging_setup import bind_run_id, get_logger
 from eds.warehouse import execute_directory
@@ -61,6 +61,7 @@ def provision_warehouse(client: Client, config: Config) -> None:
         {
             "pilotage_password": config.pilotage_password,
             "recherche_password": config.recherche_password,
+            "max_memory_usage": config.restitution_max_memory,
         },
     )
     execute_directory(client, "10_bronze")
@@ -92,7 +93,13 @@ def run(
         # on ignore alors le journal, sans quoi un fichier inchangé serait sauté
         # — précisément le cas d'une reprise après incident.
         journal = {} if (full_refresh or only_date) else state.load_ingest_log(client)
-        _ingest(client, config, journal, report, only_date=only_date)
+        # Les deux zones sont résolues une fois par run : un dossier en cible
+        # locale, un conteneur de stockage objet en cible azure. Le reste du
+        # pipeline ne fait pas la différence.
+        depot = storage.for_source(config)
+        lake = storage.for_lake(config)
+        log.debug("Zones : %s → %s (cible %s)", depot.label, lake.label, config.storage_backend)
+        _ingest(client, config, depot, lake, journal, report, only_date=only_date)
 
         # Un échec de chargement laisse bronze amputé du jour concerné :
         # reconstruire silver et gold dessus publierait des indicateurs faux
@@ -105,10 +112,10 @@ def run(
                 report.files_failed,
             )
         elif report.has_changes or force_rebuild:
-            _rebuild(client, run_id, report)
+            _rebuild(config, run_id, report)
         elif transform.is_stale(client):
             log.warning("Couches dérivées en retard sur bronze : reconstruction.")
-            _rebuild(client, run_id, report)
+            _rebuild(config, run_id, report)
         else:
             log.info("Aucun nouveau fichier : les couches silver et gold sont à jour.")
 
@@ -149,16 +156,21 @@ def run(
     return report
 
 
-def _rebuild(client: Client, run_id: str, report: RunReport) -> None:
-    """Reconstruit silver puis gold, et note que le run a produit des tables."""
-    transform.build_silver(client, run_id)
-    transform.build_gold(client, run_id)
+def _rebuild(config: Config, run_id: str, report: RunReport) -> None:
+    """Reconstruit et teste les couches dérivées ; note que le run a produit des tables.
+
+    Une seule invocation de dbt : c'est le graphe des `ref()` qui ordonne silver,
+    gold et le rapport qualité, plus le préfixe numérique des fichiers.
+    """
+    transform.build(run_id, config.dbt_target)
     report.rebuilt = True
 
 
 def _ingest(
     client: Client,
     config: Config,
+    depot,
+    lake,
     journal: dict,
     report: RunReport,
     *,
@@ -168,20 +180,20 @@ def _ingest(
     # Un jour déposé de façon incomplète doit alerter, pas passer pour un run
     # nominal : sans cela, l'entrepôt serait reconstruit sur une source amputée
     # et le cron ne verrait rien.
-    for absent in collect_module.missing_files(config):
+    for absent in collect_module.missing_files(depot):
         message = f"{absent} : fichier attendu absent du dépôt"
         report.errors.append(message)
         report.files_failed += 1
         log.error(message)
 
-    fichiers = list(collect_module.discover(config))
+    fichiers = list(collect_module.discover(depot))
 
     if only_date:
         fichiers = [f for f in fichiers if f.ingest_date == only_date]
         if not fichiers:
             # Le rejeu d'un jour est un geste de reprise sur incident : une faute
             # de frappe dans la date ne doit pas ressembler à une reprise réussie.
-            jours = sorted({f.ingest_date for f in collect_module.discover(config)})
+            jours = sorted({f.ingest_date for f in collect_module.discover(depot)})
             raise ValueError(
                 f"Aucun fichier déposé le {only_date}. "
                 f"Jours disponibles : {', '.join(jours) or 'aucun'}"
@@ -193,7 +205,7 @@ def _ingest(
             # L'empreinte est calculée sur le fichier source, donc avant toute
             # copie : un fichier inchangé n'est ni recopié ni repseudonymisé.
             # Sur un dépôt volumineux, c'est ce qui rend le run à vide gratuit.
-            empreinte = collect_module.checksum(source)
+            empreinte = collect_module.checksum(source, depot)
 
             do_load, reason = state.needs_ingestion(source, empreinte, journal)
             if not do_load:
@@ -202,8 +214,8 @@ def _ingest(
                 continue
 
             log.info("%s : %s", source.label, reason)
-            result = collect_module.collect(source, config)
-            rows_loaded = load_bronze.load(client, source)
+            result = collect_module.collect(source, depot, lake, config)
+            rows_loaded = load_bronze.load(client, source, lake)
 
             state.record_ingestion(
                 client,

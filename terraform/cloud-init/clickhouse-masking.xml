@@ -1,0 +1,15 @@
+<clickhouse>
+    <!--
+        Le jeton SAS vit dans une collection nommée : il n'entre normalement jamais
+        dans une requête. Cette règle est la ceinture qui accompagne les bretelles —
+        si une requête écrite à la main contenait une URL signée, elle serait
+        masquée avant d'atteindre `system.query_log`.
+    -->
+    <query_masking_rules>
+        <rule>
+            <name>jeton SAS Azure</name>
+            <regexp>(sig=)[A-Za-z0-9%_\-]+</regexp>
+            <replace>\1[MASQUE]</replace>
+        </rule>
+    </query_masking_rules>
+</clickhouse>

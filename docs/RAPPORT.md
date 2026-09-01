@@ -8,8 +8,8 @@
 
 1. [Contexte et analyse du besoin](#1-contexte-et-analyse-du-besoin)
 2. [Les données sources](#2-les-données-sources)
-3. [Architecture](#3-architecture)
-4. [Traitements et qualité](#4-traitements-et-qualité)
+3. [Architecture](#3-architecture) — *dont §3.6 le déploiement cloud*
+4. [Traitements et qualité](#4-traitements-et-qualité) — *dont §4.4 pourquoi dbt*
 5. [Les indicateurs](#5-les-indicateurs)
 6. [Restitution et cloisonnement](#6-restitution-et-cloisonnement)
 7. [Gouvernance RGPD](#7-gouvernance-rgpd)
@@ -33,7 +33,8 @@ et d'espérer que personne n'a introduit d'incohérence.
 > d'analyses. Aucun indicateur de ce dossier n'en dépend donc, et nous ne prétendons pas
 > couvrir ce système. L'architecture l'accueillerait sans réécriture : un nouveau domaine
 > se déclare dans `src/eds/collect.py` et dans `sql/15_bronze_load/`, et alimenterait une
-> quatrième étoile (`fact_resultat_labo`, au grain « un résultat d'analyse »).
+> quatrième étoile (`fact_resultat_labo`, au grain « un résultat d'analyse ») écrite comme
+> les autres, en modèle dbt.
 
 La direction veut deux choses de cet entrepôt, et elles ne se ressemblent pas :
 
@@ -164,8 +165,9 @@ source-filestorage  →  lake  →  bronze  →  silver  →  gold  →  Metabas
 ### 3.2 Le modèle de données
 
 Voici l'entrepôt en entier — les trente-trois tables, leurs colonnes principales et les
-relations qui les lient. C'est ce schéma qui fait foi : les DDL de `sql/` en découlent, et
-un test refuse toute table présente dans l'entrepôt mais absente d'ici.
+relations qui les lient. C'est ce schéma qui fait foi : les DDL en découlent — `sql/10_bronze/`
+pour la couche bronze, les modèles `dbt/models/` pour tout le reste — et un test refuse toute
+table présente dans l'entrepôt mais absente d'ici.
 
 ![Modèle de données de l'entrepôt](img/eds-data-model.png)
 
@@ -217,13 +219,14 @@ mais aucun indicateur du dossier n'en a besoin — et c'est voulu (§3.4).
 |---|---|---|
 | **Entrepôt** | ClickHouse | Base orientée colonnes, donc taillée pour l'analytique sur le flux de monitoring. Elle sait lire directement des fichiers CSV, JSON et Parquet, dispose d'une gestion fine des droits, et son SQL couvre nos besoins (fonctions de fenêtrage, `argMax`, agrégats conditionnels). |
 | **Chargement** | Le moteur lit les fichiers lui-même | Le lake est monté dans le conteneur ClickHouse ; les fichiers sont chargés par la fonction `file()`. Aucune donnée ne transite par la mémoire de Python. C'est la différence entre un pipeline qui tient la charge et un script qui s'effondre dès que le monitoring grossit. |
-| **Transformations** | SQL versionné dans `sql/` | Chaque règle métier est un fichier lisible, exécuté par le moteur. Python n'orchestre que l'ordre. Faire remonter les données côté client pour les transformer en mémoire serait l'anti-pattern classique : cela ne passe pas à l'échelle et rend les calculs impossibles à auditer. |
+| **Transformations** | SQL versionné, orchestré par **dbt** | Chaque règle métier est un modèle lisible, exécuté **par le moteur**. Faire remonter les données côté client pour les transformer en mémoire serait l'anti-pattern classique : cela ne passe pas à l'échelle et rend les calculs impossibles à auditer. dbt n'y change rien — il n'exécute aucun calcul, il envoie le SQL à ClickHouse dans l'ordre que le graphe des dépendances impose, et teste le résultat (§4.4). |
 | **Modélisation silver** | Constellation Kimball | Trois tables de faits — séjour, diagnostic, monitoring — au **grain déclaré**, chacune formant sa propre étoile avec ses dimensions directes. Les dimensions patient, service et CIM-10 sont **conformées**, donc partagées : les deux usages comptent les mêmes patients. Aucune jointure entre deux tables de faits n'est nécessaire, ce qui est précisément l'objectif du modèle dimensionnel. |
 | **Incrémentalité** | Partitionnement par jour + journal d'ingestion | Rejouer un jour revient à supprimer sa partition puis à la recharger. Le journal, indexé par empreinte du fichier source, permet de sauter ce qui n'a pas changé et de reprendre ce qui a échoué. |
 | **Silver et gold** | Reconstruites à chaque exécution | À ce volume, la reconstruction complète prend moins d'une seconde. On y gagne un déterminisme total : le même bronze produit toujours exactement les mêmes indicateurs. |
 | **Cloisonnement** | Deux comptes SQL distincts | La séparation est portée par le moteur. Un utilisateur « recherche » qui écrirait une requête SQL à la main dans Metabase se verrait refuser l'accès par ClickHouse — pas seulement masquer le lien dans l'interface. |
 | **Restitution** | Metabase, provisionné par API | Dashboards sans code pour les utilisateurs, mais définis en Python et versionnés côté projet : après un clone, tout se recrée sans un seul clic. |
-| **Orchestration** | Interface en ligne de commande + cron | Simple, testable, sans dépendance lourde. La montée vers un ordonnanceur dédié est décrite en §8. |
+| **Orchestration** | Interface en ligne de commande ; `cron` en local, **job Container Apps planifié** sur Azure | Simple, testable, sans dépendance lourde. Le même exécutable sert aux deux : le cloud ne change que le déclencheur. La montée vers un ordonnanceur dédié est décrite en §8.2. |
+| **Déploiement** | Docker Compose en local, **Terraform** sur Azure | Une seule commande dans les deux cas, et rien qui se crée à la main. L'infrastructure cloud est décrite en 15 fichiers versionnés ; `terraform destroy` ne laisse rien derrière (§3.6). |
 
 ### 3.4 Pourquoi une constellation plutôt qu'une seule étoile
 
@@ -298,6 +301,92 @@ Deux points d'évolution restent identifiés, sans urgence à ce volume : la rec
 intégrale de silver et gold devrait passer à un traitement incrémental si l'entrepôt
 dépassait la centaine de millions de lignes, et l'ingestion par fichier quotidien devrait
 céder la place à un flux continu si le CHU passait au temps réel.
+
+### 3.6 Déploiement cloud
+
+La même chaîne tourne sur Azure, décrite intégralement en Terraform. Le critère
+d'acceptation du portage était strict : **les chiffres doivent être identiques à
+l'unité près**. Ils le sont — une plateforme qui donnerait d'autres résultats n'aurait
+pas été portée, mais réécrite.
+
+```
+Stockage objet (blobs)           Container Apps              VM
+┌──────────────────────┐        ┌──────────────────┐       ┌────────────────────┐
+│ filestorage/         │───────▶│ job-eds-pipeline │──────▶│ ClickHouse         │
+│   identité en clair  │  lit   │ cron · zéro coût │  SQL  │   bronze → gold    │
+│ lake/                │◀───────│ + dbt build      │       │        ▲           │
+│   pseudonymisé       │ écrit  └──────────────────┘       │        │ SAS r/o   │
+└──────────┬───────────┘                                   │   Metabase         │
+           └───────────── azureBlobStorage() ──────────────┘   Caddy · HTTPS    │
+                                                           └────────────────────┘
+```
+
+**Ce que le cloud apporte réellement**, au-delà de l'exercice :
+
+| Apport | Concrètement |
+|---|---|
+| Un dépôt du CHU réaliste | Stockage objet **versionné**, à suppression réversible — c'est ainsi qu'un CHU dépose, et c'est la seule chose du système qui ne se reconstruise pas |
+| Un lake qui survit à la machine | Détruire la VM ne détruit rien : elle est du bétail, tout s'y reconstruit en dix minutes |
+| Une planification managée | Le `cron` devient un job serverless, journalisé, réessayable, déclenchable à la main pour la reprise sur incident — et **gratuit** : 60 s/jour contre 180 000 vCPU-s offerts par mois |
+| Des secrets hors des fichiers | `.env` devient Key Vault, lu par identité gérée. Aucun mot de passe sur le disque de la VM, ni dans le dépôt |
+| **Un quatrième niveau de cloisonnement** | Voir ci-dessous — c'est l'apport le plus fort |
+
+#### Le cloisonnement devient une propriété de l'infrastructure
+
+En local, « l'identité ne descend jamais sous la collecte » est une propriété **du
+code**, garantie par `FORBIDDEN_COLUMNS` et par les tests. Sur Azure, elle devient en
+plus une propriété **de l'IAM** : les droits sont attribués au conteneur, pas au compte.
+
+| Identité | `filestorage` (identité en clair) | `lake` | Bases gold |
+|---|---|---|---|
+| Job du pipeline | lecture | lecture / écriture | — |
+| **VM (ClickHouse, Metabase)** | **aucun droit** | lecture seule, jeton daté | — |
+| `chu_pilotage` / `chu_recherche` | aucun droit | aucun droit | leur seule base |
+
+La machine qui héberge l'entrepôt **ne peut pas** lire le conteneur qui contient les
+noms et les NIR. Pas « ne le fait pas » : ne le peut pas. Le seul composant qui touche
+l'identité en clair est le job de collecte, qui la lit en flux, la pseudonymise en
+mémoire et n'écrit jamais que le résultat.
+
+#### Ce que le déploiement réel a imposé
+
+Un déploiement ne se conçoit pas sur le papier. Le plan initial visait une machine de
+2 Gio en France Central, à 20 €/mois, lisant un stockage ADLS Gen2 par identité gérée.
+**Aucune de ces quatre hypothèses n'a survécu au contact de l'abonnement.** Les quatre
+faits qui les ont remplacées ont été vérifiés en interrogeant Azure et le moteur, et ce
+sont eux qui dictent l'architecture livrée :
+
+1. **Le choix de la région ne nous appartient pas.** Une policy d'abonnement
+   (« Allowed resource deployment regions ») restreint le déploiement à cinq régions,
+   dont la France ne fait pas partie ; et parmi ces cinq, deux seulement proposent des
+   VM de série B — les autres n'offrent rien en dessous de 70 €/mois. Le déploiement
+   tourne donc en **Suède**, dans l'Union européenne, donc dans le champ du RGPD.
+   L'hébergement en France redevient possible sur un abonnement payant, en changeant
+   une variable. À noter, parce que c'est contre-intuitif : le **quota** annonçait des
+   vCPU de série B disponibles en France — il ne dit rien de la disponibilité réelle.
+2. **ClickHouse 26.3 ne sait pas utiliser l'identité gérée d'une machine virtuelle**
+   pour lire un stockage objet : sans identifiants, il tente `WorkloadIdentityCredential`,
+   qui n'existe que dans Kubernetes. D'où le jeton SAS, limité au conteneur `lake`, en
+   lecture seule et daté — un compromis explicite, documenté, et strictement plus
+   restrictif qu'une clé de compte.
+3. **ClickHouse exige un système de fichiers, pas un partage réseau** : renommages
+   atomiques et liens durs. C'est ce qui interdit de l'héberger dans un conteneur
+   managé — le seul volume persistant qu'offre Container Apps est un partage réseau,
+   sur lequel le moteur échoue. La même contrainte avait imposé un volume Docker nommé
+   en local.
+4. **Le stockage hiérarchique (ADLS Gen2) interdit le versioning des blobs.** Il fallait
+   choisir. Le conteneur du dépôt du CHU étant la seule source de vérité du système,
+   l'historique des versions l'emporte sur des répertoires POSIX dont nos droits ne se
+   servent pas — ils sont attribués au conteneur, pas au dossier. Effet de bord bienvenu :
+   le moteur lit alors un compte de blobs classique, le cas le mieux éprouvé.
+
+S'y ajoutent sept pièges de configuration qu'aucune documentation n'annonce — ClickHouse
+qui cesse d'écouter dès qu'on monte sa propre configuration, un plancher non documenté sur
+la taille de ses pools, le provider Terraform qui lit un compte de stockage avant que sa
+clé soit utilisable. Le détail de ces vérifications, avec les commandes et les messages
+d'erreur exacts, figure en §5 de [`PLAN-CLOUD.md`](PLAN-CLOUD.md) et dans les conventions
+du dépôt. **Aucun n'a fait bouger un seul des chiffres publiés** : c'était le critère
+d'acceptation du portage, et c'est ce qui distingue un portage d'une réécriture.
 
 ---
 
@@ -446,7 +535,7 @@ en §5.3.
 
 ### 4.3 Traçabilité
 
-Chaque ligne de bronze et de silver — les huit tables, dimensions comprises — porte trois
+Chaque ligne de bronze et de silver — les quatorze tables, dimensions comprises — porte trois
 colonnes de lignage : le fichier dont elle provient, le jour de dépôt correspondant, et
 l'horodatage de son traitement. Les tables gold, qui sont des agrégats, n'ont pas de ligne
 individuelle à tracer : elles se rattachent à leur exécution par `ops.quality_report`.
@@ -458,6 +547,41 @@ qualité produit un comptage.
 Concrètement, cela permet de répondre à « d'où sort ce 14 864 ? » sans ouvrir un seul
 fichier : le tableau de bord de pilotage affiche le rapport qualité, et le journal
 d'ingestion indique quel fichier a fourni combien de lignes.
+
+### 4.4 Pourquoi dbt, et ce que dbt ne remplace pas
+
+Les couches silver et gold sont écrites en **dbt** : 27 modèles, 78 tests. Le choix
+n'est pas décoratif — il résout trois problèmes que la version en scripts SQL numérotés
+portait réellement.
+
+**L'ordre d'exécution cesse d'être une convention de nommage.** Il reposait sur le
+préfixe des fichiers, au point qu'il fallait écrire dans les conventions du projet que
+`05_pilotage_qualite.sql` devait s'exécuter en dernier « car il recopie
+`ops.quality_report` ». Une règle vraie, invisible du code, et qu'une renumérotation
+maladroite aurait brisée en silence. Avec `ref()`, dbt **déduit** cet ordre ; un test
+statique interdit d'écrire une base en dur, ce qui empêche le piège de revenir.
+
+**La déduplication n'est plus copiée-collée.** La CTE `argMax` des séjours était écrite
+deux fois — dans le fait et dans sa table de rejets — et celle du monitoring aussi.
+Deux copies qui devaient rester identiques sans qu'aucun mécanisme ne le garantisse.
+Elles sont devenues deux modèles éphémères, écrits une fois, que dbt inline dans chaque
+consommateur.
+
+**Les tests entrent dans le pipeline.** `dbt build` construit et teste en une passe,
+selon le graphe : un `fact_sejour` dont la clé n'est plus unique fait échouer le run,
+donc suspend la publication — exactement comme un fichier en échec. La qualité devient
+une **condition de publication**, et non un contrôle *a posteriori*.
+
+**Ce que dbt ne remplace pas.** Un test dbt répond « ça passe ou ça casse » ;
+`ops.quality_report` répond « 15 000 lignes lues, 14 864 conservées, 136 écartées par la
+règle Q2 ». Le second est ce qui permet de justifier un chiffre devant un métier, et
+aucun mécanisme dbt ne le rend. Le rapport qualité a donc été conservé — et, plutôt que
+d'être séquencé à la main, il est devenu lui-même un modèle du graphe. C'est ce qui a
+supprimé la règle d'ordre évoquée plus haut.
+
+Les deux dispositifs coexistent avec des rôles distincts : **78 tests dbt** pendant le
+run, qui bloquent ; **63 tests d'intégration** après, qui vérifient ce que dbt ne voit
+pas — Metabase, le cloisonnement, la mise en page des tableaux de bord.
 
 ---
 
@@ -595,7 +719,8 @@ Toutes ces tables appliquent le seuil de diffusion décrit en §7.
 
 Le sujet demande de pouvoir « justifier chaque chiffre ». Voici le chemin exact, du nombre
 affiché à l'expression SQL qui le produit — chaque ligne est vérifiable en copiant la
-requête dans la console ClickHouse (`http://localhost:8123/play`).
+requête dans la console ClickHouse : `http://localhost:8123/play` en local, et par tunnel
+SSH sur le déploiement Azure, où l'entrepôt n'est pas exposé (cf. [`CLOUD.md`](CLOUD.md) §7).
 
 | Chiffre affiché | Valeur | Table gold | Expression déterminante |
 |---|---:|---|---|
@@ -617,8 +742,15 @@ Trois vérifications que le jury peut faire lui-même en une commande :
 
 ```bash
 make quality              # les 18 contrôles qualité du dernier traitement
-make test-e2e             # les invariants, dont chacun de ces chiffres
+make test-e2e             # les 63 invariants, dont chacun de ces chiffres
 uv run eds check-cloisonnement   # les deux barrières de cloisonnement
+```
+
+Sur le déploiement Azure, les mêmes preuves se rejouent sans se connecter à la machine :
+
+```bash
+make cloud-check          # le job de contrôle du cloisonnement, dans le cloud
+make cloud-logs           # le rapport qualité du dernier traitement planifié
 ```
 
 La suite d'intégration **ancre ces valeurs** : modifier une règle sans le vouloir ferait
@@ -674,16 +806,20 @@ jeu synthétique dont les prévalences n'ont aucune valeur clinique (§8.1).
 
 ![Tableau de bord de recherche](img/dashboard-recherche.jpg)
 
-### 6.2 Le cloisonnement, à trois niveaux
+### 6.2 Le cloisonnement, à quatre niveaux
 
 | Niveau | Mécanisme | Effet |
 |---|---|---|
+| **Infrastructure** *(déploiement Azure)* | Droits IAM attribués **au conteneur de stockage**, pas au compte | La machine qui héberge l'entrepôt n'a aucun droit sur le conteneur qui contient les noms et les NIR |
 | **Base de données** | Deux comptes SQL, chacun avec le seul droit de lecture sur sa base gold | Un accès hors périmètre est refusé **par le moteur** |
 | **Connexions Metabase** | Une connexion par usage, utilisant le compte SQL correspondant | Aucune requête ne peut viser l'autre base |
 | **Contenu Metabase** | Une collection par usage, visible du seul groupe concerné | Chaque utilisateur ne voit que son tableau de bord |
 
-Le niveau qui compte est le premier. Les deux autres organisent l'interface ; celui-là
-oppose un refus même à une requête SQL écrite à la main.
+Les deux derniers organisent l'interface. Les deux premiers opposent un refus réel : le
+niveau base de données à une requête SQL écrite à la main, le niveau infrastructure à la
+machine elle-même — et celui-là ne dépend d'aucune ligne de code (§3.6). Il n'existe que
+sur le déploiement Azure ; en local, la protection équivalente est une propriété du code,
+garantie par `FORBIDDEN_COLUMNS` et par les tests de collecte.
 
 Le résultat se constate directement. Voici ce que voit un utilisateur connecté avec le
 compte **pilotage** : une seule collection dans sa barre latérale, un seul tableau de bord.
@@ -751,7 +887,8 @@ teste les deux barrières, sur l'installation de celui qui la lance :
 
 Les neuf scénarios sont également exécutés par la suite d'intégration (`make test-e2e`) :
 une régression du cloisonnement ferait échouer les tests, elle ne pourrait pas passer
-inaperçue.
+inaperçue. Sur le déploiement Azure, la même preuve se rejoue par un job dédié
+(`make cloud-check`) : le contrôle n'est pas une capture d'écran, c'est un exécutable.
 
 Ni l'un ni l'autre compte n'a accès aux couches bronze, silver ou d'exploitation : celles-ci
 restent réservées au compte technique du pipeline.
@@ -842,6 +979,11 @@ vérifient en outre qu'aucune colonne nommée `nir`, `nom`, `prenom`, `birth_dat
 `patient_id` n'existe dans **aucune** base de l'entrepôt, et rejouent l'attaque par
 différenciation décrite en §7.2.
 
+Sur le déploiement Azure s'y ajoute un contrôle d'une autre nature, porté par
+l'infrastructure : `terraform plan` doit rester vide. Une attribution de rôle ajoutée à la
+main — un droit de lecture donné à la machine sur le dépôt du CHU, par exemple — apparaîtrait
+comme une dérive à corriger, et non comme un état acceptable.
+
 ### 7.4 Registre des hypothèses
 
 Ce que nous avons décidé sans que le sujet le tranche, et qu'il faudrait valider avec le
@@ -894,17 +1036,30 @@ permettra ce basculement sans changer une ligne de code — il suffira de filtre
 **Le monitoring ne couvre que deux services.** Tout indicateur bâti dessus est
 structurellement partiel, ce que les tableaux de bord signalent explicitement.
 
+**Le déploiement de démonstration n'est pas hébergé en France.** Ce n'est pas un choix :
+l'offre étudiante utilisée l'interdit (§3.6). Les données restent dans l'Union européenne,
+donc dans le champ du RGPD, mais un entrepôt de santé français réel devrait être hébergé
+sur le territoire national, chez un hébergeur certifié HDS — une exigence que ni Azure
+West Europe ni Sweden Central ne couvrent en l'état. Sur un abonnement payant, le
+changement se réduit à une variable Terraform ; la certification HDS, elle, relève d'une
+décision contractuelle, pas technique.
+
 ### 8.2 Limites techniques
 
 | Point | État actuel | Recommandation |
 |---|---|---|
 | Base applicative de Metabase | H2 embarqué | PostgreSQL en production : H2 ne supporte ni la sauvegarde à chaud ni la montée en charge |
-| Secrets | Fichier `.env` local, tiré au hasard à l'installation | Coffre-fort (Vault, gestionnaire de secrets du cloud), avec rotation tracée |
+| Secrets | `.env` en local ; **Key Vault en déploiement Azure**, lu par identité gérée | Rotation automatisée et tracée ; le sel reste l'élément irremplaçable |
 | Durée de conservation | Un an sur `ops.quality_report` (TTL) ; aucune sur les données | À arrêter avec le délégué à la protection des données (§8.3), puis à appliquer par partition |
-| Ordonnancement | cron | Airflow ou Dagster dès que les dépendances entre traitements se complexifient : reprise fine, historique, alerting intégré |
+| Ordonnancement | cron en local ; **job Container Apps planifié** sur Azure, avec journalisation centralisée et déclenchement manuel | Airflow ou Dagster dès que les dépendances entre traitements se complexifient |
 | Reconstruction silver et gold | Intégrale à chaque run | Traitement incrémental (moteur `ReplacingMergeTree`) si le volume devient conséquent |
 | Blocage des données dans Metabase | Restriction du droit de requête | Le blocage complet est réservé aux éditions payantes ; ici c'est ClickHouse qui porte l'interdiction réelle, ce qui suffit |
 | Ingestion du monitoring | Par fichier quotidien | Ingestion en continu si le CHU passe à un flux temps réel |
+| Empreinte des fichiers sources | SHA-256 recalculé à chaque passage | Voie rapide sur l'`ETag` du blob : à l'échelle d'un CHU, ne pas télécharger ce qui n'a pas changé |
+| Haute disponibilité du déploiement Azure | Une seule VM — quota de 6 vCPU sur l'offre étudiante | Cluster ClickHouse Keeper à trois nœuds, Metabase répliqué derrière une passerelle applicative |
+| Résidence des données | `swedencentral` : la France est exclue par une policy d'abonnement, et n'offre de toute façon aucune VM de série B | `francecentral` sur un abonnement payant — une seule variable Terraform à changer |
+| Authentification de ClickHouse au stockage | Jeton SAS de conteneur, lecture seule, daté | Identité gérée dès que ClickHouse la prendra en charge depuis une VM (§3.6) |
+| Certificat TLS | Auto-signé par défaut : Let's Encrypt sature sur `*.cloudapp.azure.com` | Nom de domaine propre du CHU, ou DuckDNS pour une démonstration |
 
 ### 8.3 Recommandations de gouvernance
 
@@ -938,3 +1093,5 @@ définitions SQL, éviterait les désaccords ultérieurs.
   [vectoriel](img/eds-data-model.svg), lisible à toute échelle à l'impression
 - [Documentation d'exploitation](EXPLOITATION.md)
 - [Plan d'implémentation et profilage complet](PLAN.md)
+- [Plan de déploiement Azure et faits techniques vérifiés](PLAN-CLOUD.md)
+- [Mode d'emploi du déploiement Azure](CLOUD.md)

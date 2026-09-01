@@ -1,0 +1,31 @@
+{
+	# Aucune API d'administration : elle n'écoute que sur la boucle locale, mais
+	# un service qu'on n'utilise pas est un service qu'on n'expose pas.
+	admin off
+%{ if acme_email != "" ~}
+	email ${acme_email}
+%{ endif ~}
+}
+
+${site_host} {
+	# `tls internal` = certificat auto-signé par l'autorité interne de Caddy. Le
+	# trafic est réellement chiffré ; le navigateur affiche un avertissement à la
+	# première visite. Let's Encrypt n'est pas utilisable sur cloudapp.azure.com,
+	# dont le quota d'émission est partagé entre tous les clients Azure.
+	# Renseigner `acme_hostname` (un domaine propre, ou DuckDNS) fait disparaître
+	# cette directive et Caddy obtient alors un certificat de confiance.
+	${directive_tls}
+
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	# Seul Metabase est publié. ClickHouse reste interne : sa console `/play`
+	# s'atteint par tunnel SSH. Un entrepôt de santé n'a pas à écouter sur Internet.
+	reverse_proxy metabase:3000
+}

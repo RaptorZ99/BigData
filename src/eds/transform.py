@@ -1,26 +1,70 @@
-"""Transformations bronze → silver → gold, exécutées dans ClickHouse.
+"""Transformations bronze → silver → gold, exécutées dans ClickHouse par dbt.
 
-Python n'orchestre que l'ordre des scripts : aucune ligne de données métier ne
-remonte côté client. Les couches silver et gold sont reconstruites intégralement
-à chaque run (`CREATE OR REPLACE TABLE … AS SELECT`), ce qui les rend
-déterministes et rejouables — à ce volume le coût est négligeable, et le gain en
-reproductibilité est ce qu'on veut pour un entrepôt évalué sur la fiabilité de
-ses chiffres.
+Python n'orchestre que l'invocation : aucune ligne de données métier ne remonte
+côté client. Les couches silver et gold sont reconstruites intégralement à chaque
+run (matérialisation `table`), ce qui les rend déterministes et rejouables — à ce
+volume le coût est négligeable, et le gain en reproductibilité est ce qu'on veut
+d'un entrepôt évalué sur la fiabilité de ses chiffres.
+
+Pourquoi dbt plutôt que des scripts SQL numérotés :
+
+* l'ordre d'exécution découle des `ref()` au lieu d'un préfixe de fichier — la
+  règle « ce script en dernier car il recopie le rapport qualité » disparaît ;
+* la déduplication des séjours et du monitoring est écrite **une** fois, en
+  modèle éphémère, au lieu d'être copiée dans le fait et dans ses rejets ;
+* `dbt build` construit **et** teste : une règle métier violée fait échouer le
+  run, donc suspend la publication, exactement comme un fichier en échec.
+
+Ce que dbt ne remplace pas : `ops.quality_report`. Un test répond « ça passe ou
+ça casse » ; le rapport qualité répond « 15 000 lues, 14 864 conservées, 136
+écartées par Q2 ». Le rapport est donc lui-même un modèle dbt (`models/ops/`).
 """
 
 from __future__ import annotations
 
+import json
+import os
+import re
+from pathlib import Path
+from typing import Any
+
 from clickhouse_connect.driver.client import Client
 
+from eds.config import PROJECT_ROOT
 from eds.logging_setup import get_logger
-from eds.warehouse import execute_directory
 
 log = get_logger(__name__)
+
+DBT_DIR = PROJECT_ROOT / "dbt"
+
+# dbt écrit ses artefacts dans `target/` du projet, sauf si `DBT_TARGET_PATH` en
+# décide autrement — ce que fait l'image du pipeline, dont le répertoire applicatif
+# n'est pas garanti inscriptible. Chercher le fichier produit au mauvais endroit
+# faisait échouer la publication de la documentation alors que dbt avait réussi.
+DBT_TARGET_DIR = Path(os.environ.get("DBT_TARGET_PATH") or DBT_DIR / "target")
+
+# Événements dbt jugés dignes de la console : la version de l'adaptateur et la
+# ligne de synthèse finale. Le détail modèle par modèle part en DEBUG — visible
+# avec `eds run --verbose`, et de toute façon conservé par dbt dans
+# `dbt/logs/dbt.log`. Sans ce filtre, un run afficherait deux fois quatre-vingt-dix
+# lignes : celles de dbt et leur copie relayée.
+_EVENEMENTS_NOTABLES = {"MainReportVersion", "StatsLine", "FinishedRunningStats"}
+
+_NIVEAUX = {"info": log.info, "warn": log.warning, "error": log.error}
+
+# Séquences de couleur ANSI : lisibles dans un terminal, illisibles dans un
+# fichier de log ou dans Log Analytics.
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+class TransformError(RuntimeError):
+    """Échec de la construction des couches dérivées."""
 
 
 # Tables que les couches dérivées doivent contenir après un run réussi.
 # Sert de contrôle de complétude : une table manquante signale une
-# transformation interrompue.
+# transformation interrompue. La liste est vérifiée contre les modèles dbt par
+# `tests/test_dbt_project.py` — elles ne peuvent pas diverger en silence.
 EXPECTED_TABLES: dict[str, tuple[str, ...]] = {
     "eds_silver": (
         "dim_patient",
@@ -79,6 +123,9 @@ def is_stale(client: Client) -> bool:
     a échoué. Sans ce contrôle, le run suivant conclurait « aucun nouveau
     fichier » et laisserait l'entrepôt avec des tables absentes ou périmées. Le
     pipeline se répare donc tout seul au run d'après.
+
+    Ce contrôle porte sur l'entrepôt réel, pas sur le manifeste dbt : c'est
+    l'état des données qui décide, pas ce que dbt croit avoir construit.
     """
     absentes = missing_tables(client)
     if absentes:
@@ -121,23 +168,116 @@ def _scalar(client: Client, query: str):
     return rows[0][0] if rows and rows[0] else None
 
 
-def build_silver(client: Client, run_id: str) -> None:
-    """Reconstruit la constellation silver et son rapport qualité.
+def _relay(event: Any) -> None:
+    """Reverse un événement dbt dans le journal du pipeline.
 
-    L'ordre des scripts porte les dépendances : dimensions, puis fact_sejour
-    (dont dérivent les rejets), puis les deux autres faits qui en propagent les
-    clés dimensionnelles.
+    Les deux systèmes partagent ainsi un seul fichier de log, et le `run_id`
+    injecté par `logging_setup` relie la sortie de dbt à `ops.pipeline_runs` —
+    y compris dans Log Analytics une fois le pipeline en exécution planifiée.
     """
-    log.info("Construction de la couche silver…")
-    execute_directory(client, "20_silver", {"run_id": run_id})
-    log.info("Silver construite.")
+    message = _ANSI.sub("", event.info.msg or "").strip()
+    if not message:
+        return
+    if event.info.level in ("warn", "error"):
+        _NIVEAUX[event.info.level]("dbt · %s", message)
+    elif event.info.name in _EVENEMENTS_NOTABLES:
+        log.info("dbt · %s", message)
+    else:
+        log.debug("dbt · %s", message)
 
 
-def build_gold(client: Client, run_id: str) -> None:
-    """Reconstruit les deux bases gold, une par usage."""
-    log.info("Construction des couches gold…")
-    execute_directory(client, "30_gold", {"run_id": run_id})
-    log.info("Gold construites.")
+def _echecs(resultat: Any) -> list[str]:
+    """Nœuds dbt en erreur, sous une forme lisible dans un message d'exception."""
+    noeuds = getattr(resultat.result, "results", None) or []
+    return [
+        f"{noeud.node.name} ({noeud.status}) : {(noeud.message or '').splitlines()[0][:200]}"
+        for noeud in noeuds
+        if str(noeud.status) in ("error", "fail")
+    ]
+
+
+def build(run_id: str, target: str = "local", *, select: str | None = None) -> None:
+    """Construit et teste silver, gold et le rapport qualité, en une passe.
+
+    `dbt build` entrelace modèles et tests selon le graphe : un test qui échoue
+    empêche la construction de ce qui en dépend. C'est ce qui fait de la qualité
+    une condition de publication, et non un contrôle a posteriori.
+
+    ⚠ On ne passe **jamais** `--full-refresh` à dbt. `eds run --full-refresh`
+    signifie « ré-ingérer tous les jours depuis la source » ; côté dbt, la même
+    option détruirait l'historique de `ops.quality_report`, seul modèle
+    incrémental du projet. Les 26 autres sont matérialisés en `table` et donc
+    reconstruits de toute façon.
+    """
+    # Import local : dbt est un extra (`uv sync --extra dbt`). Le socle de
+    # `make demo` n'a pas à le tirer tant qu'aucune transformation n'est lancée.
+    from dbt.cli.main import dbtRunner
+
+    log.info("Construction des couches dérivées (dbt · cible %s)…", target)
+
+    arguments = [
+        "build",
+        # dbt n'imprime plus lui-même : c'est `_relay` qui décide ce qui remonte,
+        # et à quel niveau. Sans cela chaque ligne apparaîtrait en double.
+        "--quiet",
+        "--no-use-colors",
+        "--project-dir",
+        str(DBT_DIR),
+        "--profiles-dir",
+        str(DBT_DIR),
+        "--target",
+        target,
+        "--vars",
+        json.dumps({"run_id": run_id}),
+    ]
+    if select:
+        arguments += ["--select", select]
+
+    resultat = dbtRunner(callbacks=[_relay]).invoke(arguments)
+
+    if not resultat.success:
+        details = _echecs(resultat) or [str(resultat.exception or "cause inconnue")]
+        raise TransformError(
+            "dbt a échoué — les couches dérivées conservent leur état précédent. "
+            + " | ".join(details)
+        )
+
+    log.info("Couches silver, gold et rapport qualité construits et testés.")
+
+
+def dbt_docs(target: str = "local") -> Path:
+    """Génère la documentation dbt en un fichier HTML autonome.
+
+    `--static` produit un `static_index.html` unique, sans dépendance externe :
+    un seul objet à publier, et il s'ouvre depuis un disque comme depuis un
+    site statique.
+    """
+    from dbt.cli.main import dbtRunner
+
+    resultat = dbtRunner(callbacks=[_relay]).invoke(
+        [
+            "docs",
+            "generate",
+            "--static",
+            "--quiet",
+            "--no-use-colors",
+            "--project-dir",
+            str(DBT_DIR),
+            "--profiles-dir",
+            str(DBT_DIR),
+            "--target",
+            target,
+        ]
+    )
+    if not resultat.success:
+        raise TransformError(
+            f"Génération de la documentation dbt impossible : {resultat.exception}"
+        )
+
+    page = DBT_TARGET_DIR / "static_index.html"
+    if not page.is_file():
+        raise TransformError(f"dbt n'a pas produit {page}")
+    return page
 
 
 def quality_report(client: Client, run_id: str) -> list[tuple]:

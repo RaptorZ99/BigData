@@ -1,0 +1,68 @@
+name: Image
+
+# L'image du pipeline, publiée sur Docker Hub en dépôt **public**. Les jobs Container
+# Apps la tirent sans authentification : c'est ce qui permet de se passer d'un Azure
+# Container Registry (4,35 €/mois, soit 15 % du budget mensuel) sans avoir de secret de
+# registre à gérer côté Azure.
+#
+# ⚠ Deux points non négociables :
+#   * `linux/amd64` — Container Apps n'exécute pas d'arm64, et le job échouerait au
+#     démarrage sans message clair ;
+#   * `.dockerignore` exclut `source-filestorage/`, `data/` et `.env` : l'image embarque
+#     le code et le SQL, jamais les données.
+#
+# Ce workflow ne s'active que si les deux secrets ci-dessous existent dans le dépôt.
+# Sans eux il est ignoré, et `make image-push` reste le chemin nominal — c'est celui qui
+# a servi au déploiement.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  IMAGE: ${{ vars.DOCKERHUB_IMAGE || 'louis336/eds-chu' }}
+
+jobs:
+  publier:
+    name: Construire et publier
+    runs-on: ubuntu-latest
+    # Sans identifiants de registre, il n'y a rien à publier : on n'échoue pas pour autant.
+    if: ${{ vars.DOCKERHUB_USERNAME != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Authentification Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Étiquettes
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          # `main` suit la branche ; le SHA permet d'épingler une version précise
+          # dans `terraform.tfvars` et de savoir exactement ce qui tourne.
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=sha,format=short
+
+      - name: Construction et publication
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Rappel de l'image publiée
+        run: echo "::notice::${{ env.IMAGE }} — épinglez ce tag dans terraform/terraform.tfvars"

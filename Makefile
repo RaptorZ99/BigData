@@ -7,7 +7,10 @@ SHELL := /bin/bash
 # Toutes les commandes lisent .env ; on le crée à partir de l'exemple si besoin.
 ENV_FILE := .env
 
-.PHONY: help env up down pipeline provision demo test test-e2e lint fmt reset logs status quality diagram
+.PHONY: help env up down pipeline provision demo test test-e2e lint fmt reset logs status quality diagram \
+        dbt-build dbt-test dbt-docs image image-push \
+        cloud-bootstrap cloud-plan cloud-apply cloud-seed cloud-provision cloud-run \
+        cloud-check cloud-status cloud-logs cloud-stop cloud-start cloud-destroy
 
 help: ## Affiche cette aide
 	@# Le motif accepte les chiffres : sans quoi une cible comme `test-e2e`
@@ -108,6 +111,87 @@ lint: ## Vérifie le style du code
 fmt: ## Formate le code
 	uv run ruff format src tests
 	uv run ruff check --fix src tests
+
+dbt-build: ## Reconstruit et teste silver + gold (dbt), sans réingérer
+	uv run eds run --rebuild
+
+dbt-test: ## Rejoue les seuls tests dbt sur l'entrepôt en place
+	set -a && . ./$(ENV_FILE) && set +a && uv run dbt test --project-dir dbt --profiles-dir dbt
+
+dbt-docs: ## Génère la documentation dbt (graphe des modèles)
+	set -a && . ./$(ENV_FILE) && set +a && uv run eds publish-dbt-docs
+
+image: ## Construit l'image du pipeline en local
+	docker build -t eds-chu:local .
+
+# ⚠ `--platform linux/amd64` : Container Apps n'exécute pas d'arm64, et un Mac Apple
+# Silicon en produirait par défaut. Le job échouerait au démarrage, sans message clair.
+image-push: ## Construit en amd64 et publie l'image du pipeline
+	docker buildx build --platform linux/amd64 -t $(IMAGE):latest -t $(IMAGE):$$(git rev-parse --short HEAD) --push .
+	@echo "→ Publiée : $(IMAGE):$$(git rev-parse --short HEAD)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Déploiement Azure — cf. docs/CLOUD.md
+# ─────────────────────────────────────────────────────────────────────────────
+# Registre public : les jobs Azure tirent l'image sans aucun identifiant.
+IMAGE := louis336/eds-chu
+TF := terraform -chdir=terraform
+# Le groupe et les noms sont lus dans les sorties Terraform : ils ne sont écrits
+# qu'à un seul endroit, et ne peuvent pas devenir faux ici.
+RG = $(shell $(TF) output -raw nom_groupe 2>/dev/null)
+
+cloud-bootstrap: ## Enregistre les fournisseurs et crée le backend d'état (une fois)
+	@bash scripts/cloud-bootstrap.sh
+
+cloud-plan: ## terraform plan
+	$(TF) plan
+
+cloud-apply: ## terraform apply — crée ou met à jour l'infrastructure
+	$(TF) apply
+
+cloud-seed: ## Téléverse source-filestorage/ vers le dépôt du CHU (conteneur filestorage)
+	@ACC=$$($(TF) output -raw compte_stockage); \
+	 echo "→ Dépôt du CHU vers $$ACC/filestorage…"; \
+	 az storage blob upload-batch --account-name $$ACC --auth-mode login \
+	   -d filestorage -s source-filestorage --overwrite \
+	   --exclude-pattern "*.DS_Store"
+
+cloud-provision: ## Déclenche job-eds-provision (entrepôt, Metabase, documentation dbt)
+	az containerapp job start -n job-eds-provision -g $(RG) -o none
+	@echo "→ Lancé. Suivi : make cloud-status"
+
+cloud-run: ## Déclenche job-eds-pipeline immédiatement
+	az containerapp job start -n job-eds-pipeline -g $(RG) -o none
+	@echo "→ Lancé. Suivi : make cloud-status"
+
+cloud-check: ## Déclenche job-eds-controle (preuve du cloisonnement)
+	az containerapp job start -n job-eds-controle -g $(RG) -o none
+
+cloud-status: ## État de la VM et des dernières exécutions des jobs
+	@echo "── VM ──"
+	@az vm get-instance-view -g $(RG) -n $$($(TF) output -raw nom_vm) \
+	   --query "instanceView.statuses[?starts_with(code,'PowerState')].displayStatus" -o tsv
+	@echo "── Jobs ──"
+	@for J in job-eds-pipeline job-eds-provision job-eds-controle; do \
+	   az containerapp job execution list -n $$J -g $(RG) \
+	     --query "sort_by([].{job:'$$J',debut:properties.startTime,statut:properties.status}, &debut)[-3:]" \
+	     -o table 2>/dev/null | tail -4; \
+	 done
+
+cloud-logs: ## Journaux de la dernière exécution du pipeline
+	@az containerapp job logs show -n job-eds-pipeline -g $(RG) --container eds --tail 200 2>/dev/null \
+	 || echo "Aucune exécution récente. Voir Log Analytics (requête dans les sorties Terraform)."
+
+cloud-stop: ## Désalloue la VM — la facture tombe à ~5 €/mois
+	az vm deallocate -g $(RG) -n $$($(TF) output -raw nom_vm) -o none
+	@echo '→ VM désallouée. `make cloud-start` la remonte, pile comprise.'
+
+cloud-start: ## Rallume la VM ; la pile remonte seule
+	az vm start -g $(RG) -n $$($(TF) output -raw nom_vm) -o none
+	@echo "→ VM démarrée. Comptez deux minutes avant que Metabase réponde."
+
+cloud-destroy: ## ⚠ Détruit toute l'infrastructure Azure
+	$(TF) destroy
 
 diagram: ## Regénère le modèle de données (nécessite plantuml)
 	plantuml -tpng -o img docs/data-model.puml

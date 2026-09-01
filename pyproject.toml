@@ -3,12 +3,26 @@ name = "eds-chu"
 version = "1.0.0"
 description = "Entrepôt de Données de Santé (EDS) du CHU — pipeline médaillon ClickHouse + Metabase"
 readme = "README.md"
-requires-python = ">=3.12"
+# dbt-core 1.11 ne démarre pas sur Python 3.14 (mashumaro : UnserializableField sur
+# JSONObjectSchema.schema). La borne haute est donc une contrainte d'outillage, pas
+# de langage — cf. docs/PLAN-CLOUD.md §5.6.
+requires-python = ">=3.12,<3.14"
 dependencies = [
     "clickhouse-connect>=0.8.0",
     "typer>=0.15.0",
     "rich>=13.9.0",
     "requests>=2.32.0",
+]
+
+# Extras : le socle reste minimal pour `make demo`. Le cloud (stockage objet) et la
+# transformation dbt s'ajoutent explicitement — c'est l'image du job qui les installe.
+[project.optional-dependencies]
+azure = [
+    "azure-storage-blob>=12.23.0",
+    "azure-identity>=1.19.0",
+]
+dbt = [
+    "dbt-clickhouse>=1.10.2,<1.11",
 ]
 
 [project.scripts]

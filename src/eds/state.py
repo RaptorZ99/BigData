@@ -15,8 +15,8 @@ from datetime import datetime
 
 from clickhouse_connect.driver.client import Client
 
-from eds.collect import SourceFile
 from eds.logging_setup import get_logger
+from eds.storage import SourceFile
 
 log = get_logger(__name__)
 

@@ -1,0 +1,90 @@
+# Pile de restitution — ClickHouse, Metabase, Caddy.
+#
+# Différences avec le `docker-compose.yml` du poste, et pourquoi :
+#   * les limites mémoire sont explicites — trois processus se partagent la RAM
+#     de la machine, et aucun ne doit pouvoir affamer les autres ;
+#   * `config.d` et `users.d` sont montés depuis l'hôte, en écriture ;
+#   * Caddy termine le TLS ; ClickHouse n'est pas exposé publiquement (NSG).
+name: eds-chu
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.3
+    container_name: eds-clickhouse
+    environment:
+      CLICKHOUSE_USER: chu_etl
+      CLICKHOUSE_PASSWORD: $${CLICKHOUSE_ETL_PASSWORD:?}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      # ⚠ EN ÉCRITURE, pas en lecture seule : le point d'entrée de l'image écrit
+      # `default-user.xml` au démarrage. Monté en `:ro`, le conteneur meurt sur
+      # « Read-only file system ».
+      - /opt/eds/clickhouse/config.d:/etc/clickhouse-server/config.d
+      - /opt/eds/clickhouse/users.d:/etc/clickhouse-server/users.d
+    ports:
+      # Publié sur toutes les interfaces, mais le groupe de sécurité réseau ne
+      # laisse entrer que le sous-réseau des jobs. Le port n'est pas joignable
+      # depuis Internet.
+      - "8123:8123"
+    mem_limit: ${memoire_ch}m
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  metabase:
+    image: metabase/metabase:v0.58.31
+    container_name: eds-metabase
+    environment:
+      MB_DB_FILE: /metabase-data/metabase.db
+      JAVA_TIMEZONE: Europe/Paris
+      MB_LOAD_SAMPLE_CONTENT: "false"
+      MB_SITE_URL: "https://${site_host}"
+      # Sans borne explicite, la JVM se dimensionne sur la mémoire visible et se
+      # fait tuer par le noyau. `SerialGC` : sur deux vCPU partagés, le ramasse-
+      # miettes parallèle réserve de la mémoire sans rien gagner.
+      JAVA_OPTS: "-Xmx${xmx_metabase}m -XX:MaxMetaspaceSize=256m -XX:+UseSerialGC"
+    volumes:
+      - metabase-data:/metabase-data
+    ports:
+      # Joignable par le job de provisionnement, via le réseau virtuel uniquement.
+      - "3000:3000"
+    mem_limit: ${memoire_metabase}m
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 40
+      start_period: 120s
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: eds-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /opt/eds/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    mem_limit: 64m
+    depends_on:
+      - metabase
+    restart: unless-stopped
+
+volumes:
+  clickhouse-data:
+  metabase-data:
+  caddy-data:
+  caddy-config:
