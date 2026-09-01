@@ -148,8 +148,6 @@ source-filestorage  →  lake  →  bronze  →  silver  →  gold  →  Metabas
                    pseudonymisée) typées)  dimensions)  usage)     cloisonnés)
 ```
 
-Le modèle de données complet est en annexe : [`docs/img/eds-data-model.png`](img/eds-data-model.png).
-
 > **Un écart assumé avec l'architecture conseillée.** Le sujet décrit le lake comme une
 > « copie brute, telle quelle », mais demande par ailleurs — c'est le bonus valorisé — que
 > l'identifiant patient soit pseudonymisé **dès l'entrée du lake** et que les identifiants
@@ -163,7 +161,57 @@ Le modèle de données complet est en annexe : [`docs/img/eds-data-model.png`](i
 > l'entrepôt » ; l'alternative aurait été d'écrire le NIR et les noms sur notre disque pour
 > les effacer une étape plus loin.
 
-### 3.2 Justification des choix
+### 3.2 Le modèle de données
+
+Voici l'entrepôt en entier — les trente-trois tables, leurs colonnes principales et les
+relations qui les lient. C'est ce schéma qui fait foi : les DDL de `sql/` en découlent, et
+un test refuse toute table présente dans l'entrepôt mais absente d'ici.
+
+![Modèle de données de l'entrepôt](img/eds-data-model.png)
+
+*Version vectorielle, lisible à toute échelle : [`eds-data-model.svg`](img/eds-data-model.svg)
+— source PlantUML : [`data-model.puml`](data-model.puml).*
+
+**Comment le lire.** Les quatre cadres colorés sont les quatre bases ClickHouse, disposées
+dans l'ordre du flux : bronze en haut à gauche, silver au centre, les deux bases gold et
+l'exploitation en bas. Les flèches épaisses entre cadres portent la nature de la
+transformation ; celles de l'intérieur de silver sont les liens dimensionnels.
+
+| Notation | Signification |
+|---|---|
+| `PK` | Clé du grain de la table |
+| `FK dim_x` | Clé étrangère vers la dimension conformée `dim_x` |
+| `DD` | **Dimension dégénérée** : un identifiant porté par le fait, sans table à lui |
+| Cadre jaune pâle | Dimension conformée, partagée par plusieurs étoiles |
+| Cadre rose | Table de rejets — les lignes écartées, avec leur motif |
+| `⟨—o{` | Relation un-à-plusieurs (une dimension, plusieurs faits) |
+
+**Les trois étoiles se lisent au centre.** Chaque fait est relié uniquement aux dimensions
+dont il a besoin, et à aucun autre fait :
+
+- **`fact_sejour`** ⋆ `dim_patient` + `dim_service` — répond à la DMS, à l'activité des
+  urgences, aux réadmissions et à la charge des services ;
+- **`fact_monitoring`** ⋆ `dim_service` — répond aux alertes de constantes. Il porte
+  `service_code` directement, recopié depuis le séjour à la construction : c'est ce qui lui
+  évite de devoir passer par `fact_sejour` ;
+- **`fact_diagnostic`** ⋆ `dim_patient` + `dim_cim10` — répond à la prévalence, aux
+  cohortes et à la démographie. Même principe : `patient_pseudo` y est propagé.
+
+`stay_id` figure dans les trois faits sans jamais être une table : c'est la dimension
+dégénérée. Elle permet de relier les étoiles quand une analyse transversale le demande,
+mais aucun indicateur du dossier n'en a besoin — et c'est voulu (§3.4).
+
+**Ce que le schéma dit aussi de la conformité.** Trois choses s'y lisent directement :
+
+- **aucune colonne `nir`, `nom`, `prenom` ou `birth_date` n'apparaît nulle part**, pas même
+  en bronze : elles n'entrent jamais dans l'entrepôt (§4.1) ;
+- **`fact_monitoring` ne porte pas de `patient_pseudo`** : aucun indicateur de constantes
+  n'en a besoin, la donnée ne descend donc pas jusque-là (§7.1) ;
+- **`cellules_demographie` est rangée en silver et non en gold recherche**, alors qu'elle
+  sert exclusivement aux cohortes : elle contient les effectifs *sous* le seuil de
+  diffusion, et doit rester hors de portée des chercheurs (§7.2).
+
+### 3.3 Justification des choix
 
 | Décision | Choix retenu | Pourquoi |
 |---|---|---|
@@ -177,7 +225,7 @@ Le modèle de données complet est en annexe : [`docs/img/eds-data-model.png`](i
 | **Restitution** | Metabase, provisionné par API | Dashboards sans code pour les utilisateurs, mais définis en Python et versionnés côté projet : après un clone, tout se recrée sans un seul clic. |
 | **Orchestration** | Interface en ligne de commande + cron | Simple, testable, sans dépendance lourde. La montée vers un ordonnanceur dédié est décrite en §8. |
 
-### 3.3 Pourquoi une constellation plutôt qu'une seule étoile
+### 3.4 Pourquoi une constellation plutôt qu'une seule étoile
 
 Le premier réflexe serait de faire du séjour la table centrale et d'y rattacher tout le
 reste. Nous ne l'avons pas fait, pour une raison précise : chaque besoin métier interroge
@@ -197,7 +245,7 @@ L'identifiant de séjour reste présent dans les trois faits en **dimension dég
 n'a pas de table à lui, mais il permet de relier les étoiles quand une analyse transversale
 le demande.
 
-### 3.4 Volumétrie et passage à l'échelle
+### 3.5 Volumétrie et passage à l'échelle
 
 Le sujet impose que « l'architecture tienne la charge » pour le flux de monitoring. Nous
 avons préféré le mesurer plutôt que l'affirmer. Le banc d'essai
@@ -886,7 +934,7 @@ définitions SQL, éviterait les désaccords ultérieurs.
 
 ## Annexes
 
-- [Modèle de données détaillé](img/eds-data-model.png) — également en
+- [Modèle de données détaillé](img/eds-data-model.png) — commenté en §3.2, également en
   [vectoriel](img/eds-data-model.svg), lisible à toute échelle à l'impression
 - [Documentation d'exploitation](EXPLOITATION.md)
 - [Plan d'implémentation et profilage complet](PLAN.md)

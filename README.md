@@ -114,8 +114,11 @@ flowchart LR
     PY -.journalise.-> O
 ```
 
-Le modèle de données détaillé est dans **[`docs/img/eds-data-model.png`](docs/img/eds-data-model.png)**
-(source PlantUML : [`docs/data-model.puml`](docs/data-model.puml)).
+Le **[modèle de données complet](docs/img/eds-data-model.png)** — les 33 tables, leurs
+colonnes et leurs relations — est commenté pas à pas dans
+[§3.2 du rapport](docs/RAPPORT.md#32-le-modèle-de-données) : comment lire le schéma, où sont
+les trois étoiles, et ce qu'il dit de la conformité RGPD. Source PlantUML :
+[`docs/data-model.puml`](docs/data-model.puml).
 
 ### Rôle de chaque couche
 
