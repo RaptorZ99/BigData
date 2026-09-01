@@ -145,42 +145,57 @@ Le modèle de données complet (bronze typé, **silver en constellation** — 3 
 
 ```
 .
-├── README.md                  # quickstart, archi, démo — spec §14
+├── README.md                  # vitrine : quickstart, archi, vérifications
 ├── CLAUDE.md                  # 3 lignes : importe docs/CONVENTIONS.md
-├── docs/CONVENTIONS.md        # règles projet et pièges rencontrés
-├── docs/PLAN.md               # ce document
-├── docs/FICHE-SUJET.md        # sujet
-├── .gitignore                 # existe déjà (source-filestorage/, data/, .env exclus)
-├── .env.example               # toutes les variables, valeurs de démo
-├── docker-compose.yml
-├── Makefile                   # up, down, pipeline, provision, demo, test, reset, logs
-├── pyproject.toml             # projet uv, Python ≥3.12 ; deps : clickhouse-connect, typer, requests ; dev : pytest, ruff
+├── .gitignore                 # source-filestorage/, data/, .env exclus
+├── .env.example               # toutes les variables ; secrets marqués `change_me`
+├── docker-compose.yml         # ClickHouse 26.3 + Metabase v0.58.31, volumes nommés
+├── Makefile                   # env, up, down, pipeline, provision, demo, status,
+│                              # quality, test, test-e2e, lint, fmt, diagram, logs, reset
+├── pyproject.toml             # uv, Python ≥3.12 ; deps : clickhouse-connect, typer, rich, requests
 ├── src/eds/
-│   ├── __init__.py
-│   ├── cli.py                 # typer : run, status, provision-warehouse, provision-metabase, reset, quality
-│   ├── config.py              # lecture .env, validation fail-fast (sel manquant → erreur explicite)
+│   ├── cli.py                 # typer : run, status, quality, provision-warehouse,
+│   │                          #         provision-metabase, check-cloisonnement, reset
+│   ├── config.py              # lecture .env, validation fail-fast, détection des secrets d'exemple
 │   ├── logging_setup.py       # console + logs/pipeline.log (RotatingFileHandler)
-│   ├── pseudo.py              # HMAC-SHA256, généralisation date de naissance
+│   ├── pseudo.py              # HMAC-SHA256, généralisation de la date de naissance
 │   ├── collect.py             # filestorage → lake (streaming stdlib csv/json/shutil)
 │   ├── warehouse.py           # client clickhouse-connect, exécution des fichiers sql/, templating
 │   ├── load_bronze.py         # DROP PARTITION + INSERT…SELECT FROM file() par (domaine, jour)
-│   ├── transform.py           # exécute sql/20_silver puis sql/30_gold, écrit quality_report
-│   ├── state.py               # ops.ingest_log / ops.pipeline_runs (découverte des jours à traiter, checksums)
-│   └── metabase.py            # provisioning API Metabase (setup, dbs, groupes, users, permissions, cards, dashboards)
+│   ├── transform.py           # exécute sql/20_silver puis sql/30_gold ; EXPECTED_TABLES, is_stale
+│   ├── pipeline.py            # orchestration, gestion des erreurs, traçabilité du run
+│   ├── state.py               # ops.ingest_log / ops.pipeline_runs (jours à traiter, checksums)
+│   ├── metabase.py            # provisioning API (setup, dbs, groupes, users, permissions, dashboards)
+│   └── metabase_content.py    # définition et disposition des cartes des deux tableaux de bord
 ├── sql/
-│   ├── 00_init/               # databases, tables ops, users chu_*, GRANTs (templaté pour les mots de passe)
-│   ├── 10_bronze/             # DDL des tables bronze + requêtes d'insert par domaine
-│   ├── 20_silver/             # étoile : dim_patient/dim_service/dim_cim10, fact_sejour/fact_diagnostic/fact_monitoring, rejets, contrôles qualité
-│   └── 30_gold/               # kpi_* pilotage, cohorte_* recherche
-├── scheduling/crontab.example
-├── tests/
-│   ├── test_pseudo.py         # déterminisme, non-réversibilité, format, généralisation année
-│   ├── test_collect.py        # colonnes interdites absentes du lake, idempotence de copie
-│   └── test_e2e.py            # (marqué integration, requiert docker) comptages attendus §2
+│   ├── 00_init/               # databases, tables ops, profil + quota + users chu_* (templaté)
+│   ├── 10_bronze/             # DDL des tables bronze uniquement
+│   ├── 15_bronze_load/        # requêtes d'insert paramétrées par (fichier, jour)
+│   ├── 20_silver/             # constellation : 3 dims + 3 faits, rejets, rapport qualité
+│   └── 30_gold/               # kpi_* pilotage, cohorte_* recherche, contrôles RGPD
+├── tests/                     # 162 tests : 99 unitaires + 63 d'intégration
+│   ├── conftest.py            # fixtures : jeu de données miniature entièrement inventé
+│   ├── test_pseudo.py         # déterminisme, non-réversibilité, format, généralisation
+│   ├── test_collect.py        # aucune colonne identifiante ne sort de la source
+│   ├── test_config.py         # détection des secrets d'exemple
+│   ├── test_state.py          # les 4 branches de la décision d'ingestion
+│   ├── test_warehouse.py      # découpage des scripts SQL (chaînes respectées)
+│   ├── test_pipeline.py       # dépôt incomplet, échec partiel, couche en retard
+│   ├── test_dashboards.py     # mise en page : chevauchements, grille, titres, tables visées
+│   ├── test_data_model.py     # le diagramme décrit-il encore l'entrepôt réel ?
+│   └── test_e2e.py            # (integration, requiert docker) invariants de l'entrepôt
 ├── docs/
 │   ├── RAPPORT.md             # dossier Partie 1 — spec §14
-│   └── EXPLOITATION.md        # doc Partie 2 : lancement, maintenance, reprise sur incident — spec §14
-└── data/                      # gitignoré : lake/, clickhouse/, metabase/
+│   ├── EXPLOITATION.md        # doc Partie 2 : lancement, maintenance, reprise sur incident
+│   ├── PLAN.md                # ce document
+│   ├── CONVENTIONS.md         # règles projet et pièges rencontrés (importé par CLAUDE.md)
+│   ├── FICHE-SUJET.md         # sujet officiel (+ .pdf)
+│   ├── data-model.puml        # modèle de données — fait foi pour les DDL
+│   └── img/                   # diagramme rendu (PNG + SVG) et captures des dashboards
+├── benchmarks/charge_monitoring.py   # banc d'essai : 20 M de relevés par le chemin réel
+├── scheduling/crontab.example
+├── .github/workflows/ci.yml   # style + tests unitaires ; invariants si le dépôt est fourni
+└── data/                      # gitignoré : lake/, volumes Docker
 ```
 
 ---
@@ -540,10 +555,25 @@ Documenter dans EXPLOITATION.md : installation (`crontab -e`), supervision (exit
 
 ## 12. Étape 7 — Tests (`tests/`)
 
+**162 tests au total : 99 unitaires (`make test`, sans Docker) et 63 d'intégration
+(`make test-e2e`).** Le jeu de données des tests unitaires est entièrement inventé et vit
+dans `conftest.py` — aucune donnée réelle n'entre dans le dépôt.
+
+*Unitaires :*
+
 - `test_pseudo.py` : même entrée+sel → même pseudo (déterminisme) ; sels différents → pseudos différents ; format `P[0-9a-f]{16}` ; `birth_year` correct ; sel absent/court → exception explicite.
-- `test_collect.py` : sur un mini-fixture CSV (3 lignes inventées, dans `tests/fixtures/`) → le fichier lake ne contient ni `nir` ni `nom` ni `prenom` ni motif `IPP\d+` ; recollecte → contenu identique (déterminisme).
-- `test_e2e.py` (`@pytest.mark.integration`, requiert `make up` + pipeline exécuté) : vérifie les invariants recalculés (§2.6, note) — dim_patient = 6 000 ; fact_sejour = 14 864 (rejets 136) ; fact_diagnostic = 37 040 (cascade 340) ; fact_monitoring = 64 799 (rejets 1 878) ; flags : post-mortem 192, after_discharge 0 ; réadmissions 687 sur 1 421 sorties observables (48,3 %) ; alertes 3 053 ; `cohorte_demographie_region` = 1 596 cellules diffusées (4 supprimées) ; aucune table recherche avec `nb_patients < 5` ; `SELECT` sur `eds_gold_pilotage` avec le user `chu_recherche` → `ACCESS_DENIED`.
-- Lint : `ruff check` + `ruff format --check` dans `make test`.
+- `test_collect.py` : le fichier lake ne contient ni `nir` ni `nom` ni `prenom` ni motif `IPP\d+` ; recollecte → contenu identique (déterminisme).
+- `test_config.py` : les six secrets d'exemple sont détectés et **nommés** ; la détection ignore la casse.
+- `test_state.py` : les quatre branches de la décision d'ingestion (nouveau, inchangé, modifié, en échec).
+- `test_warehouse.py` : le découpage des scripts SQL respecte les chaînes — un `;` dans un libellé ne sépare pas deux instructions.
+- `test_pipeline.py` : dépôt incomplet → échec ; échec partiel → publication suspendue ; couche dérivée en retard → détectée.
+- `test_dashboards.py` : aucune carte ne se chevauche, chaque ligne de grille fait 24 colonnes, les titres tiennent dans leur carte, chaque requête vise une table déclarée.
+- `test_data_model.py` : chaque table de l'entrepôt figure au diagramme, aucune table fantôme, rendus PNG/SVG plus récents que la source.
+
+*Intégration* (`@pytest.mark.integration`, requiert `make up` + pipeline exécuté) :
+
+- `test_e2e.py` : invariants recalculés (§2.6, note) — dim_patient = 6 000 ; fact_sejour = 14 864 (rejets 136) ; fact_diagnostic = 37 040 (cascade 340) ; fact_monitoring = 64 799 (rejets 1 878) ; flags : post-mortem 192, after_discharge 0 ; réadmissions 687 sur 1 421 sorties observables (48,3 %) ; alertes 3 053 ; `cohorte_demographie_region` = 1 596 cellules diffusées (4 supprimées) ; aucune table recherche avec `nb_patients < 5` ; l'attaque par différenciation ne rend rien ; `SELECT` sur `eds_gold_pilotage` avec le user `chu_recherche` → `ACCESS_DENIED` ; chaque compte Metabase ne voit qu'un dashboard et qu'une base ; les dashboards sont provisionnés en pleine largeur.
+- Lint : `make lint` (`ruff check` + `ruff format --check`), exécuté aussi par la CI.
 
 ---
 
@@ -557,7 +587,7 @@ Documenter dans EXPLOITATION.md : installation (`crontab -e`), supervision (exit
 | **P4 Silver** | 20_silver (constellation : 3 dims + 3 faits, ordre de build §8) + quality_report | Comptages exacts (§2.6, note) : dim_patient 6 000, fact_sejour 14 864, fact_diagnostic 37 040, fact_monitoring 64 799, rejets 136/340 en cascade/1 878, flags 192/0 ; `eds quality` les affiche. |
 | **P5 Gold + RBAC** | 30_gold, users/GRANTs | KPI cohérents (réadmissions 687 sur 1 421 sorties observables = 48,3 % ; alertes 3 053) ; `chu_recherche` ne lit pas pilotage (testé) ; aucune cohorte < 5 diffusée (4 cellules supprimées sur la vue fine par département). |
 | **P6 Metabase** | metabase.py + les 2 dashboards | `make demo` de zéro → URLs affichées ; login pilotage/recherche → chacun ne voit que son univers ; les 2 dashboards remplis. |
-| **P7 Docs** | README, docs/RAPPORT.md, docs/EXPLOITATION.md, crontab.example | Cf. spec §14 ; un lecteur qui clone et suit le README arrive au même résultat. |
+| **P7 Docs** | README, docs/RAPPORT.md, docs/EXPLOITATION.md, docs/CONVENTIONS.md, docs/data-model.puml, crontab.example | Cf. spec §14 ; un lecteur qui clone et suit le README arrive au même résultat. |
 | **P8 Finitions** | test_e2e, ruff, relecture, screenshots dans docs/img/ | `make test` vert ; `make reset && make demo` repasse de bout en bout. |
 
 Commits : Conventional Commits, un commit par phase minimum (`feat(collect): …`, `feat(silver): …`, `docs(rapport): …`).
