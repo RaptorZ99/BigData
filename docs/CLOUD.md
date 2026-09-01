@@ -103,7 +103,7 @@ Tarifs Linux relevés à l'API tarifaire Azure pour `swedencentral`, base 730 h/
 | Geste | Effet |
 |---|---|
 | `make cloud-stop` entre deux démonstrations | **5,2 €/mois** (disque + IP conservés) |
-| `auto_shutdown_time = "2200"` | **19,4 €/mois** → 4,0 mois |
+| Mode nuit : `auto_shutdown_time` + `auto_startup_cron` | **19,4 €/mois** → 4,0 mois (voir §8.6) |
 | `make cloud-destroy` | 0 € |
 
 Un budget Azure à 60 € avec alertes à 50, 80 et 100 % est créé dès que
@@ -422,7 +422,50 @@ Il ne s'active que si les secrets `DOCKERHUB_USERNAME` et `DOCKERHUB_TOKEN` sont
 renseignés dans le dépôt ; sans eux, il est simplement ignoré et `make image-push` reste
 le chemin nominal.
 
-### 8.5 Ajouter un indicateur
+### 8.5 Éteindre la nuit, rallumer le matin
+
+**Préparé, désactivé par défaut.** Deux variables l'activent :
+
+```hcl
+# terraform/terraform.tfvars
+auto_shutdown_time = "2200"        # arrêt à 22 h, heure de Paris
+auto_startup_cron  = "0 6 * * *"   # démarrage à 06 h UTC = 08 h à Paris (été)
+pipeline_cron      = "30 7 * * *"  # 09 h 30 à Paris — DANS la fenêtre allumée
+```
+
+Puis `make cloud-apply`. Quatre ressources apparaissent : la planification d'arrêt, un
+job `job-eds-reveil`, un rôle sur mesure et son attribution.
+
+**Économie : 29,6 → 19,4 €/mois**, soit 2,6 mois d'autonomie portés à 4,0. À comparer
+aux 5,20 €/mois de `make cloud-stop` — qui reste plus efficace si la plateforme n'a pas
+besoin d'être disponible tous les jours.
+
+Trois choses valent d'être comprises avant de basculer.
+
+**Azure ne sait pas rallumer une VM.** La planification d'arrêt
+(`azurerm_dev_test_global_vm_shutdown_schedule`) n'a pas d'équivalent « démarrage » hors
+des laboratoires DevTest. C'est un quatrième job Container Apps qui joue ce rôle : il
+appelle `az vm start` avec son identité gérée. Coût : une exécution de trente secondes
+par jour, soit 0,02 % de l'offre gratuite mensuelle. Sans `auto_startup_cron`, la
+machine s'éteint le soir et **reste éteinte** — Terraform vous en avertit au `plan`.
+
+**Le pipeline doit tenir dans la fenêtre allumée.** Laissé à 01 h 05 UTC, il se
+déclencherait sans entrepôt à joindre et échouerait chaque nuit. Un second contrôle
+Terraform le signale.
+
+**Les deux formats d'heure diffèrent, et c'est voulu.** `auto_shutdown_time` est une
+heure de Paris — Azure gère le changement d'heure. `auto_startup_cron` est un cron
+**UTC**, comme tout déclencheur de job Container Apps. Les aligner artificiellement
+masquerait le fait que l'un suit l'heure d'été et l'autre non : en hiver, `0 6 * * *`
+réveille la machine à 07 h et non 08 h.
+
+**Le job de réveil ne peut que démarrer la VM.** Il porte un rôle sur mesure limité à
+`read`, `instanceView/read` et `start/action`, sur cette machine uniquement. Le rôle
+intégré « Virtual Machine Contributor » aurait convenu, mais il autorise aussi à
+supprimer la VM : donner ce pouvoir à une tâche nocturne contredirait tout le reste du
+projet.
+
+### 8.6 Ajouter un indicateur
 
 La procédure est celle du déploiement local (cf.
 [`EXPLOITATION.md` §6.3](EXPLOITATION.md#63-ajouter-un-nouvel-indicateur)) : un

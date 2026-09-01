@@ -23,6 +23,7 @@ Mode d'emploi détaillé, vérifications et reprise sur incident :
 
 | Fichier | Contenu |
 |---|---|
+| `main.tf` | Groupe de ressources, et deux `check` qui avertissent d'une planification incohérente |
 | `providers.tf` | AzureRM 5.x : `subscription_id` obligatoire, aucun fournisseur auto-enregistré |
 | `backend.tf` | État distant, authentifié par identité Entra ID |
 | `variables.tf` | 28 variables, toutes documentées, toutes avec un défaut sûr |
@@ -31,7 +32,7 @@ Mode d'emploi détaillé, vérifications et reprise sur incident :
 | `storage.tf` | Compte de blobs versionné, conteneurs, jeton SAS, **droits par conteneur** |
 | `keyvault.tf` | Coffre en RBAC, huit secrets générés |
 | `identity.tf` | Identité gérée des jobs |
-| `vm.tf` | VM, cloud-init, extinction planifiée |
+| `vm.tf` | VM, cloud-init, extinction planifiée, job de réveil et son rôle sur mesure |
 | `containerapp.tf` | Environnement dans le réseau, trois jobs |
 | `observability.tf` | Log Analytics, quota d'ingestion journalier |
 | `budget.tf` | Budget d'abonnement, alertes à 50 / 80 / 100 % |
@@ -45,7 +46,8 @@ Mode d'emploi détaillé, vérifications et reprise sur incident :
 | `subscription_id` | — | **Seule variable obligatoire** |
 | `vm_size` | `Standard_B2als_v2` | 2 vCPU / 4 Gio, 24,38 €/mois |
 | `location` | `swedencentral` | Une policy d'abonnement restreint les régions ; parmi celles autorisées, c'est la moins chère qui propose la série B |
-| `auto_shutdown_time` | `""` | `"2200"` ramène le coût de 29,6 à 19,4 €/mois |
+| `auto_shutdown_time` | `""` | Arrêt du soir, heure de Paris. **N'éteint que** — à coupler avec `auto_startup_cron` |
+| `auto_startup_cron` | `""` | Démarrage du matin, cron **UTC**. Crée `job-eds-reveil` et son rôle sur mesure |
 | `acme_hostname` | `""` | Vide = certificat auto-signé ; un domaine = Let's Encrypt |
 | `eds_image` | `louis336/eds-chu:latest` | Image **publique** : aucun secret de registre. À épingler sur un commit avant une démonstration |
 | `budget_contact_emails` | `[]` | Vide = aucune alerte de budget |

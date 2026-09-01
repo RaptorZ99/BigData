@@ -99,10 +99,40 @@ variable "swap_size_gb" {
 
 variable "auto_shutdown_time" {
   description = <<-TXT
-    Extinction quotidienne au format HHMM, fuseau de la région (ex. "2200").
-    Vide = la VM reste allumée. Éteindre 22 h → 8 h ramène le coût de 34 à 24 €/mois,
-    soit 2,3 mois d'autonomie portés à 3,2 — au prix d'une indisponibilité nocturne,
-    à éviter si l'évaluation peut avoir lieu hors heures ouvrées.
+    Extinction quotidienne, au format HHMM, **heure de Paris** (ex. "2200").
+    Vide (défaut) = la VM reste allumée en permanence.
+
+    ⚠ Cette variable n'ÉTEINT que. Azure ne propose pas de démarrage planifié pour une
+    VM autonome — la ressource utilisée ici (`azurerm_dev_test_global_vm_shutdown_schedule`)
+    ne sait rien faire d'autre. Sans `auto_startup_cron`, la machine reste éteinte
+    jusqu'à un `make cloud-start` manuel.
+
+    ⚠ À coupler avec `pipeline_cron` : un pipeline planifié dans la fenêtre d'extinction
+    échouerait chaque nuit, faute d'entrepôt à joindre. Un contrôle Terraform le signale
+    au `plan`.
+
+    Économie réelle, mesurée : 29,6 → 19,4 €/mois pour une extinction 22 h → 8 h, soit
+    2,6 mois d'autonomie portés à 4,0. À comparer aux 5,20 €/mois de `make cloud-stop`,
+    qui reste le levier le plus efficace entre deux démonstrations.
+  TXT
+  type        = string
+  default     = ""
+}
+
+variable "auto_startup_cron" {
+  description = <<-TXT
+    Démarrage quotidien de la VM, en expression cron **UTC** (ex. "0 6 * * *" = 08 h 00
+    à Paris en été, 07 h 00 en hiver). Vide (défaut) = aucun démarrage automatique.
+
+    Mis en œuvre par un quatrième job Container Apps qui appelle `az vm start` avec son
+    identité gérée — gratuit à ce volume (une exécution de ~30 s par jour, contre
+    180 000 vCPU-s offerts par mois).
+
+    **Pourquoi une expression cron ici et une heure HHMM pour l'extinction ?** Les deux
+    services ne parlent pas le même langage : la planification d'arrêt Azure prend une
+    heure locale et gère le changement d'heure toute seule ; le déclencheur d'un job
+    Container Apps prend un cron, toujours en UTC. Aligner artificiellement les deux
+    formats masquerait le fait que l'un suit l'heure d'été et l'autre non.
   TXT
   type        = string
   default     = ""

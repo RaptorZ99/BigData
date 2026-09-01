@@ -268,7 +268,7 @@ Leviers, tous en place :
 | Levier | Effet | Commande |
 |---|---|---|
 | Désallouer la VM entre deux démonstrations | **5,20 €/mois** (disque + IP seuls) | `make cloud-stop` / `make cloud-start` |
-| Extinction nocturne 22 h → 8 h | ≈ 19,40 €/mois → 4,0 mois | variable `auto_shutdown_time` |
+| Extinction nocturne 22 h → 8 h | ≈ 19,40 €/mois → 4,0 mois | `auto_shutdown_time` **et** `auto_startup_cron` — Azure ne sait pas rallumer seul (cf. CLOUD.md §8.5) |
 | Descendre en gamme | `Standard_B2ts_v2` (1 Gio) : 6,77 €/mois — **trop juste** pour la pile complète | variable `vm_size` |
 | Tout détruire | 0 € | `make cloud-destroy` |
 
@@ -1023,7 +1023,8 @@ terraform/
 | `lake_sas_expiry_days` | `180` | Rotation par `terraform apply` |
 | `budget_amount_eur` / `budget_contact_emails` | `60` / `[]` | Alertes 50 / 80 / 100 % |
 | `publish_dbt_docs` | `true` | Site statique de la documentation dbt |
-| `auto_shutdown_time` | `""` | Ex. `2200` pour l'extinction nocturne |
+| `auto_shutdown_time` | `""` | Arrêt du soir, heure de Paris. N'éteint que |
+| `auto_startup_cron` | `""` | Démarrage du matin, cron UTC. Crée `job-eds-reveil` |
 
 ### 9.4 Stockage (`storage.tf`)
 
@@ -1587,7 +1588,7 @@ ssh -N -L 8123:localhost:8123 chu@<ip-publique>
 | 5 | dbt cassé sur Python 3.14 | Certaine | Élevé | Dépôt figé sur 3.13, vérifié (§5.6) |
 | 6 | ~~ADLS Gen2 mal supporté par `azureBlobStorage()`~~ — **levé** : le HNS est désactivé (§5.11), et le test de fumée passe sur le déploiement réel | — | — | **Test de fumée dès le point 3 de la recette** ; repli documenté : désactiver HNS (`is_hns_enabled = false`), sans autre conséquence |
 | 7 | Avertissement de certificat auto-signé pendant la démonstration | Certaine | Faible | Annoncé ; bascule DuckDNS + Let's Encrypt en 2 minutes par `acme_hostname` |
-| 8 | Crédit épuisé pendant l'évaluation | Faible | Élevé | Budget à 60 € avec alertes ; `make cloud-stop` entre deux démonstrations ; extinction nocturne disponible |
+| 8 | Crédit épuisé pendant l'évaluation | Faible | Élevé | Budget à 60 € avec alertes ; `make cloud-stop` entre deux démonstrations ; mode nuit complet (arrêt + réveil) disponible en deux variables |
 | 9 | Quota de 6 vCPU atteint | Faible | Moyen | Une seule VM ; les jobs sont serverless et hors quota VM |
 | 10 | Démarrage à froid du job (téléchargement de l'image ≈ 20 s) | Certaine | Nul | Sans effet sur un traitement nocturne |
 | 11 | L'IP privée de la VM change | Faible | Élevé | Allocation **statique** `10.20.1.10` (§9.5) |

@@ -102,3 +102,104 @@ resource "azurerm_dev_test_global_vm_shutdown_schedule" "warehouse" {
     enabled = false
   }
 }
+
+# ── Démarrage automatique du matin ──────────────────────────────────────────
+# Azure sait éteindre une VM sur planification, mais pas la rallumer : la ressource
+# ci-dessus n'a pas d'équivalent « startup » hors des laboratoires DevTest. Sans ce
+# qui suit, `auto_shutdown_time` produit une machine qui s'arrête le soir et attend
+# une intervention humaine.
+#
+# On réutilise donc ce qui est déjà là : un job Container Apps, planifié, qui appelle
+# `az vm start` avec son identité gérée. Coût : une exécution de ~30 s par jour, soit
+# 0,02 % de l'offre mensuelle gratuite.
+#
+# Le tout est inactif par défaut : sans `auto_startup_cron`, rien n'est créé.
+
+# Droit minimal : démarrer **cette** machine, et rien d'autre. Le rôle intégré
+# « Virtual Machine Contributor » conviendrait, mais il autorise aussi à supprimer la
+# VM — donner ce pouvoir à une tâche nocturne contredirait tout le reste du projet.
+resource "azurerm_role_definition" "demarrage_vm" {
+  count = var.auto_startup_cron != "" ? 1 : 0
+
+  name        = "eds-demarrage-vm-${local.suffixe}"
+  scope       = azurerm_linux_virtual_machine.warehouse.id
+  description = "Démarrer la VM de l'entrepôt EDS, et rien d'autre"
+
+  permissions {
+    actions = [
+      "Microsoft.Compute/virtualMachines/read",
+      "Microsoft.Compute/virtualMachines/instanceView/read",
+      "Microsoft.Compute/virtualMachines/start/action",
+    ]
+    not_actions = []
+  }
+
+  assignable_scopes = [azurerm_linux_virtual_machine.warehouse.id]
+}
+
+resource "azurerm_role_assignment" "job_demarrage_vm" {
+  count = var.auto_startup_cron != "" ? 1 : 0
+
+  scope              = azurerm_linux_virtual_machine.warehouse.id
+  role_definition_id = azurerm_role_definition.demarrage_vm[0].role_definition_resource_id
+  principal_id       = azurerm_user_assigned_identity.pipeline.principal_id
+}
+
+resource "azurerm_container_app_job" "reveil" {
+  count = var.auto_startup_cron != "" ? 1 : 0
+
+  name                         = "job-eds-reveil"
+  resource_group_name          = azurerm_resource_group.eds.name
+  location                     = azurerm_resource_group.eds.location
+  container_app_environment_id = azurerm_container_app_environment.eds.id
+  workload_profile_name        = "Consumption"
+  tags                         = local.etiquettes
+
+  replica_timeout_in_seconds = 600
+  # Deux tentatives : démarrer une VM est idempotent, et un aléa d'API ne doit pas
+  # laisser la plateforme éteinte toute la journée.
+  replica_retry_limit = 2
+
+  schedule_trigger_config {
+    cron_expression = var.auto_startup_cron
+    parallelism     = 1
+  }
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.pipeline.id]
+  }
+
+  template {
+    container {
+      name = "reveil"
+      # Image publique de Microsoft : aucun identifiant de registre, et l'outil est
+      # maintenu par l'éditeur du service qu'il pilote.
+      image  = "mcr.microsoft.com/azure-cli:latest"
+      cpu    = 0.25
+      memory = "0.5Gi"
+
+      command = ["/bin/sh", "-c"]
+      # `az vm start` sur une machine déjà allumée réussit sans rien faire : le job est
+      # donc rejouable, et un démarrage manuel la veille ne le fait pas échouer.
+      args = [
+        "az login --identity --client-id $AZURE_CLIENT_ID -o none && az vm start -g $RG -n $VM -o none && echo 'VM demarree'"
+      ]
+
+      env {
+        name  = "AZURE_CLIENT_ID"
+        value = azurerm_user_assigned_identity.pipeline.client_id
+      }
+      env {
+        name  = "RG"
+        value = azurerm_resource_group.eds.name
+      }
+      env {
+        name  = "VM"
+        value = azurerm_linux_virtual_machine.warehouse.name
+      }
+    }
+  }
+
+  depends_on = [azurerm_role_assignment.job_demarrage_vm]
+}
