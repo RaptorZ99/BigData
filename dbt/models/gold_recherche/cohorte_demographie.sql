@@ -1,49 +1,46 @@
-{{ config(order_by='(code_cim10, sexe, tranche_age_debut)') }}
--- Marge par pathologie, sexe et tranche d'âge.
+{{ config(order_by='(code_cim10, tranche_age_debut, sexe)') }}
+-- KPI 6 — Description de cohorte : distribution par âge et sexe, pour chaque
+-- pathologie.
 --
--- ═══════════════════════════════════════════════════════════════════════════
---  Appliquer le seuil séparément sur une vue agrégée et sur sa décomposition
---  NE SUFFIT PAS. Si une seule cellule fine est supprimée, sa valeur se retrouve
---  par soustraction :
+-- Grain : pathologie × tranche d'âge × sexe.
 --
---      total de la marge − somme des cellules fines diffusées = cellule cachée
+-- Restreint au **diagnostic principal**, c'est-à-dire au motif de l'hospitalisation.
+-- Décrire une cohorte, c'est décrire les patients pris en charge POUR cette
+-- pathologie ; y inclure ceux qui la portent en comorbidité mélangerait deux
+-- populations et gonflerait les cohortes chroniques (diabète, insuffisance cardiaque)
+-- de plus du double. La prévalence, elle, compte bien tous les rangs : les deux
+-- tables répondent à deux questions distinctes, et c'est voulu.
 --
---  L'attaque ne demande aucun privilège : une jointure entre les deux tables, avec
---  le compte chercheur, suffit à reconstruire pathologie, sexe, tranche d'âge,
---  département **et** effectif exact de patients censés être protégés. C'est le
---  mécanisme dit de « différenciation », bien connu du contrôle statistique de la
---  divulgation.
+-- Âges diffusés en tranches de dix ans, jamais en valeur exacte, et calculés depuis
+-- la seule année de naissance : la date complète n'existe nulle part dans l'entrepôt.
 --
---  Parade appliquée ici : la **suppression complémentaire**. Une marge n'est diffusée
---  que si TOUTE sa décomposition l'est. Dès qu'une cellule fine tombe sous le seuil,
---  la ligne agrégée disparaît elle aussi — il n'y a alors plus rien à soustraire.
+-- k-anonymat : une cellule de moins de `seuil_k` patients garde sa ligne, mais son
+-- effectif est masqué (même principe qu'en tête de `prevalence_pathologie`).
 --
---  Le coût est assumé et mesuré : quelques lignes agrégées de moins, reportées dans
---  `k_anonymat_controle`. Le principe retenu est qu'une donnée douteuse ne se diffuse
---  pas, même agrégée.
--- ═══════════════════════════════════════════════════════════════════════════
---
--- L'alias de l'agrégat ne reprend pas le nom de la colonne source : sinon le filtre
--- le réinterpréterait comme un agrégat imbriqué.
+-- Le test `assert_pas_de_suppression_partielle` vérifie qu'aucune pathologie n'est
+-- publiée à moitié : sans cela, sommer les cellules d'une pathologie pour en tirer
+-- une répartition par sexe donnerait un ratio biaisé, les cellules manquantes étant
+-- systématiquement les plus petites.
 SELECT
     code_cim10,
     libelle,
-    sexe,
     tranche_age_debut,
     tranche_age,
-    total AS nb_patients
+    sexe,
+    nb >= {{ var('seuil_k') }}  AS diffusable,
+    if(diffusable, nb, NULL)    AS nb_patients
 FROM
 (
     SELECT
-        code_cim10,
-        libelle,
-        sexe,
-        tranche_age_debut,
-        tranche_age,
-        sum(nb_patients)        AS total,
-        countIf(NOT diffusable) AS cellules_fines_supprimees
-    FROM {{ ref('cellules_demographie') }}
-    GROUP BY code_cim10, libelle, sexe, tranche_age_debut, tranche_age
+        d.code_cim10                                AS code_cim10,
+        c.libelle                                   AS libelle,
+        {{ tranche_age_debut('p.birth_year') }}     AS tranche_age_debut,
+        {{ tranche_age_libelle('p.birth_year') }}   AS tranche_age,
+        p.sex                                       AS sexe,
+        uniqExact(d.patient_pseudo)                 AS nb
+    FROM {{ ref('fact_diagnostic') }} AS d
+    INNER JOIN {{ ref('dim_cim10') }}   AS c USING (code_cim10)
+    INNER JOIN {{ ref('dim_patient') }} AS p USING (patient_pseudo)
+    WHERE d.is_principal
+    GROUP BY code_cim10, libelle, tranche_age_debut, tranche_age, sexe
 )
-WHERE total >= {{ var('seuil_k') }}
-  AND cellules_fines_supprimees = 0

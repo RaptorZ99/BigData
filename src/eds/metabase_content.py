@@ -6,7 +6,8 @@ bord reste lisible et modifiable sans toucher à la mécanique d'API.
 Chaque requête est un simple `SELECT` sur une table gold : la logique de calcul
 appartient à l'entrepôt, l'outil de restitution ne fait qu'afficher. Un chiffre
 du dashboard est donc toujours retrouvable en SQL, ce qui est exactement ce
-qu'on veut pouvoir démontrer.
+qu'on veut pouvoir démontrer. Aucune carte ne ré-agrège une table gold pour en
+changer le grain : si une vue manque, c'est un modèle qui manque.
 
 La grille Metabase fait 24 colonnes de large, et les tableaux de bord sont
 provisionnés en `width: "full"` (cf. `metabase.py`) : la grille occupe donc toute
@@ -25,16 +26,14 @@ empilement de graphiques :
     caractères lisibles par colonne de grille — une tuile de quatre colonnes en
     tient treize, une de cinq colonnes dix-sept. Au-delà, Metabase tronque et un
     chiffre sans son titre ne veut plus rien dire. Le nom reste court, la
-    définition complète va dans la description, accessible au survol. Même règle
-    pour les valeurs affichées dans les tables : « aucune mesure possible » est
-    devenu « hors fenêtre » pour cette raison ;
+    définition complète va dans la description, accessible au survol ;
   * **une carte est dimensionnée pour son contenu.** Un graphique respire sur
-    huit unités de hauteur, pas six ; une table de dix-huit lignes en demande
-    treize, sinon elle impose un défilement interne — invisible sur une capture,
-    et pénible à l'usage.
+    huit unités de hauteur, pas six ; une table de cent lignes en demande douze,
+    sinon elle impose un défilement interne — invisible sur une capture, et
+    pénible à l'usage.
 
-`tests/test_dashboards.py` vérifie les trois premières règles à chaque exécution
-de la suite unitaire, sans démarrer Metabase.
+`tests/test_dashboards.py` vérifie ces règles à chaque exécution de la suite
+unitaire, sans démarrer Metabase.
 """
 
 from __future__ import annotations
@@ -84,10 +83,9 @@ _PILOTAGE_CARDS = [
     {
         "name": "Réadmission 30 j",
         "description": (
-            "Part (%) des sorties vivantes suivies d'une réadmission dans les 30 jours. "
-            "Calculée sur les seules sorties dont la fenêtre d'observation n'est pas "
-            "vide — les sorties postérieures à la dernière admission connue ne peuvent "
-            "rien constater. Voir l'encart de couverture plus bas."
+            "Part (%) des séjours suivis, pour le même patient, d'une nouvelle admission "
+            "dans les 30 jours. Indicateur de qualité des soins : plus il est bas, mieux "
+            "c'est. Borne basse — voir l'encart plus bas."
         ),
         "display": "scalar",
         "sql": "SELECT taux_readmission_pct FROM kpi_synthese",
@@ -99,8 +97,8 @@ _PILOTAGE_CARDS = [
     {
         "name": "Alertes (%)",
         "description": (
-            "Part des relevés de constantes hors seuils cliniques (fréquence cardiaque, "
-            "saturation, température). Réanimation et cardiologie uniquement."
+            "Part des relevés de constantes hors seuils de vigilance : fréquence "
+            "cardiaque < 50 ou > 100 bpm, saturation < 92 %, température > 38,5 °C."
         ),
         "display": "scalar",
         "sql": "SELECT pct_releves_alerte FROM kpi_synthese",
@@ -119,23 +117,22 @@ _PILOTAGE_CARDS = [
         "size_x": 5,
         "size_y": 3,
     },
-    # ── Bande 2 · activité ──────────────────────────────────────────────────
+    # ── Bande 2 · durées de séjour et urgences ──────────────────────────────
     {
         "name": "Durée moyenne de séjour par service",
-        "description": "DMS pondérée par le nombre de sorties, sur les séjours terminés.",
+        "description": (
+            "KPI 1 — DMS sur les séjours terminés, au grain du service. Lue telle quelle "
+            "dans kpi_dms_service : la carte n'agrège rien."
+        ),
         "display": "bar",
         "sql": (
-            "SELECT service_label AS service,\n"
-            "       round(sum(dms_jours * nb_sorties) / sum(nb_sorties), 2) AS dms_jours\n"
+            "SELECT service_label AS service, dms_jours\n"
             "FROM kpi_dms_service\n"
-            "GROUP BY service\n"
             "ORDER BY dms_jours DESC"
         ),
         "visualization_settings": {
             "graph.dimensions": ["service"],
             "graph.metrics": ["dms_jours"],
-            # Les DMS se tiennent dans un mouchoir (6,01 à 6,23 j) : sans les
-            # valeurs affichées, le graphique ne dit rien de lisible.
             "graph.show_values": True,
             "graph.x_axis.title_text": "Service",
             "graph.y_axis.title_text": "Jours",
@@ -148,22 +145,26 @@ _PILOTAGE_CARDS = [
     {
         "name": "Activité des urgences par jour",
         "description": (
-            "Deux lectures : passages par le service des urgences, "
-            "et admissions en mode urgence tous services confondus."
+            "KPI 3 — Passages dans l'unité URGENCES par jour d'admission, et part encore "
+            "présente (sortie non renseignée)."
         ),
         "display": "line",
         "sql": (
             "SELECT admission_date AS jour,\n"
-            "       nb_passages_service_urgences AS `Passages service Urgences`,\n"
-            "       nb_admissions_mode_urgence   AS `Admissions en mode urgence`\n"
+            "       nb_passages        AS `Passages`,\n"
+            "       nb_encore_presents AS `Encore présents`\n"
             "FROM kpi_urgences_jour\n"
             "ORDER BY jour"
         ),
         "visualization_settings": {
             "graph.dimensions": ["jour"],
-            "graph.metrics": ["Passages service Urgences", "Admissions en mode urgence"],
+            "graph.metrics": ["Passages", "Encore présents"],
+            # Deux séries dans la même unité (des séjours) : un axe unique, sinon
+            # deux courbes de hauteur comparable représenteraient des effectifs
+            # dans un rapport de 1 à 5.
+            "graph.y_axis.auto_split": False,
             "graph.x_axis.title_text": "Jour d'admission",
-            "graph.y_axis.title_text": "Nombre",
+            "graph.y_axis.title_text": "Séjours",
         },
         "row": 5,
         "col": 12,
@@ -173,16 +174,17 @@ _PILOTAGE_CARDS = [
     # ── Bande 3 · surveillance des constantes ───────────────────────────────
     {
         "name": "Relevés de constantes en alerte par jour",
-        "description": "Surveillance des patients de réanimation et de cardiologie.",
+        "description": (
+            "KPI 4 — Relevés portant au moins une constante hors seuil de vigilance. "
+            "Environ 8 % des relevés sur la période."
+        ),
         "display": "line",
         "sql": (
-            "SELECT releve_date AS jour, service_label AS service, nb_alertes\n"
-            "FROM kpi_alertes_monitoring\n"
-            "ORDER BY jour, service"
+            "SELECT jour, nb_alertes AS `Relevés en alerte`\nFROM kpi_alertes_jour\nORDER BY jour"
         ),
         "visualization_settings": {
-            "graph.dimensions": ["jour", "service"],
-            "graph.metrics": ["nb_alertes"],
+            "graph.dimensions": ["jour"],
+            "graph.metrics": ["Relevés en alerte"],
             "graph.x_axis.title_text": "Jour",
             "graph.y_axis.title_text": "Relevés en alerte",
         },
@@ -194,17 +196,17 @@ _PILOTAGE_CARDS = [
     {
         "name": "Nature des alertes par service",
         "description": (
-            "Nombre d'alertes par type. Un même relevé pouvant déclencher plusieurs "
-            "alertes, le total dépasse le nombre de relevés en alerte."
+            "Nombre d'alertes par type et par service. Un même relevé pouvant déclencher "
+            "plusieurs alertes, le total dépasse le nombre de relevés en alerte. Seuls "
+            "les services équipés de capteurs au chevet apparaissent."
         ),
         "display": "bar",
         "sql": (
             "SELECT service_label AS service,\n"
-            "       sum(nb_alertes_frequence_cardiaque) AS `Fréquence cardiaque`,\n"
-            "       sum(nb_alertes_saturation)          AS `Saturation (SpO2)`,\n"
-            "       sum(nb_alertes_temperature)         AS `Température`\n"
-            "FROM kpi_alertes_monitoring\n"
-            "GROUP BY service\n"
+            "       nb_alertes_frequence_cardiaque AS `Fréquence cardiaque`,\n"
+            "       nb_alertes_saturation          AS `Saturation (SpO2)`,\n"
+            "       nb_alertes_temperature         AS `Température`\n"
+            "FROM kpi_alertes_service\n"
             "ORDER BY service"
         ),
         "visualization_settings": {
@@ -213,12 +215,12 @@ _PILOTAGE_CARDS = [
             # Barres groupées et non empilées : un relevé peut déclencher
             # plusieurs alertes, un empilement laisserait croire à un total.
             #
-            # `auto_split: False` est indispensable ici. Les alertes de
-            # température sont environ dix fois plus nombreuses que les autres ;
-            # laissé à lui-même, Metabase place les séries sur DEUX axes Y de
-            # graduations différentes, et des barres de hauteur comparable
-            # représentent alors des effectifs dans un rapport de 1 à 10. Un axe
-            # unique montre l'écart réel, qui est précisément l'information.
+            # `auto_split: False` est indispensable ici. Les trois types d'alerte
+            # n'ont pas du tout le même effectif ; laissé à lui-même, Metabase
+            # place les séries sur DEUX axes Y de graduations différentes, et des
+            # barres de hauteur comparable représentent alors des effectifs dans
+            # un rapport de 1 à 10. Un axe unique montre l'écart réel, qui est
+            # précisément l'information.
             "graph.y_axis.auto_split": False,
             "graph.show_values": True,
             "graph.x_axis.title_text": "Service",
@@ -230,19 +232,18 @@ _PILOTAGE_CARDS = [
         "size_y": 8,
     },
     # ── Bande 4 · réadmissions, précédées de leur avertissement ─────────────
-    # L'encart passe AVANT les deux cartes : un taux de réadmission lu sans sa
-    # couverture est un chiffre trompeur, et personne ne lit un avertissement
-    # placé sous le graphique qu'il corrige.
+    # L'encart passe AVANT les cartes : un taux de réadmission lu sans sa limite
+    # est un chiffre trompeur, et personne ne lit un avertissement placé sous le
+    # graphique qu'il corrige.
     {
         "kind": "text",
         "text": (
             "### ↩️ Réadmissions à 30 jours\n"
-            "⚠️ **Aucune sortie ne dispose des 30 jours complets.** Une réadmission ne "
-            "peut être constatée que si l'entrepôt couvre la période où elle surviendrait. "
-            "Les admissions s'arrêtent au dernier jour déposé : une sortie de fin de "
-            "période n'a que quelques jours de fenêtre, et les sorties postérieures n'en "
-            "ont aucune. Le taux affiché porte sur les seules sorties observables et "
-            "**sous-estime** le taux réel ; la couverture est affichée à côté, jour par jour."
+            "⚠️ **Le taux affiché est une borne basse.** Une réadmission ne peut être "
+            "constatée que si l'entrepôt couvre la période où elle surviendrait. Les "
+            "admissions s'arrêtent au dernier jour déposé : une sortie de fin de période "
+            "n'a que quelques jours de fenêtre, et aucune sortie ne dispose des 30 jours "
+            "complets. Le taux réel est donc **supérieur** à celui-ci."
         ),
         "row": 21,
         "col": 0,
@@ -250,25 +251,21 @@ _PILOTAGE_CARDS = [
         "size_y": 2,
     },
     {
-        "name": "Taux de réadmission par service (fenêtre observable)",
+        "name": "Taux de réadmission par service",
         "description": (
-            "Indicateur de qualité des soins : plus il est bas, mieux c'est. Restreint aux "
-            "sorties dont la fenêtre d'observation n'est pas vide."
+            "KPI 2 ventilé — le service porté est celui du séjour initial, celui dont on "
+            "interroge la prise en charge. La somme des services reproduit exactement le "
+            "taux global affiché en tuile."
         ),
         "display": "bar",
         "sql": (
-            "SELECT service_label AS service,\n"
-            "       sum(sorties_eligibles) AS sorties,\n"
-            "       sum(readmissions_30j)  AS readmissions,\n"
-            "       round(100.0 * sum(readmissions_30j) / sum(sorties_eligibles), 2) AS taux_pct\n"
-            "FROM kpi_readmissions_30j\n"
-            "WHERE jours_observables > 0\n"
-            "GROUP BY service\n"
-            "ORDER BY taux_pct DESC"
+            "SELECT service_label AS service, taux_readmission_30j_pct AS `taux (%)`\n"
+            "FROM kpi_readmissions_service\n"
+            "ORDER BY `taux (%)` DESC"
         ),
         "visualization_settings": {
             "graph.dimensions": ["service"],
-            "graph.metrics": ["taux_pct"],
+            "graph.metrics": ["taux (%)"],
             "graph.show_values": True,
             "graph.x_axis.title_text": "Service",
             "graph.y_axis.title_text": "Taux de réadmission (%)",
@@ -276,33 +273,11 @@ _PILOTAGE_CARDS = [
         "row": 23,
         "col": 0,
         "size_x": 12,
-        "size_y": 9,
+        "size_y": 8,
     },
-    {
-        "name": "Couverture de l'indicateur de réadmission",
-        "description": "Part des sorties sur lesquelles l'indicateur peut se prononcer.",
-        "display": "table",
-        # Libellés courts : la colonne se tronque au-delà d'une quinzaine de
-        # caractères, et « aucune mesure possib… » ne veut plus rien dire.
-        "sql": (
-            "SELECT discharge_date AS `jour de sortie`,\n"
-            "       sum(sorties_eligibles) AS sorties,\n"
-            "       max(jours_observables) AS `jours obs. / 30`,\n"
-            "       if(max(jours_observables) = 0, 'hors fenêtre', 'partiel')\n"
-            "           AS `portée`\n"
-            "FROM kpi_readmissions_30j\n"
-            "GROUP BY `jour de sortie`\n"
-            "ORDER BY `jour de sortie`"
-        ),
-        "row": 23,
-        "col": 12,
-        "size_x": 12,
-        "size_y": 9,
-    },
-    # ── Bande 5 · flux et charge des services ──────────────────────────────
     {
         "name": "Modes d'admission et de sortie",
-        "description": "Répartition quotidienne des flux d'entrée et de sortie.",
+        "description": "Répartition des flux d'entrée et de sortie sur toute la période.",
         "display": "row",
         "sql": (
             "SELECT concat(sens, ' — ', mode) AS flux, sum(nb_sejours) AS nb_sejours\n"
@@ -319,14 +294,41 @@ _PILOTAGE_CARDS = [
             "graph.x_axis.title_text": "Flux",
             "graph.y_axis.title_text": "Nombre de séjours",
         },
-        "row": 32,
+        "row": 23,
+        "col": 12,
+        "size_x": 12,
+        "size_y": 8,
+    },
+    # ── Bande 5 · charge des services ──────────────────────────────────────
+    {
+        "name": "Charge des services par jour",
+        "description": (
+            "Séjours ouverts à la fin de chaque journée : la charge réelle du service, "
+            "invisible dans un simple comptage d'admissions. La décrue de fin de période "
+            "est un effet de bord des données déposées, pas une baisse d'activité."
+        ),
+        "display": "line",
+        "sql": (
+            "SELECT jour, service_label AS service, sejours_en_cours\n"
+            "FROM kpi_activite_service\n"
+            "ORDER BY jour, service"
+        ),
+        "visualization_settings": {
+            "graph.dimensions": ["jour", "service"],
+            "graph.metrics": ["sejours_en_cours"],
+            "graph.x_axis.title_text": "Jour",
+            "graph.y_axis.title_text": "Séjours ouverts",
+        },
+        "row": 31,
         "col": 0,
         "size_x": 12,
         "size_y": 8,
     },
     {
         "name": "Activité quotidienne par service",
-        "description": "Entrées, sorties, décès et charge (séjours ouverts) par service.",
+        "description": (
+            "Entrées, sorties, décès et charge (séjours ouverts), par service et par jour."
+        ),
         "display": "table",
         "sql": (
             "SELECT jour, service_label AS service, admissions, sorties,\n"
@@ -334,7 +336,7 @@ _PILOTAGE_CARDS = [
             "FROM kpi_activite_service\n"
             "ORDER BY jour DESC, service"
         ),
-        "row": 32,
+        "row": 31,
         "col": 12,
         "size_x": 12,
         "size_y": 8,
@@ -348,7 +350,7 @@ _PILOTAGE_CARDS = [
             "consultable dans l'entrepôt : aucun chiffre du dashboard n'est le "
             "résultat d'une suppression silencieuse."
         ),
-        "row": 40,
+        "row": 39,
         "col": 0,
         "size_x": 24,
         "size_y": 2,
@@ -369,7 +371,7 @@ _PILOTAGE_CARDS = [
             "FROM kpi_qualite_pipeline\n"
             "ORDER BY `écartées` DESC, `signalées` DESC, controle"
         ),
-        "row": 42,
+        "row": 41,
         "col": 0,
         "size_x": 24,
         "size_y": 12,
@@ -384,7 +386,7 @@ _PILOTAGE_CARDS = [
             "FROM kpi_ingestion\n"
             "ORDER BY `jour de dépôt` DESC, domaine"
         ),
-        "row": 54,
+        "row": 53,
         "col": 0,
         "size_x": 24,
         "size_y": 10,
@@ -400,15 +402,16 @@ _RECHERCHE_CARDS = [
         "text": (
             "## 🔬 Recherche clinique\n"
             "Cohortes de patients par pathologie et description démographique.\n\n"
-            "**Données pseudonymisées et agrégées.** Aucune information "
-            "identifiante n'est accessible depuis cet espace, et toute cellule "
-            "regroupant moins de 5 patients est retirée de la diffusion.\n\n"
+            "**Données pseudonymisées et agrégées.** Aucune information identifiante "
+            "n'est accessible depuis cet espace.\n\n"
+            "**Petits effectifs : la ligne reste, le chiffre part.** Toute cellule "
+            "regroupant moins de 5 patients garde sa place dans les tables, mais son "
+            "effectif est retiré et remplacé par « masqué ». Vous savez ainsi qu'une "
+            "valeur existe et qu'elle est protégée — c'est plus honnête que de faire "
+            "disparaître la ligne sans rien dire.\n\n"
             "⚠️ **Jeu de données synthétique.** Les prévalences ont des ordres de grandeur "
             "plausibles, mais elles sont générées : les cohortes servent à valider la chaîne "
-            "de traitement, **pas** à conclure quoi que ce soit d'épidémiologique.\n\n"
-            "**Le seuil retire des pathologies entières.** Le référentiel en compte treize ; "
-            "onze sont diffusées ici. La mucoviscidose et la trisomie 21, portées par moins "
-            "de cinq patients, n'apparaissent nulle part sur cet écran."
+            "de traitement, **pas** à conclure quoi que ce soit d'épidémiologique."
         ),
         "row": 0,
         "col": 0,
@@ -417,13 +420,18 @@ _RECHERCHE_CARDS = [
     },
     {
         "name": "Taille des cohortes par pathologie",
-        "description": "Nombre de patients distincts concernés par chaque diagnostic CIM-10.",
+        "description": (
+            "KPI 5 — Patients distincts concernés par chaque diagnostic CIM-10, tous rangs "
+            "confondus. Les cohortes masquées sont absentes du graphique : elles figurent "
+            "dans la table voisine."
+        ),
         # Barres horizontales : les libellés CIM-10 dépassent 40 caractères et
         # deviendraient illisibles en abscisse.
         "display": "row",
         "sql": (
             "SELECT libelle AS pathologie, nb_patients\n"
-            "FROM cohorte_pathologie\n"
+            "FROM prevalence_pathologie\n"
+            "WHERE diffusable\n"
             "ORDER BY nb_patients DESC"
         ),
         "visualization_settings": {
@@ -443,24 +451,21 @@ _RECHERCHE_CARDS = [
     {
         "name": "Prévalence par pathologie",
         "description": (
-            "Part des patients de l'entrepôt concernés par chaque pathologie. Une "
-            "pathologie dont la cohorte compte moins de 5 patients n'est pas diffusée."
+            "Les treize pathologies du référentiel, y compris celles dont l'effectif est "
+            "masqué. La prévalence rapporte la cohorte à la population suivie."
         ),
-        "display": "row",
+        "display": "table",
+        # L'effectif reste une colonne NUMÉRIQUE : le convertir en texte pour y
+        # écrire « masqué » ferait perdre le formatage français des nombres, et
+        # 2 234 s'afficherait 2234. L'état de masquage a donc sa propre colonne.
         "sql": (
-            "SELECT libelle AS pathologie, prevalence_pct AS `prévalence (%)`\n"
+            "SELECT code_cim10 AS `code`, libelle AS pathologie,\n"
+            "       nb_patients     AS `patients`,\n"
+            "       prevalence_pct  AS `prévalence (%)`,\n"
+            "       if(diffusable, '', 'masqué (< 5)') AS `diffusion`\n"
             "FROM prevalence_pathologie\n"
-            "ORDER BY `prévalence (%)` DESC"
+            "ORDER BY nb_patients DESC NULLS LAST"
         ),
-        "visualization_settings": {
-            "graph.dimensions": ["pathologie"],
-            "graph.metrics": ["prévalence (%)"],
-            "graph.max_categories_enabled": False,
-            "graph.max_categories": 20,
-            "graph.show_values": True,
-            "graph.x_axis.title_text": "Pathologie (CIM-10)",
-            "graph.y_axis.title_text": "Prévalence (%)",
-        },
         "row": 4,
         "col": 12,
         "size_x": 12,
@@ -469,17 +474,17 @@ _RECHERCHE_CARDS = [
     {
         "name": "Distribution par âge et sexe",
         "description": (
-            "Pyramide des âges de la population suivie, patients comptés une seule fois."
+            "Pyramide des âges de la population suivie, chaque patient compté une seule "
+            "fois. Lue à son propre grain, et non agrégée depuis la vue par pathologie : "
+            "un patient portant cinq diagnostics y serait compté cinq fois."
         ),
         "display": "bar",
-        # Lue depuis la table au grain sexe × âge, et non agrégée depuis la vue
-        # par pathologie : `nb_patients` n'est pas additif, un patient portant
-        # plusieurs diagnostics y serait compté autant de fois.
         "sql": (
             "SELECT tranche_age AS `tranche d'âge`,\n"
             "       sumIf(nb_patients, sexe = 'F') AS Femmes,\n"
             "       sumIf(nb_patients, sexe = 'M') AS Hommes\n"
             "FROM cohorte_demographie_globale\n"
+            "WHERE diffusable\n"
             "GROUP BY `tranche d'âge`, tranche_age_debut\n"
             "ORDER BY tranche_age_debut"
         ),
@@ -498,25 +503,23 @@ _RECHERCHE_CARDS = [
     {
         "name": "Part des femmes par pathologie",
         "description": (
-            "Composition des cohortes par sexe, exprimée en part de femmes. "
-            "Une série unique : Metabase regrouperait les catégories excédentaires "
-            "sous « Autre » au-delà de huit séries, ce qui masquerait une partie des "
-            "pathologies."
+            "Composition des cohortes par sexe, exprimée en part de femmes. Le ratio est "
+            "plus lisible que deux séries d'effectifs : les cohortes vont de 8 à plus de "
+            "2 000 patients, et deux barres absolues côte à côte ne laisseraient pas lire "
+            "la composition des petites."
         ),
         "display": "row",
-        # Le ratio est plus lisible que deux séries d'effectifs : les cohortes vont
-        # de 8 à plus de 2 000 patients, et deux barres absolues côte à côte ne
-        # laisseraient pas lire la composition des petites.
-        #
-        # Lue depuis `cohorte_demographie_sexe`, au grain pathologie × sexe, et NON
-        # depuis `cohorte_demographie` : sommer cette dernière à travers les tranches
-        # d'âge calculerait le ratio sur les seules cellules ayant passé le seuil, qui
-        # sont les plus grandes. Le biais mesuré atteignait neuf points.
+        # La somme des tranches d'âge n'est légitime que si aucune cellule de la
+        # pathologie n'est masquée. C'est vrai ici, et deux contrôles dbt le
+        # garantissent : `assert_pas_de_suppression_partielle` interdit qu'une
+        # pathologie soit publiée à moitié, `assert_part_de_femmes_non_biaisee`
+        # compare le ratio publié à celui recalculé depuis silver.
         "sql": (
             "SELECT libelle AS pathologie,\n"
             "       round(100.0 * sumIf(nb_patients, sexe = 'F')\n"
             "             / sum(nb_patients), 1) AS `part de femmes (%)`\n"
-            "FROM cohorte_demographie_sexe\n"
+            "FROM cohorte_demographie\n"
+            "WHERE diffusable\n"
             "GROUP BY pathologie\n"
             "ORDER BY `part de femmes (%)` DESC"
         ),
@@ -533,65 +536,59 @@ _RECHERCHE_CARDS = [
         "size_y": 9,
     },
     {
-        "name": "Description détaillée des cohortes",
-        "description": "Pathologie × sexe × tranche d'âge — cellules d'au moins 5 patients.",
-        "display": "table",
-        "sql": (
-            "SELECT libelle AS pathologie, sexe, tranche_age AS `tranche d'âge`,\n"
-            "       nb_patients AS patients\n"
-            "FROM cohorte_demographie\n"
-            "ORDER BY pathologie, sexe, tranche_age_debut"
-        ),
-        "row": 22,
-        "col": 0,
-        "size_x": 14,
-        "size_y": 7,
-    },
-    {
         "kind": "text",
         "text": (
             "### 🔒 Protection des petits effectifs\n"
-            "Au grain le plus fin (pathologie × sexe × tranche d'âge × département), "
-            "certaines cellules descendent sous le seuil de 5 patients : elles sont "
-            "**supprimées de la diffusion**, car un effectif aussi faible pourrait "
+            "Le seuil de diffusion est de **5 patients**. En dessous, l'effectif est "
+            "retiré : un chiffre aussi faible, croisé avec l'âge et le sexe, pourrait "
             "permettre de ré-identifier une personne.\n\n"
-            "Le compteur ci-dessous mesure cet effet à chaque traitement."
+            "Le compteur ci-dessous mesure l'effet du dispositif à chaque traitement, "
+            "table par table — sans jamais dire quelles cellules sont concernées."
         ),
         "row": 22,
-        "col": 14,
-        "size_x": 10,
-        "size_y": 4,
-    },
-    {
-        "name": "Cellules retirées de la diffusion (seuil k = 5)",
-        "description": "Effet mesuré du k-anonymat sur la vue démographique la plus fine.",
-        "display": "table",
-        "sql": (
-            "SELECT cellules_calculees  AS `cellules calculées`,\n"
-            "       cellules_diffusees  AS `cellules diffusées`,\n"
-            "       cellules_supprimees AS `cellules supprimées`,\n"
-            "       seuil_k             AS `seuil k`\n"
-            "FROM k_anonymat_controle"
-        ),
-        "row": 26,
-        "col": 14,
-        "size_x": 10,
+        "col": 0,
+        "size_x": 24,
         "size_y": 3,
     },
     {
-        "name": "Cohortes par département (grain fin, k >= 5)",
-        "description": "Vue la plus détaillée diffusable, après suppression des petits effectifs.",
+        "name": "Cellules masquées par le seuil (k = 5)",
+        "description": "Effet mesuré du k-anonymat sur chacune des tables diffusées.",
         "display": "table",
         "sql": (
-            "SELECT libelle AS pathologie, region_code AS `département`, sexe,\n"
-            "       tranche_age AS `tranche d'âge`, nb_patients AS patients\n"
-            "FROM cohorte_demographie_region\n"
-            "ORDER BY pathologie, `département`, sexe, tranche_age_debut"
+            "SELECT table_cible        AS `table diffusée`,\n"
+            "       motif,\n"
+            "       cellules_calculees AS `calculées`,\n"
+            "       cellules_diffusees AS `diffusées`,\n"
+            "       cellules_masquees  AS `masquées`,\n"
+            "       seuil_k            AS `seuil k`\n"
+            "FROM k_anonymat_controle\n"
+            "ORDER BY `table diffusée`"
+        ),
+        "row": 25,
+        "col": 0,
+        "size_x": 24,
+        "size_y": 4,
+    },
+    {
+        "name": "Description détaillée des cohortes",
+        "description": (
+            "KPI 6 — Pathologie × tranche d'âge × sexe, sur le diagnostic PRINCIPAL, "
+            "c'est-à-dire le motif d'hospitalisation. Les cellules sous le seuil "
+            "apparaissent avec leur effectif masqué."
+        ),
+        "display": "table",
+        "sql": (
+            "SELECT code_cim10 AS `code`, libelle AS pathologie,\n"
+            "       tranche_age AS `tranche d'âge`, sexe,\n"
+            "       nb_patients AS patients,\n"
+            "       if(diffusable, '', 'masqué (< 5)') AS `diffusion`\n"
+            "FROM cohorte_demographie\n"
+            "ORDER BY pathologie, tranche_age_debut, sexe"
         ),
         "row": 29,
         "col": 0,
         "size_x": 24,
-        "size_y": 11,
+        "size_y": 14,
     },
 ]
 

@@ -1,13 +1,15 @@
--- La répartition par sexe diffusée doit être EXACTE, pas approchée.
+-- La répartition par sexe lisible dans `cohorte_demographie` doit être EXACTE.
 --
--- Sommer `cohorte_demographie` à travers les tranches d'âge donnerait un ratio calculé
--- sur les seules cellules ayant survécu au seuil : un biais de plusieurs points, sans
--- que rien ne le signale. Ce test compare la part de femmes publiée à celle de la
--- couche silver, pathologie par pathologie, et n'admet aucun écart.
+-- Le tableau de bord recherche en tire une « part de femmes » par pathologie, en
+-- sommant les tranches d'âge. Cette somme n'est légitime que si aucune cellule de la
+-- pathologie n'a été masquée (cf. `assert_pas_de_suppression_partielle`). Ce test
+-- vérifie le résultat plutôt que la condition : il compare la part publiée à celle
+-- recalculée depuis silver, pathologie par pathologie, et n'admet aucun écart.
 WITH publiee AS (
     SELECT code_cim10,
            round(100.0 * sumIf(nb_patients, sexe = 'F') / sum(nb_patients), 1) AS pct
-    FROM {{ ref('cohorte_demographie_sexe') }}
+    FROM {{ ref('cohorte_demographie') }}
+    WHERE diffusable
     GROUP BY code_cim10
 ),
 reelle AS (
@@ -16,6 +18,7 @@ reelle AS (
                        / uniqExact(d.patient_pseudo), 1) AS pct
     FROM {{ ref('fact_diagnostic') }} AS d
     INNER JOIN {{ ref('dim_patient') }} AS p USING (patient_pseudo)
+    WHERE d.is_principal
     GROUP BY code_cim10
 )
 SELECT publiee.code_cim10, publiee.pct AS pct_publie, reelle.pct AS pct_reel

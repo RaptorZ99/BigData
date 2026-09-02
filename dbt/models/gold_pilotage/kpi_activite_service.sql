@@ -35,12 +35,24 @@ par_jour AS
     FROM evenements
     GROUP BY service_code, jour
 ),
--- Le cumul exige une ligne par jour même sans mouvement : un service peut n'avoir ni
--- entrée ni sortie tout en gardant des patients hospitalisés.
+-- Le calendrier est reconstruit jour par jour entre la première et la dernière date
+-- observée, et non déduit des jours porteurs d'un mouvement : un jour sans aucune
+-- entrée ni sortie dans tout l'hôpital manquerait alors à la courbe alors que des
+-- centaines de patients y sont hospitalisés. C'est arrivé sur ce jeu de données.
+bornes AS
+(
+    SELECT min(jour) AS debut, max(jour) AS fin FROM par_jour
+),
+calendrier AS
+(
+    SELECT debut + n AS jour
+    FROM bornes
+    ARRAY JOIN range(toUInt32(dateDiff('day', debut, fin)) + 1) AS n
+),
 grille AS
 (
     SELECT c.jour AS jour, s.service_code AS service_code
-    FROM (SELECT DISTINCT jour FROM par_jour) AS c
+    FROM calendrier AS c
     CROSS JOIN (SELECT DISTINCT service_code FROM par_jour) AS s
 ),
 quotidien AS
@@ -72,6 +84,3 @@ FROM
                  ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
 ) AS q
 INNER JOIN {{ ref('dim_service') }} AS d ON d.service_code = q.service_code
--- Le filtre se fait ici et non en HAVING : `sejours_en_cours` est une fonction de
--- fenêtrage, elle n'existe pas encore au moment de l'agrégation.
-WHERE q.admissions + q.sorties + q.sejours_en_cours > 0

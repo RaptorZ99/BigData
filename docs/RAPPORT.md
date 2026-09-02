@@ -4,7 +4,9 @@
 tableaux de bord cloisonnés, avec pseudonymisation dès l'entrée de la zone de travail.
 
 > Tous les chiffres de ce dossier sont ceux de la dernière exécution, et chacun est
-> reproductible en une commande (§5.3). La mise en service et l'exploitation sont dans le
+> reproductible en une commande (§5.4). Les six indicateurs du sujet sont en outre
+> **vérifiés valeur par valeur contre la feuille de réponses** du jeu de données
+> corrigé (§5.2). La mise en service et l'exploitation sont dans le
 > [README](../README.md).
 
 | § | Question |
@@ -71,11 +73,11 @@ observations a une conséquence directe dans la chaîne.
 | `patients/` est redéposé **en intégralité** à chaque fois — 6 000 lignes, trois fois — et **118 patients changent de département** d'un dépôt à l'autre | Déduplication par `argMax` sur le jour d'ingestion : **18 000 lignes → 6 000 patients**, chacun dans sa version la plus récente. Un test vérifie que la dimension ne porte aucune version périmée |
 | ~2 % du monitoring porte FC **et** SpO2 aberrantes **sur les mêmes lignes** (0/500 bpm, 0/120 %), la température restant toujours valide | Signature d'un **capteur en panne**, pas d'un patient en détresse → rejet, et non alerte clinique |
 | 683 séjours sans date de sortie — et le mode de sortie n'est vide **que** dans ce cas | Patient encore hospitalisé → conservé, signalé, exclu de la seule DMS |
-| 68 séjours dont la sortie **précède** l'admission | Incohérence temporelle → rejet, et avec eux 528 relevés et 127 diagnostics, **en cascade** (§4) |
+| 68 séjours dont la sortie **précède** l'admission | Incohérence temporelle → le séjour quitte `fact_sejour`, mais **ni ses 127 diagnostics ni ses 520 relevés** : ce sont les horodatages qui sont faux, pas le reste (§4) |
 | 136 séjours admis **après un décès antérieur** du même patient | Anomalie de source → conservée et **marquée**, pour ne pas masquer un problème amont |
 | Aucun séjour ne chevauche le précédent du même patient ; 1,13 séjour par patient, 3 au plus | Le calcul de réadmission est néanmoins écrit pour résister aux chevauchements (§5.2) : la bonne définition ne dépend pas de la propreté du jeu |
-| 13 codes CIM-10, dont trois maladies rares portées par 8, 4 et 3 patients | Le seuil de 5 patients **retire deux pathologies entières** de la base de recherche (§7.2) |
-| Activité **inégale** entre services — 1 615 séjours en cardiologie, 212 en oncologie — et 49 % des admissions en mode urgence | Les indicateurs par service discriminent réellement : la DMS va de 2 à 9 jours (§5.1) |
+| 13 codes CIM-10, dont trois maladies rares portées par 8, 4 et 3 patients | Le seuil de 5 patients **masque l'effectif de deux pathologies entières** dans la base de recherche (§7.2) |
+| Activité **inégale** entre services — 1 601 séjours en cardiologie, 211 en oncologie — et 49 % des admissions en mode urgence | Les indicateurs par service discriminent réellement : la DMS va de 2 à 9 jours (§5.1) |
 | Le monitoring ne couvre que **REA** et **CARDIO** | Les alertes de constantes ne concernent que ces deux services — ce n'est pas une lacune de la chaîne |
 
 ---
@@ -117,8 +119,8 @@ dimensions conformées.
 | Fait | Grain | Dimensions | Lignes |
 |---|---|---|---:|
 | `fact_sejour` | un séjour | `dim_patient`, `dim_service` | 6 729 |
-| `fact_diagnostic` | un code CIM-10 par séjour | `dim_patient`, `dim_cim10` | 12 593 |
-| `fact_monitoring` | un relevé (`stay_id`, `ts`) | `dim_service` | 40 400 |
+| `fact_diagnostic` | un code CIM-10 par séjour | `dim_patient`, `dim_cim10` | 12 720 |
+| `fact_monitoring` | un relevé (`stay_id`, `ts`) | `dim_service` | 40 920 |
 
 Trois propriétés à retenir :
 
@@ -129,7 +131,10 @@ Trois propriétés à retenir :
   le *drill-across* (partir d'une alerte de constante et remonter au séjour).
 - **Les mesures non additives sont isolées.** `nb_patients` ne se somme jamais hors de son
   grain : la pyramide des âges lit une table au grain sexe × tranche, pas la table au grain
-  CIM-10 × sexe × tranche — sinon un patient à cinq diagnostics serait compté cinq fois.
+  CIM-10 × tranche × sexe — sinon un patient à cinq diagnostics serait compté cinq fois.
+- **Le patient et le service des deux faits secondaires sont résolus depuis le référentiel
+  de tous les séjours déposés**, pas depuis `fact_sejour`. Un séjour écarté pour ses
+  horodatages garde donc ses diagnostics et ses relevés (§4).
 
 Source PlantUML : [`data-model.puml`](data-model.puml). Un test
 (`tests/test_data_model.py`) échoue si une table est ajoutée sans figurer au diagramme : le
@@ -166,36 +171,48 @@ Trois natures de règles, à ne pas confondre :
 |---|---|---:|---:|---:|---:|
 | **Q1** Patients redéposés à chaque dépôt | Déduplication | 18 000 | 6 000 | 12 000 | — |
 | **Q2** Sortie antérieure à l'admission | Rejet | 6 797 | 6 729 | 68 | — |
-| **Q4** Constantes hors plage physiologique | Rejet | 41 778 | 40 400 | 858 | — |
-| **C1** Relevé dont le séjour est écarté | Cascade | 41 778 | 40 400 | 528 | — |
-| **C2** Diagnostic dont le séjour est écarté | Cascade | 12 720 | 12 593 | 127 | — |
+| **Q4** Constantes hors plage physiologique | Rejet | 41 778 | 40 920 | 858 | — |
 | **Q3** Séjour sans date de sortie | Signalement | 6 729 | 6 729 | 0 | 683 |
 | **Q5** Sortie datée, mode non renseigné | Signalement | 6 729 | 6 729 | 0 | 0 |
 | **Q7** Admission après un décès antérieur | Signalement | 6 729 | 6 729 | 0 | 136 |
-| **Q8** Relevé postérieur à la sortie | Contrôle | 40 400 | 40 400 | 0 | **0** |
+| **Q8** Relevé postérieur à la sortie | Contrôle | 40 920 | 40 920 | 0 | **0** |
+| **C1** Relevé rattaché à un séjour inconnu | Contrôle | 41 778 | 40 920 | 0 | **0** |
+| **C2** Diagnostic rattaché à un séjour inconnu | Contrôle | 12 720 | 12 720 | 0 | **0** |
 | **Q6** Formats et intégrité référentielle (5 règles) | Contrôle | — | — | 0 | **0** |
 
-Q4 et C1 se recoupent sur 8 relevés, qui portent les deux motifs : 1 378 lignes de monitoring
-écartées au total, chacune avec **tous** ses motifs.
+Avec les contrôles RGPD de la couche gold (§7), `ops.quality_report` compte **dix-huit
+lignes** pour seize règles — le k-anonymat est chiffré table diffusée par table diffusée.
+Elles sont recalculées à chaque run et affichées au bas du tableau de bord de pilotage.
 
-Avec les quatre contrôles RGPD de la couche gold (§7), `ops.quality_report` compte
-**dix-huit règles**, recalculées à chaque run et affichées au bas du tableau de bord de
-pilotage.
+**La décision qui structure toute la couche : un rejet ne vaut que pour la table où vit
+l'anomalie.**
 
-Trois décisions à défendre :
+Q2 constate que `discharge_ts` précède `admission_ts`. Ce qui est faux, ce sont **les
+horodatages** — pas l'existence du séjour, pas le patient, pas le service, pas les
+diagnostics qui y ont été codés, pas les constantes relevées au chevet, qui portent leur
+propre horodatage. Écarter en cascade tout ce qui s'y rattache reviendrait à faire
+disparaître une infection urinaire parce qu'une date de sortie a été mal saisie.
+
+Le coût de cette cascade a été mesuré : **quinze patients manquants** sur la prévalence des
+infections urinaires (2 219 au lieu de 2 234) et **520 relevés valides perdus**. Le séjour
+quitte donc `fact_sejour`, où sa durée serait inexploitable ; ses 127 diagnostics et ses 520
+relevés restent dans l'entrepôt et résolvent leur patient et leur service depuis le
+référentiel des 6 797 séjours déposés.
+
+Il ne reste par conséquent **aucune règle de cascade**. C1 et C2 sont devenus des contrôles
+attendus à zéro : un relevé ou un diagnostic référençant un séjour *absent du dépôt* n'aurait
+ni service ni patient résoluble, et serait écarté. Aucun n'existe.
+
+Deux autres décisions à défendre :
 
 - **Une sortie non renseignée n'est pas une anomalie** — c'est un patient encore
   hospitalisé. Les 683 séjours concernés sont conservés, marqués, et exclus du seul calcul
   où ils fausseraient le résultat : la DMS.
-- **Les cascades ne sont pas cosmétiques.** Un relevé dont le séjour parent est écarté ne
-  peut pas recevoir son code de service — ce code vient du séjour. Le garder produirait une
-  ligne inexploitable.
-- **Q8 vaut zéro, et c'est un résultat.** Les relevés postérieurs à la sortie appartiennent
-  tous aux 68 séjours dont la sortie précède l'admission — une telle sortie rend
-  mécaniquement tout relevé « postérieur ». Q8 n'est qu'un symptôme de Q2 : une fois ceux-ci
-  écartés en cascade, le contrôle passe au vert, et il est conservé pour cette raison. Même
-  logique pour Q5, à zéro sur ce jeu : c'est la règle qui fait l'entrepôt, pas le jeu de
-  données.
+- **Q8 vaut zéro, et c'est un résultat.** Le contrôle ne se prononce que sur les séjours
+  temporellement cohérents : sur les autres, c'est la date de sortie elle-même qui est
+  fausse, et tout relevé y paraîtrait « postérieur ». Sans ce périmètre, Q8 ne mesurerait
+  que Q2. Même logique pour Q5, à zéro sur ce jeu : c'est la règle qui fait l'entrepôt, pas
+  le jeu de données.
 
 **Traçabilité.** Chaque ligne de bronze et de silver porte son fichier d'origine, son jour
 de dépôt et son horodatage de traitement. Chaque exécution est enregistrée dans
@@ -206,24 +223,74 @@ de dépôt et son horodatage de traitement. Chaque exécution est enregistrée d
 ## 5. Les indicateurs
 
 Tous sont calculés dans l'entrepôt et exposés en tables agrégées. Les requêtes des tableaux
-de bord se réduisent à des `SELECT` : aucun calcul métier n'est enfoui dans Metabase.
+de bord se réduisent à des `SELECT` : aucun calcul métier n'est enfoui dans Metabase, et
+**aucune carte ne ré-agrège une table gold pour en changer le grain**. Si une vue manque,
+c'est un modèle qui manque.
 
-### 5.1 Définitions et résultats
+### 5.1 Les six indicateurs, et le grain auquel ils se lisent
 
-| Indicateur | Définition retenue | Résultat |
+| # | Indicateur | Grain publié | Table gold | Résultat |
+|---|---|---|---|---|
+| 1 | **DMS par service** | service | `kpi_dms_service` | 2,15 j aux urgences → 9,05 j en réanimation |
+| 2 | **Réadmission à 30 jours** | établissement | `kpi_readmissions_30j` | **780 / 6 729 = 11,59 %** |
+| 3 | **Activité des urgences** | jour d'admission | `kpi_urgences_jour` | 9 → 82 passages/j, 1 423 au total |
+| 4 | **Relevés en alerte** | jour | `kpi_alertes_jour` | **3 314 / 40 920 = 8,1 %** |
+| 5 | **Prévalence par pathologie** | code CIM-10 | `prevalence_pathologie` | 2 234 (infections urinaires) → 8 (amyotrophie spinale) |
+| 6 | **Description de cohorte** | pathologie × tranche d'âge × sexe | `cohorte_demographie` | 102 cellules, 89 chiffrées |
+
+**Le grain n'est pas un détail de mise en forme, c'est la question posée.** « Quels services
+immobilisent le plus longtemps un lit ? » est une question sur les services : la DMS se
+publie par service, pas par service et par jour de sortie — cette dernière vue existait, et
+elle se lisait comme du bruit. Même chose pour la réadmission, qui est un chiffre unique de
+qualité des soins : sa ventilation par service est utile, mais elle est une vue de plus,
+pas la définition de l'indicateur. À l'inverse, l'activité des urgences et la surveillance
+des constantes **sont** des séries temporelles : les publier au grain du jour est ce que
+demande la question.
+
+Chaque indicateur a donc exactement une table, à exactement un grain. Les vues
+complémentaires — `kpi_readmissions_service`, `kpi_alertes_service`, `kpi_activite_service`,
+`kpi_flux` — portent leur grain dans leur nom.
+
+Quelques définitions qui méritent d'être explicitées :
+
+| Indicateur | Choix de définition | Pourquoi |
 |---|---|---|
-| **DMS par service** | Moyenne de `sortie − admission`, par service et jour de sortie. **Séjours en cours exclus** — une durée partielle tirerait la moyenne vers le bas et simulerait une amélioration | **5,15 j** — de 2,15 aux urgences à 9,05 en réanimation |
-| **Activité des urgences** | Deux acceptions légitimes, **publiées côte à côte** : séjours dont le *service* est URGENCES, et admissions en *mode* urgence tous services. La seconde vaut 2,3× la première | 9 → 82 passages/j ; 18 → 158 admissions/j |
-| **Réadmission à 30 j** | Existe-t-il, pour le même patient, **une** admission dans les 30 jours suivant sa sortie ? Dénominateur : sorties **vivantes** — un patient décédé ne peut pas être réadmis | **647 / 4 499 = 14,4 %**, sur 89 % des sorties (§5.2) |
-| **Alertes de constantes** | FC hors [40 ; 130] **ou** SpO2 < 90 % **ou** T ≥ 38,5 °C. Distinct des rejets : une FC à 500 bpm est un capteur en panne, écartée en amont | **1 939 / 40 400 = 4,8 %** |
-| **Taille de cohorte** | Nombre de **patients distincts** portant un diagnostic — pas de séjours. Un patient hospitalisé trois fois compte une fois | de 8 (amyotrophie spinale) à 2 219 (infections urinaires) — 11 pathologies diffusées sur 13 |
-| **Prévalence** | Part des 5 949 patients ayant au moins un séjour. Dénominateur calculé comme scalaire indépendant, **jamais par jointure** entre deux faits | 37,3 % → 0,13 % |
+| **DMS** | Séjours **terminés** uniquement | Une durée partielle tirerait la moyenne vers le bas et simulerait une amélioration |
+| **Réadmission** | Existe-t-il, pour le même patient, **une** admission dans les 30 jours suivant la sortie ? Dénominateur : **tous** les séjours valides | Un séjour en cours ne peut pas être suivi d'une réadmission ; il compte pour 0 au numérateur mais reste au dénominateur — le taux décrit la population entière, pas un sous-ensemble choisi |
+| **Passage aux urgences** | Séjour dont le **service** est URGENCES | L'autre acception — admission en **mode** urgence, tous services — vaut 2,3× plus (18 → 158/j) et répond à une autre question ; elle est publiée dans `kpi_flux` |
+| **Alerte de constante** | FC < 50 ou > 100 bpm, SpO2 < 92 %, T° > 38,5 °C | Seuils de **vigilance**, volontairement plus serrés que les bornes de plausibilité (FC 20-250, SpO2 50-100, T° 30-45) qui écartent les capteurs en panne : une constante peut être parfaitement mesurée et cliniquement anormale |
+| **Taille de cohorte** | Patients **distincts**, tous rangs de diagnostic | Un patient hospitalisé trois fois compte une fois |
+| **Description de cohorte** | Diagnostic **principal** seulement | Décrire une cohorte, c'est décrire les patients pris en charge **pour** cette pathologie. Compter aussi les comorbidités gonfle le diabète de 843 à 2 177 patients — deux populations distinctes, deux questions distinctes |
 
-La DMS est ordonnée comme on l'attend cliniquement — urgences courtes, réanimation longue —
-et ne l'est que parce que les séjours en cours en sont exclus. Les seuils d'alerte sont des
-**hypothèses de travail**, à valider avec les équipes soignantes avant tout usage réel.
+### 5.2 Les chiffres sont vérifiés, pas seulement reproductibles
 
-### 5.2 Le taux de réadmission : l'indicateur qui demandait le plus de soin
+Un indicateur reproductible peut être faux : il suffit qu'il le soit à chaque exécution. Le
+jeu de données corrigé est fourni avec une **feuille de réponses**
+([`REPONSES-KPI-niveau1.pdf`](REPONSES-KPI-niveau1.pdf)) qui donne les valeurs attendues
+pour les six KPI et pour les trois points de contrôle bronze → silver.
+
+La suite d'intégration les ancre **valeur par valeur** :
+
+| Vérification | Valeurs comparées |
+|---|---:|
+| Points de contrôle silver (`dim_patient`, `fact_sejour`, `fact_monitoring`) | 3 |
+| KPI 1 — DMS par service (effectif, jours, heures) | 24 |
+| KPI 2 — Réadmission à 30 jours | 3 |
+| KPI 3 — Urgences par jour (28 jours × 3 mesures) | 84 |
+| KPI 4 — Alertes par jour (30 jours × 3 mesures) | 90 |
+| KPI 5 — Prévalence par pathologie, masquages compris | 13 |
+| KPI 6 — Cohorte pathologie × tranche × sexe | 102 |
+
+Ces vérifications ont trouvé trois défauts réels, tous corrigés :
+
+1. la **cascade de rejets** minorait la prévalence de quinze patients et perdait 520 relevés
+   (§4) ;
+2. les **seuils d'alerte** retenus au départ (FC 40-130, SpO2 < 90) étaient plus larges que
+   ceux du sujet et sous-comptaient les alertes de 40 % ;
+3. le **grain de publication** de la DMS et de la réadmission répondait à une autre question
+   que celle posée (§5.1).
+
+### 5.3 Le taux de réadmission : l'indicateur qui demandait le plus de soin
 
 **Définition robuste.** On teste **toutes** les admissions du patient, pas seulement la
 suivante. Sur ce jeu, aucun séjour ne se chevauche et les deux écritures donnent le même
@@ -231,55 +298,60 @@ compte ; sur des données réelles, l'admission « suivante » est souvent un s�
 commencé avant la sortie, qui masque la réadmission réelle. La bonne définition ne doit pas
 dépendre de la propreté du jeu.
 
-**Le piège : la fenêtre d'observation.** Une réadmission ne peut être constatée que si
+**La limite : la fenêtre d'observation.** Une réadmission ne peut être constatée que si
 l'entrepôt couvre la période où elle surviendrait. Les admissions s'arrêtent au 28 août ;
-les sorties s'étalent du 2 août au 14 septembre. Une sortie du 2 août dispose de 27 jours
+les sorties s'étalent du 2 août au 15 septembre. Une sortie du 2 août dispose de 27 jours
 d'observation, une sortie du 27 août d'un seul, une sortie de septembre d'**aucun**.
 
-| Fenêtre observable | Sorties | Réadmissions | Taux |
+| Fenêtre observable | Séjours | Réadmissions | Taux |
 |---|---:|---:|---:|
-| 22 à 27 jours | 471 | 120 | 25,5 % |
-| 15 à 21 jours | 1 306 | 287 | 22,0 % |
-| 8 à 14 jours | 1 406 | 194 | 13,8 % |
-| 1 à 7 jours | 1 316 | 46 | 3,5 % |
-| aucune — sortie après le 28 août | 552 | 0 | 0 % |
+| 22 à 27 jours | 568 | 154 | 27,1 % |
+| 15 à 21 jours | 1 557 | 332 | 21,3 % |
+| 8 à 14 jours | 1 676 | 231 | 13,8 % |
+| 1 à 7 jours | 1 568 | 63 | 4,0 % |
+| aucune — sortie après le 28 août | 677 | 0 | 0 % |
+| séjour encore en cours | 683 | 0 | 0 % |
 
 Le taux **croît avec la fenêtre** : c'est la signature d'une censure à droite, pas d'une
-tendance. Agréger tout donnerait 12,8 % ; publier un « taux à 30 jours » alors qu'aucune
-sortie n'a trente jours serait arithmétiquement exact et faux.
-
-**Ce que nous publions** : **647 réadmissions sur 4 499 sorties observables, soit 14,4 %**,
-avec la couverture affichée à côté (89,1 % des sorties ; fenêtre maximale 27 jours) et
-l'avertissement placé **au-dessus** des graphiques qu'il qualifie — un avertissement sous le
-chiffre qu'il corrige n'est pas lu. Ce 14,4 % est une **borne basse** : les sorties les mieux
-observées tournent autour de 25 %, et soixante jours d'historique permettraient de le
-confirmer (§8).
+tendance. Le **11,59 % publié est donc une borne basse** — les séjours les mieux observés
+tournent autour de 27 % — et l'avertissement est placé **au-dessus** des graphiques qu'il
+qualifie, un avertissement sous le chiffre qu'il corrige n'étant pas lu. Soixante jours
+d'historique permettraient de publier la valeur réelle (§8).
 
 ![Réadmissions et couverture de l'indicateur](img/pilotage-readmissions.jpg)
 
-Par service, le taux va de 10,7 % en réanimation à 18 % en oncologie et en pédiatrie — un
+Par service, le taux va de 6,6 % en réanimation à 14,7 % en chirurgie et en pédiatrie — un
 classement à lire avec la même précaution, les services n'ayant pas le même profil de sortie
-dans la fenêtre observable.
+dans la fenêtre observable. La somme des services reproduit exactement le taux global : un
+test le vérifie à chaque build.
 
-### 5.3 Retrouver n'importe quel chiffre
+### 5.4 Retrouver n'importe quel chiffre
 
 | Chiffre affiché | Valeur | Table gold | Expression déterminante |
 |---|---:|---|---|
 | Séjours pris en charge | 6 729 | `kpi_synthese` | `count()` sur `fact_sejour` |
-| Patients suivis | 5 949 | `kpi_synthese` | `uniqExact(patient_pseudo)` |
+| Patients suivis | 5 949 | `kpi_synthese` | `uniqExact(patient_pseudo)` sur `fact_sejour` |
 | DMS globale | 5,15 j | `kpi_synthese` | `avg(duree_jours)` **où** `discharge_ts IS NOT NULL` |
-| DMS par service | 2,15 → 9,05 j | `kpi_dms_service` | `sum(dms × nb_sorties) / sum(nb_sorties)` — moyenne **repondérée** ; une moyenne de moyennes serait fausse |
-| Réadmissions | 647 / 4 499 | `kpi_readmissions_30j` | `arrayExists(adm -> adm > discharge_ts AND adm <= discharge_ts + INTERVAL 30 DAY, admissions_du_patient)` |
-| Relevés en alerte | 1 939 / 40 400 | `kpi_alertes_monitoring` | `countIf(is_alert)` |
+| DMS par service | 2,15 → 9,05 j | `kpi_dms_service` | `avg(duree_jours)` **groupé par service** — la carte lit la table telle quelle |
+| Réadmissions | 780 / 6 729 | `kpi_readmissions_30j` | `arrayExists(adm -> adm > discharge_ts AND adm <= discharge_ts + INTERVAL 30 DAY, admissions_du_patient)` |
+| Relevés en alerte | 3 314 / 40 920 | `kpi_alertes_jour` | `countIf(is_alert)` |
 | Séjours en cours | 683 | `kpi_synthese` | `countIf(is_ongoing)` |
-| Pyramide des âges | total 5 949 | `cohorte_demographie_globale` | grain sexe × tranche : un patient compté **une** fois |
-| Pathologies diffusées | 11 / 13 | `cohorte_pathologie` | `HAVING uniqExact(patient_pseudo) >= 5` |
-| Cellules supprimées (k<5) | 178 / 1 083 | `k_anonymat_controle` | cellules calculées − cellules diffusées |
+| Population suivie | 6 000 | `prevalence_pathologie` | `count()` sur `dim_patient` — dénominateur de la prévalence |
+| Pyramide des âges | total 6 000 | `cohorte_demographie_globale` | grain sexe × tranche : un patient compté **une** fois |
+| Effectifs publiés | 11 / 13 pathologies | `prevalence_pathologie` | `nb_patients >= 5` — la ligne reste, l'effectif part |
+| Cellules masquées (k<5) | 13 / 102 | `k_anonymat_controle` | cellules calculées − cellules diffusées |
 
-Trois commandes rejouent l'ensemble : `make quality` (les 18 règles), `make test-e2e` (les
-66 invariants, dont chacun de ces chiffres), `uv run eds check-cloisonnement`. **La suite
-d'intégration ancre ces valeurs** : modifier une règle sans le vouloir fait échouer un test
-nommé, cela ne fait pas dériver un chiffre en silence.
+**Deux dénominateurs coexistent, et ce n'est pas une incohérence.** Le pilotage compte
+5 949 patients — ceux qui ont au moins un séjour dont les horodatages sont exploitables. La
+recherche en compte 6 000 — la population que le CHU a déposée. L'écart est exactement les
+51 patients dont *tous* les séjours ont été écartés par Q2 : leurs diagnostics restent
+comptés (§4), et les exclure de la population de référence fausserait la prévalence. Chaque
+table porte son dénominateur en colonne pour que la lecture ne dépende pas de cette note.
+
+Trois commandes rejouent l'ensemble : `make quality` (les 18 lignes du rapport qualité),
+`make test-e2e` (les 72 invariants, dont chacun de ces chiffres), `uv run eds
+check-cloisonnement`. **La suite d'intégration ancre ces valeurs** : modifier une règle sans
+le vouloir fait échouer un test nommé, cela ne fait pas dériver un chiffre en silence.
 
 ---
 
@@ -349,85 +421,104 @@ horaire empêchent une requête emballée de priver l'autre usage de son tableau
 Un test d'intégration vérifie qu'aucune colonne nommée `nir`, `nom`, `prenom`,
 `birth_date` ou `patient_id` n'existe dans **aucune** base de l'entrepôt.
 
-### 7.2 Petits effectifs : le seuil ne suffit pas
+### 7.2 Petits effectifs : masquer plutôt que supprimer
 
-Toute table diffusée à la recherche applique `HAVING uniqExact(patient_pseudo) >= 5`, et les
-âges sont publiés en tranches de dix ans. Le seuil mord dès le premier niveau : la
-mucoviscidose (4 patients) et la trisomie 21 (3) disparaissent de la cohorte par pathologie,
-de la prévalence et de toute vue démographique — elles existent dans le référentiel et en
-silver, nulle part dans la base des chercheurs. Au grain le plus fin — pathologie × sexe ×
-tranche d'âge × département — 178 cellules sur 1 083 tombent sous le seuil.
+Le seuil est de **cinq patients**, et les âges sont publiés en tranches de dix ans. Trois
+questions se posent alors : à quel grain l'appliquer, que faire de la cellule protégée, et
+que reste-t-il de déductible une fois la protection en place.
 
-**Et c'est là que le piège classique apparaît.** Publier une vue agrégée **et** sa
-décomposition, en appliquant le seuil séparément aux deux, laisse fuiter les cellules
-supprimées :
+**À quel grain.** Une première version publiait le grain pathologie × sexe × tranche d'âge ×
+**département**, avec la marge correspondante. Deux problèmes en sortaient. D'abord le coût :
+178 cellules sur 1 083 tombaient sous le seuil, et la parade contre la reconstruction par
+différence en retirait 66 marges sur 149 — 44 % de la table. Ensuite l'inutilité : huit
+départements sur des cohortes de quelques centaines de patients ne protègent pas grand-monde
+et ne renseignent personne.
+
+Le grain départemental a donc été **retiré**. Le sujet demande une distribution « par âge et
+sexe » : c'est le grain publié. Résultat mesuré : **89 cellules chiffrées au lieu de 83**,
+sur une table plus lisible, et sans la chaîne de tables intermédiaires qu'il fallait protéger
+les unes des autres.
+
+**Que faire de la cellule protégée.** Elle garde sa ligne, et perd son effectif :
+
+| Table diffusée | Cellules | Effectifs publiés | Effectifs masqués |
+|---|---:|---:|---:|
+| `prevalence_pathologie` | 13 | 11 | **2** |
+| `cohorte_demographie` | 102 | 89 | **13** |
+| `cohorte_demographie_globale` | 20 | 20 | 0 |
+
+Faire disparaître la ligne serait **moins** protecteur, pas plus. Le chercheur ne saurait pas
+qu'une valeur a été retirée, et le dispositif ne serait vérifiable nulle part. C'est la
+pratique du contrôle statistique de la divulgation — les instituts publient la cellule
+marquée « secret », ils ne la retirent pas. Ce qui est protégé, c'est **l'effectif**, et il
+ne sort pas de silver. La mucoviscidose (4 patients) et la trisomie 21 (3) apparaissent donc
+au tableau de bord, sans leur taille.
+
+**Ce qui reste déductible.** Publier une vue agrégée **et** sa décomposition, en appliquant
+le seuil séparément aux deux, laisse fuiter la cellule protégée :
 
 ```
-   total de la marge  −  somme des cellules fines diffusées  =  cellule cachée
+   total de la marge  −  somme des cellules diffusées  =  cellule cachée
 ```
 
-Une simple jointure entre nos deux tables, **avec le seul compte chercheur et sans aucun
-privilège particulier**, reconstituait la pathologie, le sexe, la tranche d'âge, le
-département et l'effectif exact des patients censés être protégés.
+L'attaque ne demande aucun privilège : une jointure entre deux tables, avec le seul compte
+chercheur, suffit. Elle avait été trouvée sur la version précédente, où elle reconstituait
+pathologie, sexe, tranche d'âge, département **et** effectif exact.
 
-Parade appliquée : la **suppression complémentaire** — une marge n'est diffusée que si toute
-sa décomposition l'est. Dès qu'une cellule fine tombe sous le seuil, la ligne agrégée
-disparaît aussi ; il n'y a plus rien à soustraire.
+Deux propriétés la neutralisent dans la version actuelle :
 
-| Vue | Calculées | Diffusées | Supprimées | Motif |
-|---|---:|---:|---:|---|
-| Cohorte par pathologie | 13 | 11 | **2** | seuil k ≥ 5 |
-| Grain fin (× département) | 1 083 | 905 | **178** | seuil k ≥ 5 |
-| Marge (pathologie × sexe × âge) | 149 | 83 | **66** | décomposition incomplète |
+1. **Aucune pathologie n'est publiée à moitié.** Les trois pathologies sous le seuil le sont
+   sur *toutes* leurs cellules ; les dix autres sur *aucune*. Il n'existe donc, pour aucune
+   pathologie, un reste à soustraire. Un test (`assert_pas_de_suppression_partielle`) échoue
+   si cette condition cesse de tenir — c'est un signal, pas une garantie structurelle, et le
+   rapport le dit plutôt que de l'affirmer plus fort qu'il ne peut.
+2. **Les deux tables ne décrivent pas la même population.** `prevalence_pathologie` compte
+   tous les rangs de diagnostic, `cohorte_demographie` le seul diagnostic principal : la
+   soustraction n'aurait pas de sens.
 
-Le coût est assumé, et il est élevé : 66 marges sur 149, soit 44 %. C'est le prix d'un grain
-à huit départements sur des cohortes de quelques centaines de patients — dès qu'une marge
-compte moins d'une soixantaine de patients, l'un de ses départements passe presque sûrement
-sous le seuil. Une donnée dont la diffusion permettrait d'en déduire une autre ne se diffuse
-pas, même agrégée ; c'est le grain départemental lui-même qu'il faudrait revoir (§8).
-
-**Une table protégée ne se ré-agrège pas — et c'est le piège suivant.** Le graphique de part
-de femmes sommait les tranches d'âge de la table protégée. L'opération est pourtant licite au
-sens de l'additivité : un patient n'appartient qu'à une tranche. Mais les cellules qui
-manquent à cette table ne manquent pas au hasard, ce sont les plus petites — et le ratio
-calculé sur ce qui reste dérivait de **neuf points** : 71,5 % de femmes pour les infections
-urinaires, contre 62,5 % en réalité. Un chiffre faux, présenté sans le moindre signe
-extérieur d'erreur.
+**Un corollaire, découvert à la dure.** Le graphique de part de femmes sommait les tranches
+d'âge d'une table déjà filtrée par le seuil. L'opération est licite au sens de l'additivité
+— un patient n'appartient qu'à une tranche. Mais les cellules qui manquaient ne manquaient
+pas au hasard, c'étaient les plus petites, et le ratio dérivait de **neuf points** : 71,5 %
+de femmes pour les infections urinaires contre 62,5 % en réalité. Un chiffre faux, sans le
+moindre signe extérieur d'erreur.
 
 La règle qui en découle est plus forte que « ne pas sommer une mesure non additive » : **un
-agrégat se calcule à son propre grain, jamais à partir d'une table filtrée.** La répartition
-par sexe a donc sa table, `cohorte_demographie_sexe`, bâtie depuis silver puis soumise au
-seuil — et à la suppression complémentaire, puisque `cohorte_pathologie` publie l'effectif
-total et livrerait la cellule manquante par soustraction. Un test compare chaque pourcentage
-publié à la vérité de silver et n'admet aucun écart.
+agrégat ne se calcule jamais à partir d'une table filtrée.** La somme est redevenue légitime
+ici précisément parce qu'aucune pathologie n'est publiée à moitié — et un second test
+(`assert_part_de_femmes_non_biaisee`) compare chaque pourcentage publié à la vérité de
+silver, sans tolérance.
 
 ![Protection des petits effectifs et son effet mesuré](img/recherche-k-anonymat.jpg)
 
-Deux précautions en découlent : la table de travail qui porte les effectifs sous le seuil vit
-en `eds_silver`, **hors de portée des comptes de restitution** ; et **l'attaque est rejouée à
-chaque exécution** de la suite d'intégration, qui exige qu'elle ne rende rien.
-
 ### 7.3 Contrôles automatiques
 
-Quatre règles RGPD tournent à chaque run, chiffrées dans `ops.quality_report` au même titre
-que les contrôles de qualité :
+Les règles RGPD tournent à chaque run, chiffrées dans `ops.quality_report` au même titre que
+les contrôles de qualité :
 
 | Règle | Ce qu'elle mesure | Attendu |
 |---|---|---|
-| `RGPD_k_anonymat` | Cellules retirées par le seuil, au grain le plus fin | 178 / 1 083 |
-| `RGPD_suppression_complementaire` | Marges retirées, décomposition incomplète | 66 / 149 |
-| `RGPD_cohortes_diffusees` | Cohortes par pathologie effectivement diffusées | 11 / 13 |
+| `RGPD_k_anonymat` · `prevalence_pathologie` | Cohortes dont l'effectif est masqué | 2 / 13 |
+| `RGPD_k_anonymat` · `cohorte_demographie` | Cellules dont l'effectif est masqué | 13 / 102 |
+| `RGPD_k_anonymat` · `cohorte_demographie_globale` | Idem, pyramide des âges | 0 / 20 |
 | `RGPD_minimisation` | Colonnes identifiantes **ou pseudonyme** dans la base recherche | **0** |
+
+S'y ajoutent, côté dbt, quatre tests qui échouent le build : aucun effectif publié sous le
+seuil, cohérence entre le drapeau `diffusable` et la présence de l'effectif, aucune
+pathologie publiée à moitié, et aucune part de femmes biaisée.
 
 ### 7.4 Registre des hypothèses
 
 Ce que nous avons tranché sans que le sujet le fasse, et qu'il faudrait valider :
 
-1. Les seuils d'alerte des constantes (§5.1) ;
-2. l'exclusion des patients décédés du dénominateur des réadmissions ;
+1. Les seuils d'alerte des constantes (§5.1), repris de la feuille de réponses mais non
+   validés cliniquement ;
+2. le maintien des séjours décédés et en cours au dénominateur des réadmissions — le taux
+   décrit alors la population entière, pas un sous-ensemble choisi ;
 3. l'exclusion des séjours en cours du calcul de la DMS ;
-4. le maintien des séjours chevauchants, jugés artefacts du jeu de données ;
-5. le seuil k = 5, retenu d'après l'énoncé — certaines autorités en recommandent un plus élevé.
+4. la restriction de la description de cohorte au diagnostic **principal** (§5.1) ;
+5. le retrait du grain départemental des vues de recherche (§7.2) ;
+6. le seuil k = 5, retenu d'après l'énoncé — certaines autorités en recommandent un plus élevé.
 
 ---
 
@@ -441,8 +532,10 @@ aucune population. Les cohortes valident la chaîne de traitement, **pas** une c
 
 | Limite | Portée | Recommandation |
 |---|---|---|
-| Aucune sortie n'a 30 jours d'observation (27 au plus) | Le taux de réadmission publié est une borne basse (§5.2) | Attendre **60 jours d'historique** avant de publier cet indicateur en production |
-| Suppression complémentaire coûteuse : 44 % des marges | Le grain départemental protège peu de patients, retire beaucoup de lignes, et rend la table inexploitable pour tout ré-agrégat (§7.2) | Publier le grain fin par **région** plutôt que par département, ou le réserver à un accès sur convention |
+| Aucun séjour n'a 30 jours d'observation (27 au plus) | Le taux de réadmission publié, 11,59 %, est une borne basse : les séjours les mieux observés sont à 27 % (§5.3) | Attendre **60 jours d'historique** avant de publier cet indicateur en production |
+| La charge des services s'effondre après le 28 août | Ce n'est pas une baisse d'activité, c'est la fin des admissions déposées | La courbe le signale en description ; en production le problème disparaît |
+| Le grain départemental a été retiré des vues de recherche | Une analyse territoriale n'est plus possible depuis le tableau de bord (§7.2) | La rouvrir par **région** plutôt que par département, ou la réserver à un accès sur convention |
+| Absence de suppression partielle : une propriété du jeu, pas du code | Si un futur dépôt publiait une pathologie à moitié, la somme par sexe redeviendrait biaisée (§7.2) | Le test `assert_pas_de_suppression_partielle` casse le build — traiter l'alerte, ne pas la contourner |
 | Âge dérivé de la seule année | Approximation d'un an au plus | Conséquence assumée de la minimisation — ne pas revenir sur `birth_year` pour la corriger |
 | Monitoring limité à REA et CARDIO | Les alertes ne couvrent pas tout l'hôpital | Étendre l'équipement, ou afficher la couverture à côté du taux |
 | Vingt-huit jours de dépôt | Volumétrie de démonstration | Le banc d'essai (`benchmarks/`) valide 20 M de relevés par le chemin réel du pipeline |

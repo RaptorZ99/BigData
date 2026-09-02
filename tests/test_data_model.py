@@ -53,9 +53,9 @@ def test_les_tables_ops_sont_au_diagramme(entites: set[str], table: str):
 def test_les_tables_derivees_sont_au_diagramme(entites: set[str], base: str, table: str):
     """Silver et gold : le diagramme doit suivre chaque ajout de table.
 
-    C'est exactement ce qui avait dérivé : `cellules_demographie` (la table de
-    travail du k-anonymat) et `k_anonymat_controle` (sa preuve chiffrée)
-    existaient dans l'entrepôt et dans le rapport, mais pas sur le schéma.
+    C'est exactement ce qui avait dérivé : `k_anonymat_controle` (la preuve
+    chiffrée du dispositif) existait dans l'entrepôt et dans le rapport, mais pas
+    sur le schéma.
     """
     assert table in entites, (
         f"{base}.{table} est déclarée dans EXPECTED_TABLES mais absente de "

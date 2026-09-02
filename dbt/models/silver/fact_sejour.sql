@@ -8,15 +8,6 @@
 --   Q3  discharge_ts vide                  → CONSERVÉ (séjour en cours, légitime)
 --   Q5  discharge_mode vide                → CONSERVÉ en NULL
 --   Q7  admission après un décès antérieur → FLAG (signalé, non rejeté)
-WITH valides AS
-(
-    SELECT *
-    FROM {{ ref('stg_sejours') }}
-    -- Q2 : on écarte les incohérences temporelles.
-    -- Q3 : un séjour sans date de sortie est conservé (patient hospitalisé).
-    WHERE discharge_ts IS NULL
-       OR discharge_ts >= admission_ts
-)
 SELECT
     stay_id,
     patient_pseudo,
@@ -33,9 +24,9 @@ SELECT
     -- Mesures. NULL tant que le séjour est en cours : une durée partielle
     -- fausserait la DMS, il vaut mieux ne pas la compter du tout.
     if(discharge_ts IS NULL, NULL,
-       dateDiff('hour', admission_ts, discharge_ts))       AS duree_heures,
+       dateDiff('minute', admission_ts, discharge_ts) / 60.0)   AS duree_heures,
     if(discharge_ts IS NULL, NULL,
-       round(dateDiff('minute', admission_ts, discharge_ts) / 1440.0, 3)) AS duree_jours,
+       dateDiff('minute', admission_ts, discharge_ts) / 1440.0) AS duree_jours,
 
     -- Flags métier.
     discharge_ts IS NULL                                   AS is_ongoing,
@@ -55,4 +46,5 @@ SELECT
     source_file                                            AS _source_file,
     last_ingest_date                                       AS _ingest_date,
     now()                                                  AS _built_at
-FROM valides
+FROM {{ ref('stg_sejours') }}
+WHERE est_coherent

@@ -112,6 +112,7 @@ package "eds_silver — constellation : 3 étoiles (1 par fait) sur dimensions c
     --
     <i>flags</i>
     alert_hr / alert_spo2 / alert_temp
+    <i>FC < 50 ou > 100 · SpO2 < 92 · T° > 38,5</i>
     is_alert · is_after_discharge : Bool
   }
 
@@ -133,7 +134,7 @@ package "eds_silver — constellation : 3 étoiles (1 par fait) sur dimensions c
     is_post_mortem_anomaly : Bool
   }
 
-  entity "**fact_diagnostic**\n<i>grain : 1 diagnostic posé sur 1 séjour</i>" as fact_diagnostic {
+  entity "**fact_diagnostic**\n<i>grain : 1 code CIM-10 posé sur 1 séjour</i>" as fact_diagnostic {
     # patient_pseudo <<FK dim_patient>>
     # code_cim10 <<FK dim_cim10>>
     stay_id <<DD>>
@@ -160,19 +161,9 @@ package "eds_silver — constellation : 3 étoiles (1 par fait) sur dimensions c
     ..colonnes d'origine + lignage..
   }
 
-  entity "**cellules_demographie**\n<i>table de travail du k-anonymat</i>" as s_cellules #ECEFF1 {
-    grain : CIM-10 × sexe × tranche
-    ....... × département
-    --
-    nb_patients · diffusable : Bool
-    --
-    <b>JAMAIS diffusée</b> : elle porte
-    les effectifs <b>sous</b> le seuil.
-    Rangée en silver, hors de portée
-    des comptes de restitution.
-  }
+  note "<b>stay_id = dimension dégénérée (DD)</b> portée par les 3 faits :\nelle relie logiquement les étoiles (drill-across)\n<b>sans aucune jointure fact-to-fact</b>.\nFK propagées au build silver depuis le référentiel des séjours\n(patient_pseudo → fact_diagnostic, service_code → fact_monitoring)." as n_dd
 
-  note "<b>stay_id = dimension dégénérée (DD)</b> portée par les 3 faits :\nelle relie logiquement les étoiles (drill-across)\n<b>sans aucune jointure fact-to-fact</b>.\nFK propagées au build silver depuis le séjour\n(patient_pseudo → fact_diagnostic, service_code → fact_monitoring)." as n_dd
+  note "<b>Un rejet ne vaut que pour la table où vit l'anomalie.</b>\nQ2 invalide les HORODATAGES du séjour, pas le séjour :\nfact_sejour l'écarte (6 729 / 6 797), mais ses diagnostics\net ses relevés restent dans l'entrepôt — ils résolvent leur\npatient et leur service depuis le référentiel complet.\nLa cascade coûtait 15 patients de prévalence et 528 relevés." as n_rejet
 }
 
 ' Étoile 1 — fact_sejour (DMS, urgences, réadmissions, activité)
@@ -187,35 +178,56 @@ dim_cim10 ||--o{ fact_diagnostic : code_cim10
 ' ══════════════════════ GOLD PILOTAGE ═══════════════════════
 package "eds_gold_pilotage — user SQL : chu_pilotage (SELECT only)" as gold_p #E3F2FD {
 
-  entity "**kpi_dms_service**" as g_dms {
-    grain : service × jour de sortie
+  entity "**kpi_dms_service**\n<i>KPI 1</i>" as g_dms {
+    grain : <b>service</b>
     --
-    nb_sorties · dms_jours
+    nb_sejours · dms_jours
+    dms_heures · médiane / min / max
   }
 
-  entity "**kpi_urgences_jour**" as g_urg {
-    grain : jour
+  entity "**kpi_urgences_jour**\n<i>KPI 3</i>" as g_urg {
+    grain : <b>jour d'admission</b>
     --
-    nb_passages_service_urgences
-    nb_admissions_mode_urgence
+    nb_passages
+    nb_encore_presents
+    duree_moy_heures
   }
 
-  entity "**kpi_readmissions_30j**" as g_readm {
-    grain : service × jour de sortie
+  entity "**kpi_readmissions_30j**\n<i>KPI 2</i>" as g_readm {
+    grain : <b>établissement</b> (1 ligne)
     --
-    sorties_eligibles
-    readmissions_30j · taux
+    nb_sejours
+    nb_readmissions_30j
+    taux_readmission_30j_pct
     --
-    <b>jours_observables</b> : 0 → la ligne
-    ne peut rien constater
-    <b>fenetre_complete</b> : 30 j couverts
+    <i>borne basse : la fenêtre de 30 j</i>
+    <i>n'est jamais complète</i>
   }
 
-  entity "**kpi_alertes_monitoring**" as g_alert {
-    grain : jour × service
+  entity "**kpi_readmissions_service**" as g_readm_svc {
+    grain : <b>service</b>
     --
-    nb_releves · pct_alertes
-    {field} nb_alertes (FC / SpO2 / T°)
+    nb_sejours · nb_readmissions_30j
+    taux_readmission_30j_pct
+    --
+    <i>se réconcilie avec le global</i>
+    <i>par construction (test dbt)</i>
+  }
+
+  entity "**kpi_alertes_jour**\n<i>KPI 4</i>" as g_alert_j {
+    grain : <b>jour</b>
+    --
+    nb_releves · nb_alertes
+    taux_alertes_pct
+    {field} détail FC / SpO2 / T°
+  }
+
+  entity "**kpi_alertes_service**" as g_alert_svc {
+    grain : <b>service</b>
+    --
+    nb_releves · nb_alertes
+    {field} détail FC / SpO2 / T°
+    nb_sejours_monitores
   }
 
   entity "**kpi_activite_service**" as g_act {
@@ -223,12 +235,12 @@ package "eds_gold_pilotage — user SQL : chu_pilotage (SELECT only)" as gold_p 
     --
     admissions · sorties
     deces · sejours_en_cours
-    <i>cumul sur le calendrier,</i>
-    <i>pas de produit croisé</i>
+    <i>cumul sur un calendrier</i>
+    <i>reconstruit jour par jour</i>
   }
 
   entity "**kpi_flux**" as g_flux {
-    grain : jour × mode
+    grain : jour × sens × mode
     --
     répartition admission_mode
     et discharge_mode
@@ -249,10 +261,8 @@ package "eds_gold_pilotage — user SQL : chu_pilotage (SELECT only)" as gold_p 
     {field} (séjours, DMS, réadmissions,
     alertes, séjours en cours)
     --
-    nb_sorties_observables
-    pct_sorties_observables
-    <i>le taux ne se lit jamais</i>
-    <i>sans sa couverture</i>
+    <i>chaque valeur est reprise telle</i>
+    <i>quelle d'une autre table gold</i>
   }
 
   entity "**kpi_ingestion**" as g_ing {
@@ -266,54 +276,36 @@ package "eds_gold_pilotage — user SQL : chu_pilotage (SELECT only)" as gold_p 
 ' ══════════════════════ GOLD RECHERCHE ══════════════════════
 package "eds_gold_recherche — user SQL : chu_recherche (SELECT only)" as gold_r #F3E5F5 {
 
-  entity "**cohorte_pathologie**" as g_cohorte {
+  entity "**prevalence_pathologie**\n<i>KPI 5</i>" as g_preval {
     grain : code CIM-10
     --
     libelle · nb_patients · nb_sejours
-    nb_patients_diag_principal
-    nb_diagnostics_principaux
-    nb_diagnostics_associes
+    prevalence_pct · nb_patients_total
+    <b>diffusable</b> : Bool
+    --
+    <i>tous rangs de diagnostic</i>
+    <i>13 lignes, 11 effectifs publiés</i>
   }
 
-  entity "**prevalence_pathologie**" as g_preval {
-    grain : code CIM-10
+  entity "**cohorte_demographie**\n<i>KPI 6</i>" as g_demo {
+    grain : CIM-10 × tranche d'âge
+    ....... × sexe
     --
-    libelle · nb_patients
-    nb_patients_total
-    prevalence_pct
+    nb_patients · <b>diffusable</b> : Bool
+    --
+    <i>diagnostic PRINCIPAL uniquement</i>
+    <i>= motif d'hospitalisation</i>
+    <i>102 cellules, 89 effectifs publiés</i>
   }
 
   entity "**cohorte_demographie_globale**" as g_demo_glob {
     grain : sexe × tranche d'âge
     --
     {field} nb_patients (comptés une fois)
+    <b>diffusable</b> : Bool
+    --
     <i>mesure non additive : ce grain</i>
     <i>ne se dérive pas des autres</i>
-  }
-
-  entity "**cohorte_demographie**" as g_demo {
-    grain : CIM-10 × sexe
-    ....... × tranche d'âge (10 ans)
-    --
-    nb_patients
-    <i>marge diffusée seulement si TOUTE</i>
-    {field} <i>sa décomposition l'est (66/149 retirées)</i>
-  }
-
-  entity "**cohorte_demographie_sexe**" as g_demo_sexe {
-    grain : CIM-10 × sexe
-    --
-    nb_patients
-    <i>la part de femmes se calcule ICI :</i>
-    {field} <i>sommer g_demo la biaiserait de 9 points</i>
-  }
-
-  entity "**cohorte_demographie_region**" as g_demo_reg {
-    grain : CIM-10 × sexe × tranche
-    ....... × département
-    --
-    nb_patients
-    <i>preuve k ≥ 5 : 178 cellules/1 083 supprimées</i>
   }
 
   entity "**k_anonymat_controle**\n<i>preuve du dispositif</i>" as g_kanon {
@@ -321,10 +313,10 @@ package "eds_gold_recherche — user SQL : chu_recherche (SELECT only)" as gold_
     --
     cellules_calculees
     cellules_diffusees
-    cellules_supprimees · seuil_k
+    cellules_masquees · seuil_k
     --
     <i>dit COMBIEN de cellules sont</i>
-    <i>retirées, jamais lesquelles</i>
+    <i>masquées, jamais lesquelles</i>
   }
 }
 
@@ -361,7 +353,7 @@ package "ops — traçabilité & exploitation (chu_etl uniquement)" as ops #FFF3
 ' ══════════════════ FLUX ENTRE COUCHES ══════════════════════
 bronze -[#37474F,bold]down-> silver : <b>SQL in-engine</b> : dédup argMax\nrègles qualité Q1→Q8 · rejets tracés
 silver -[#1565C0,bold]down-> gold_p : agrégation KPI
-silver -[#6A1B9A,bold]down-> gold_r : agrégation cohortes\n<b>filtre k ≥ 5 + suppression complémentaire</b>
+silver -[#6A1B9A,bold]down-> gold_r : agrégation cohortes\n<b>masquage des cellules < 5 patients</b>
 silver .[#EF6C00]down.> ops : comptages par règle
 
 ' ═══════════════ AIDES AU PLACEMENT (invisibles) ═════════════
@@ -381,29 +373,29 @@ fact_monitoring -[hidden]right- fact_sejour
 fact_sejour -[hidden]right- fact_diagnostic
 fact_monitoring -[hidden]down- s_monitoring_rejets
 s_monitoring_rejets -[hidden]right- s_sejours_rejets
-s_sejours_rejets -[hidden]right- s_cellules
-s_cellules -[hidden]right- n_dd
+s_sejours_rejets -[hidden]right- n_rejet
+n_rejet -[hidden]right- n_dd
 fact_diagnostic -[hidden]down- n_dd
 
 ' forcer la rangée gold/ops SOUS la couche silver
-s_monitoring_rejets -[hidden]down- g_cohorte
+s_monitoring_rejets -[hidden]down- g_preval
 s_sejours_rejets -[hidden]down- g_dms
 
-' gold recherche : grille 2 × 2 (alignée sur les rangées de gold_pilotage)
-g_cohorte -[hidden]right- g_preval
-g_cohorte -[hidden]down- g_demo_glob
-g_demo_glob -[hidden]right- g_demo
-g_demo -[hidden]down- g_demo_reg
-g_demo_reg -[hidden]right- g_kanon
+' gold recherche : grille 2 × 2
+g_preval -[hidden]right- g_demo
+g_preval -[hidden]down- g_demo_glob
+g_demo_glob -[hidden]right- g_kanon
 
-' gold pilotage : grille 4 + 3
+' gold pilotage : grille 4 + 4 + 3
 g_dms -[hidden]right- g_urg
 g_urg -[hidden]right- g_readm
-g_readm -[hidden]right- g_alert
-g_dms -[hidden]down- g_act
+g_readm -[hidden]right- g_readm_svc
+g_dms -[hidden]down- g_alert_j
+g_alert_j -[hidden]right- g_alert_svc
+g_alert_svc -[hidden]right- g_act
 g_act -[hidden]right- g_flux
-g_flux -[hidden]right- g_qual
-g_act -[hidden]down- g_synth
+g_alert_j -[hidden]down- g_qual
+g_qual -[hidden]right- g_synth
 g_synth -[hidden]right- g_ing
 
 ' ops : colonne
@@ -421,8 +413,10 @@ legend bottom
   Pas de dim_date physique : les fonctions temporelles ClickHouse (toDate, tranches) jouent ce rôle — choix documenté au rapport.
   <b>Lignage</b> — les 14 tables de bronze et silver, dimensions comprises, portent : _source_file · _ingest_date · horodatage de traitement.
   <b>Idempotence</b> — bronze : MergeTree partitionné par _ingest_date → rejeu d'un jour = DROP PARTITION + INSERT.
-  <b>RGPD</b> — gold recherche : agrégats uniquement, HAVING uniqExact(patient_pseudo) >= 5 par cellule, âges en tranches, et <b>suppression complémentaire</b>
-  (une marge n'est diffusée que si toute sa décomposition l'est : sinon la cellule cachée se retrouve par soustraction) ;
+  <b>Qualité</b> — un rejet ne vaut que pour la table où vit l'anomalie : les 68 séjours aux horodatages incohérents quittent fact_sejour, mais leurs
+  diagnostics et leurs relevés restent — ils résolvent patient et service depuis le référentiel des 6 797 séjours déposés, jamais depuis fact_sejour.
+  <b>RGPD</b> — gold recherche : agrégats uniquement, âges en tranches de 10 ans, et <b>masquage</b> de toute cellule de moins de 5 patients (la ligne reste,
+  l'effectif part : le chercheur sait qu'une valeur est protégée, et k_anonymat_controle en donne le compte) ;
   patient_pseudo = HMAC-SHA256(sel secret, IPP) calculé à l'entrée du lake — nir/nom/prénom n'existent nulle part ici.
   <b>Cloisonnement</b> — un user SQL par base gold (SELECT only), profil « restitution » (readonly = 2, temps et mémoire bornés) et quota horaire :
   le GRANT protège la confidentialité, les bornes la disponibilité face au SQL libre de Metabase. Ni bronze, ni silver, ni ops ne leur sont accessibles.

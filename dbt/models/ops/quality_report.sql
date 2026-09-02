@@ -15,6 +15,11 @@
 --   * CONTRÔLE     — vérification attendue à zéro, dont le passage au vert est en soi
 --                    l'information.
 --
+-- Un rejet ne vaut que pour la table où vit l'anomalie : un séjour aux horodatages
+-- incohérents est écarté de `fact_sejour`, mais ses diagnostics et ses relevés restent
+-- dans l'entrepôt. Voir l'encadré de `stg_sejours`. C'est pourquoi aucune règle
+-- « cascade » n'apparaît plus ici : il n'y en a plus.
+--
 -- Pourquoi un modèle dbt, et pourquoi `incremental` :
 --   * modèle → le graphe garantit qu'il s'exécute APRÈS tout ce qu'il compte. Dans la
 --     version SQL, cet ordre reposait sur le préfixe numérique des fichiers et sur une
@@ -29,9 +34,9 @@
 -- (UInt64) et une soustraction (Int64) produirait un `Variant`, type sur lequel un
 -- simple `sum()` échoue — et cette table est recopiée dans la base de pilotage.
 --
--- Deux règles gold lisent `system.columns` ou agrègent des tables sans les référencer
--- par une colonne : le graphe ne peut pas le deviner, on l'y force.
--- depends_on: {{ ref('cohorte_demographie_region') }}
+-- La règle de minimisation lit `system.columns` sans référencer aucun modèle : le
+-- graphe ne peut pas deviner qu'elle doit attendre la couche recherche, on l'y force.
+-- depends_on: {{ ref('cohorte_demographie') }}
 -- depends_on: {{ ref('cohorte_demographie_globale') }}
 -- depends_on: {{ ref('prevalence_pathologie') }}
 
@@ -61,7 +66,7 @@ SELECT
     toInt64((SELECT count() FROM {{ ref('fact_sejour') }})),
     toInt64((SELECT count() FROM {{ ref('sejours_rejets') }})),
     toInt64(0),
-    'Lignes conservées et consultables dans eds_silver.sejours_rejets',
+    'Seuls les horodatages sont invalides : diagnostics et relevés du séjour restent dans l''entrepôt',
     now()
 
 UNION ALL
@@ -80,29 +85,30 @@ SELECT
     now()
 
 UNION ALL
--- ── C1 · REJET en cascade ───────────────────────────────────────────────────
+-- ── C1 · CONTRÔLE (attendu à zéro) ──────────────────────────────────────────
 SELECT
-    '{{ run_id }}', 'silver', 'fact_monitoring', 'C1_cascade_monitoring',
-    'Relevés écartés en cascade : séjour parent invalide ou inconnu',
+    '{{ run_id }}', 'silver', 'fact_monitoring', 'C1_sejour_inconnu',
+    'Contrôle : relevés rattachés à un séjour absent du dépôt',
     toInt64((SELECT uniqExact((stay_id, ts)) FROM {{ source('bronze', 'monitoring') }})),
     toInt64((SELECT count() FROM {{ ref('fact_monitoring') }})),
-    toInt64((SELECT countIf(reject_reason LIKE '%parent_stay_rejected%')
+    toInt64((SELECT countIf(reject_reason LIKE '%sejour_inconnu%')
              FROM {{ ref('monitoring_rejets') }})),
     toInt64(0),
-    'Nécessaire à la propagation de service_code depuis le séjour',
+    'Sans séjour parent, le service du relevé n''est pas résoluble',
     now()
 
 UNION ALL
--- ── C2 · REJET en cascade ───────────────────────────────────────────────────
+-- ── C2 · CONTRÔLE (attendu à zéro) ──────────────────────────────────────────
 SELECT
-    '{{ run_id }}', 'silver', 'fact_diagnostic', 'C2_cascade_diagnostics',
-    'Diagnostics écartés en cascade : séjour parent invalide ou inconnu',
-    toInt64((SELECT count() FROM {{ source('bronze', 'diagnostics') }})),
+    '{{ run_id }}', 'silver', 'fact_diagnostic', 'C2_sejour_inconnu',
+    'Contrôle : diagnostics rattachés à un séjour absent du dépôt',
+    -- Lus au grain du fait (séjour, code), celui de la déduplication.
+    toInt64((SELECT uniqExact((stay_id, code_cim10)) FROM {{ source('bronze', 'diagnostics') }})),
     toInt64((SELECT count() FROM {{ ref('fact_diagnostic') }})),
-    toInt64((SELECT count() FROM {{ source('bronze', 'diagnostics') }})
+    toInt64((SELECT uniqExact((stay_id, code_cim10)) FROM {{ source('bronze', 'diagnostics') }})
           - (SELECT count() FROM {{ ref('fact_diagnostic') }})),
     toInt64(0),
-    'Inclut la déduplication éventuelle sur (séjour, code, type)',
+    'Sans séjour parent, le patient du diagnostic n''est pas résoluble',
     now()
 
 UNION ALL
@@ -127,7 +133,7 @@ SELECT
     toInt64(0),
     -- On restreint aux séjours effectivement terminés : un séjour en cours n'a pas
     -- encore de mode de sortie, et il est déjà compté par la règle Q3. Sans ce filtre,
-    -- les 683 séjours ouverts seraient signalés deux fois.
+    -- les séjours ouverts seraient signalés deux fois.
     toInt64((SELECT countIf(discharge_ts IS NOT NULL AND discharge_mode IS NULL)
              FROM {{ ref('fact_sejour') }})),
     'Information manquante à la source : conservée en NULL, jamais inventée',
@@ -154,7 +160,7 @@ SELECT
     toInt64((SELECT count() FROM {{ ref('fact_monitoring') }})),
     toInt64(0),
     toInt64((SELECT countIf(is_after_discharge) FROM {{ ref('fact_monitoring') }})),
-    'Attendu à 0 : ces relevés appartenaient aux séjours temporellement incohérents',
+    'Évalué sur les seuls séjours temporellement cohérents',
     now()
 
 UNION ALL
@@ -224,37 +230,19 @@ SELECT
     now()
 
 UNION ALL
--- ═══ Couche gold : ce que la diffusion a coûté en suppression de cellules ═══
--- La preuve chiffrée que le k-anonymat n'est pas qu'une intention affichée.
--- Deux lignes distinctes : le seuil au grain fin, et la suppression complémentaire
--- sur les marges. Les confondre donnerait l'impression d'un doublon.
+-- ═══ Couche gold : ce que la diffusion a coûté en masquage de cellules ══════
+-- La preuve chiffrée que le k-anonymat n'est pas qu'une intention affichée : une ligne
+-- par table diffusée à la recherche, reprise telle quelle de `k_anonymat_controle`.
 SELECT
-    '{{ run_id }}', 'gold', table_cible,
-    if(table_cible = 'cohorte_demographie_region',
-       'RGPD_k_anonymat',
-       'RGPD_suppression_complementaire'),
-    concat('Cellules non diffusées — ', motif),
+    '{{ run_id }}', 'gold', table_cible, 'RGPD_k_anonymat',
+    concat('Cellules masquées — ', motif),
     toInt64(cellules_calculees),
     toInt64(cellules_diffusees),
-    toInt64(cellules_supprimees),
+    toInt64(cellules_masquees),
     toInt64(0),
-    if(table_cible = 'cohorte_demographie_region',
-       'Grain fin : pathologie × sexe × tranche d''âge × département',
-       'Marge retirée dès qu''une de ses cellules fines l''est : sinon la valeur cachée se retrouverait par soustraction'),
+    'La ligne reste publiée, l''effectif est retiré : le chercheur sait qu''une valeur est protégée',
     now()
 FROM {{ ref('k_anonymat_controle') }}
-
-UNION ALL
-SELECT
-    '{{ run_id }}', 'gold', 'cohorte_pathologie', 'RGPD_cohortes_diffusees',
-    'Cohortes par pathologie effectivement diffusées (k >= {{ var("seuil_k") }})',
-    toInt64((SELECT uniqExact(code_cim10) FROM {{ ref('fact_diagnostic') }})),
-    toInt64((SELECT count() FROM {{ ref('cohorte_pathologie') }})),
-    toInt64((SELECT uniqExact(code_cim10) FROM {{ ref('fact_diagnostic') }})
-          - (SELECT count() FROM {{ ref('cohorte_pathologie') }})),
-    toInt64(0),
-    'Une pathologie dont la cohorte compte moins de {{ var("seuil_k") }} patients n''est pas diffusée',
-    now()
 
 UNION ALL
 SELECT

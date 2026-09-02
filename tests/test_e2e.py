@@ -4,6 +4,11 @@ Ces tests vérifient que les chiffres produits sont exactement ceux attendus des
 données du CHU — c'est la garantie que les indicateurs sont reproductibles et
 qu'une régression de la logique de transformation serait détectée.
 
+Les six KPI du sujet sont ancrés valeur par valeur sur la feuille de réponses
+fournie avec le jeu de données corrigé (`docs/REPONSES-KPI-niveau1.pdf`). Ce
+n'est pas un test de non-régression : c'est la vérification que l'entrepôt
+produit la bonne réponse, pas seulement la même qu'hier.
+
 Prérequis : `make up && make pipeline`.
 Lancement : `make test-e2e`.
 """
@@ -42,11 +47,11 @@ BRONZE_ATTENDU = {
 
 SILVER_ATTENDU = {
     "dim_patient": 6_000,  # 18 000 lignes → 6 000 patients distincts
-    "fact_sejour": 6_729,  # 6 797 - 68 séjours incohérents
+    "fact_sejour": 6_729,  # 6 797 - 68 séjours aux horodatages incohérents
     "sejours_rejets": 68,
-    "fact_diagnostic": 12_593,  # 12 720 - 127 en cascade
-    "fact_monitoring": 40_400,  # 41 778 - 1 378 rejets
-    "monitoring_rejets": 1_378,  # 858 hors plage + 528 cascade - 8 cumulés
+    "fact_diagnostic": 12_720,  # aucune perte : le rejet Q2 ne cascade pas
+    "fact_monitoring": 40_920,  # 41 778 - 858 capteurs hors plage
+    "monitoring_rejets": 858,  # hors plage physiologique, et rien d'autre
 }
 
 
@@ -106,7 +111,12 @@ def test_flag_admission_post_deces(client):
 
 
 def test_aucun_releve_posterieur_a_la_sortie(client):
-    """Q8 : contrôle actif — ces relevés appartenaient aux séjours incohérents."""
+    """Q8 : contrôle actif, évalué sur les seuls séjours temporellement cohérents.
+
+    Sur les autres, c'est la date de sortie elle-même qui est fausse : la
+    comparaison n'aurait aucun sens et le contrôle passerait au rouge sans qu'une
+    seule donnée soit en cause.
+    """
     assert scalar(client, "SELECT countIf(is_after_discharge) FROM eds_silver.fact_monitoring") == 0
 
 
@@ -135,6 +145,35 @@ def test_integrite_referentielle_des_faits(client):
         assert scalar(client, requete) == 0, relation
 
 
+def test_le_rejet_d_un_sejour_ne_cascade_pas(client):
+    """Un rejet ne vaut que pour la table où vit l'anomalie.
+
+    Q2 invalide les HORODATAGES d'un séjour, pas le séjour : le patient existe, le
+    service existe, les diagnostics codés sont des faits cliniques et les relevés de
+    constantes portent leur propre horodatage. Les écarter en cascade minorait la
+    prévalence de quinze patients et perdait 520 relevés parfaitement valides.
+    """
+    diagnostics = scalar(
+        client,
+        "SELECT count() FROM eds_silver.fact_diagnostic "
+        "WHERE stay_id IN (SELECT stay_id FROM eds_silver.sejours_rejets)",
+    )
+    releves = scalar(
+        client,
+        "SELECT count() FROM eds_silver.fact_monitoring "
+        "WHERE stay_id IN (SELECT stay_id FROM eds_silver.sejours_rejets)",
+    )
+    assert (diagnostics, releves) == (127, 520)
+
+    # Et le patient reste résolu : aucun fait orphelin de dimension.
+    orphelins = scalar(
+        client,
+        "SELECT count() FROM eds_silver.fact_diagnostic "
+        "WHERE patient_pseudo NOT IN (SELECT patient_pseudo FROM eds_silver.dim_patient)",
+    )
+    assert orphelins == 0
+
+
 def test_le_monitoring_ne_couvre_que_la_reanimation_et_la_cardiologie(client):
     services = scalar(
         client,
@@ -143,59 +182,202 @@ def test_le_monitoring_ne_couvre_que_la_reanimation_et_la_cardiologie(client):
     assert list(services) == ["CARDIO", "REA"]
 
 
-# ── Indicateurs ─────────────────────────────────────────────────────────────
-def test_readmissions_30_jours(client):
-    """Définition : une admission postérieure à la sortie, dans les 30 jours."""
-    eligibles, readmissions = client.query(
-        "SELECT sum(sorties_eligibles), sum(readmissions_30j) "
-        "FROM eds_gold_pilotage.kpi_readmissions_30j"
-    ).result_rows[0]
-    assert eligibles == 5_051
-    assert readmissions == 647
+# ── Indicateurs : ancrés sur la feuille de réponses du jeu corrigé ──────────
+# Chaque valeur ci-dessous vient de `docs/REPONSES-KPI-niveau1.pdf`. Un écart
+# signifie que l'entrepôt ne répond pas à la question posée — pas qu'il a changé.
+
+KPI1_DMS_PAR_SERVICE = {
+    "REA": (423, 9.05, 217.1),
+    "NEURO": (1_077, 7.06, 169.5),
+    "ONCO": (185, 6.87, 164.8),
+    "PNEUMO": (753, 6.20, 148.9),
+    "CARDIO": (1_459, 5.31, 127.5),
+    "CHIR": (424, 4.39, 105.2),
+    "PEDIA": (448, 3.19, 76.5),
+    "URGENCES": (1_277, 2.15, 51.7),
+}
+
+# (jour d'août, passages, encore présents, durée moyenne en heures)
+KPI3_URGENCES_PAR_JOUR = [
+    (1, 46, 0, 47.6),
+    (2, 40, 0, 50.5),
+    (3, 48, 0, 46.9),
+    (4, 42, 0, 46.9),
+    (5, 41, 0, 48.8),
+    (6, 53, 0, 58.1),
+    (7, 58, 0, 52.4),
+    (8, 50, 0, 49.5),
+    (9, 55, 0, 51.4),
+    (10, 45, 0, 49.7),
+    (11, 62, 0, 56.1),
+    (12, 46, 0, 47.3),
+    (13, 57, 0, 51.2),
+    (14, 48, 0, 54.7),
+    (15, 68, 0, 55.9),
+    (16, 54, 15, 56.1),
+    (17, 55, 17, 50.0),
+    (18, 63, 18, 49.4),
+    (19, 73, 15, 48.8),
+    (20, 59, 17, 56.9),
+    (21, 82, 14, 50.7),
+    (22, 56, 9, 58.6),
+    (23, 64, 8, 51.5),
+    (24, 53, 10, 52.9),
+    (25, 69, 14, 46.0),
+    (26, 9, 3, 60.3),
+    (27, 11, 1, 48.8),
+    (28, 16, 5, 54.7),
+]
+
+# (jour d'août, relevés, alertes, taux %)
+KPI4_ALERTES_PAR_JOUR = [
+    (1, 351, 25, 7.1),
+    (2, 1_199, 103, 8.6),
+    (3, 1_543, 110, 7.1),
+    (4, 1_333, 103, 7.7),
+    (5, 1_341, 103, 7.7),
+    (6, 1_247, 106, 8.5),
+    (7, 1_192, 98, 8.2),
+    (8, 1_461, 118, 8.1),
+    (9, 1_520, 140, 9.2),
+    (10, 1_303, 111, 8.5),
+    (11, 1_330, 110, 8.3),
+    (12, 1_431, 106, 7.4),
+    (13, 1_549, 114, 7.4),
+    (14, 1_801, 135, 7.5),
+    (15, 1_766, 130, 7.4),
+    (16, 1_594, 127, 8.0),
+    (17, 1_862, 135, 7.3),
+    (18, 2_022, 172, 8.5),
+    (19, 1_792, 165, 9.2),
+    (20, 1_539, 128, 8.3),
+    (21, 1_540, 134, 8.7),
+    (22, 1_592, 128, 8.0),
+    (23, 1_674, 148, 8.8),
+    (24, 1_939, 171, 8.8),
+    (25, 2_182, 173, 7.9),
+    (26, 1_709, 135, 7.9),
+    (27, 669, 45, 6.7),
+    (28, 275, 19, 6.9),
+    (29, 130, 14, 10.8),
+    (30, 34, 8, 23.5),
+]
+
+KPI5_PREVALENCE = {
+    "N39": 2_234,
+    "E11": 2_177,
+    "I50": 2_156,
+    "J44": 1_775,
+    "J18": 850,
+    "F32": 827,
+    "K35": 806,
+    "I63": 643,
+    "I21": 421,
+    "C34": 239,
+    "G12": 8,
+    "E84": None,
+    "Q90": None,  # sous le seuil : effectif masqué
+}
 
 
-def test_la_fenetre_d_observation_des_readmissions_est_explicite(client):
-    """Une sortie postérieure à la dernière admission ne peut rien constater.
+def test_kpi1_dms_par_service(client):
+    """Grain : le service. Une DMS par jour de sortie répondrait à une autre question."""
+    lignes = {
+        code: (nb, dms_j, dms_h)
+        for code, nb, dms_j, dms_h in client.query(
+            "SELECT service_code, nb_sejours, dms_jours, dms_heures "
+            "FROM eds_gold_pilotage.kpi_dms_service"
+        ).result_rows
+    }
+    assert lignes == KPI1_DMS_PAR_SERVICE
 
-    Sans ce marquage, 67 des 271 lignes afficheraient un 0 % qui ne mesure rien.
-    L'indicateur doit dire sur quelle part des sorties il se prononce — et, la
-    dernière admission connue étant le 28 août, aucune sortie n'a ses 30 jours.
+
+def test_kpi2_readmissions_30_jours(client):
+    """Un séjour est suivi d'une réadmission si le patient revient dans les 30 jours.
+
+    Dénominateur : tous les séjours valides. Un séjour en cours y figure et compte
+    pour zéro au numérateur — sa sortie n'a pas eu lieu.
     """
-    muettes, total, completes, maximum = client.query(
-        "SELECT countIf(jours_observables = 0), count(), countIf(fenetre_complete), "
-        "       max(jours_observables) "
+    readmissions, sejours, taux = client.query(
+        "SELECT nb_readmissions_30j, nb_sejours, taux_readmission_30j_pct "
         "FROM eds_gold_pilotage.kpi_readmissions_30j"
     ).result_rows[0]
-    assert muettes == 67, "lignes sans fenêtre d'observation"
-    assert total == 271
-    assert completes == 0, "vingt-huit jours d'admissions ne peuvent pas couvrir 30 jours"
-    assert maximum == 27, "une sortie du 2 août voit les admissions jusqu'au 28"
+    assert (readmissions, sejours, taux) == (780, 6_729, 11.59)
 
 
-def test_le_taux_publie_ne_porte_que_sur_les_sorties_observables(client):
-    """La tuile de synthèse doit exclure les sorties qui ne mesurent rien."""
-    readmissions, observables, taux, couverture = client.query(
-        "SELECT nb_readmissions_30j, nb_sorties_observables, taux_readmission_pct, "
-        "       pct_sorties_observables "
-        "FROM eds_gold_pilotage.kpi_synthese"
+def test_la_ventilation_des_readmissions_se_reconcilie_avec_le_global(client):
+    """Deux tables, une seule définition : leurs totaux ne peuvent pas diverger."""
+    ventile = client.query(
+        "SELECT sum(nb_sejours), sum(nb_readmissions_30j) "
+        "FROM eds_gold_pilotage.kpi_readmissions_service"
     ).result_rows[0]
-    assert readmissions == 647
-    assert observables == 4_499
-    assert taux == 14.4
-    assert couverture == 89.1, "part des sorties sur lesquelles l'indicateur se prononce"
+    global_ = client.query(
+        "SELECT nb_sejours, nb_readmissions_30j FROM eds_gold_pilotage.kpi_readmissions_30j"
+    ).result_rows[0]
+    assert ventile == global_
+
+
+def test_kpi3_activite_des_urgences_par_jour(client):
+    """Un passage = un séjour dans l'unité URGENCES, compté à sa date d'admission."""
+    lignes = [
+        (jour.day, passages, presents, duree)
+        for jour, passages, presents, duree in client.query(
+            "SELECT admission_date, nb_passages, nb_encore_presents, duree_moy_heures "
+            "FROM eds_gold_pilotage.kpi_urgences_jour ORDER BY admission_date"
+        ).result_rows
+    ]
+    assert lignes == KPI3_URGENCES_PAR_JOUR
+
+
+def test_kpi4_releves_en_alerte_par_jour(client):
+    """Seuils de vigilance : FC < 50 ou > 100, SpO2 < 92, température > 38,5 °C.
+
+    Ils sont volontairement plus serrés que les bornes de plausibilité qui filtrent
+    les capteurs en panne : une constante peut être parfaitement mesurée et
+    cliniquement anormale.
+    """
+    lignes = [
+        (jour.day, releves, alertes, taux)
+        for jour, releves, alertes, taux in client.query(
+            "SELECT jour, nb_releves, nb_alertes, taux_alertes_pct "
+            "FROM eds_gold_pilotage.kpi_alertes_jour ORDER BY jour"
+        ).result_rows
+    ]
+    assert lignes == KPI4_ALERTES_PAR_JOUR
+
+
+def test_le_calendrier_d_activite_n_a_aucun_trou(client):
+    """Un jour sans aucun mouvement doit rester dans la courbe de charge.
+
+    Le 12 septembre n'a ni admission ni sortie dans tout l'hôpital, mais 687 patients
+    y sont hospitalisés. Construire l'axe temporel depuis les seuls jours porteurs
+    d'un mouvement le faisait disparaître, et la courbe sautait sans rien signaler.
+    """
+    jours, premier, dernier, lignes = client.query(
+        "SELECT uniqExact(jour), min(jour), max(jour), count() "
+        "FROM eds_gold_pilotage.kpi_activite_service"
+    ).result_rows[0]
+    services = scalar(client, "SELECT count() FROM eds_silver.dim_service")
+    assert jours == (dernier - premier).days + 1, "il manque des jours au calendrier"
+    assert lignes == jours * services
 
 
 def test_la_dms_ignore_les_sejours_en_cours(client):
     """Une durée partielle fausserait la moyenne : elle ne doit pas être comptée."""
-    sorties_gold = scalar(client, "SELECT sum(nb_sorties) FROM eds_gold_pilotage.kpi_dms_service")
-    sejours_termines = scalar(
+    agrege = scalar(client, "SELECT sum(nb_sejours) FROM eds_gold_pilotage.kpi_dms_service")
+    termines = scalar(
         client, "SELECT countIf(discharge_ts IS NOT NULL) FROM eds_silver.fact_sejour"
     )
-    assert sorties_gold == sejours_termines
+    assert agrege == termines
 
 
-def test_relevés_en_alerte(client):
-    assert scalar(client, "SELECT countIf(is_alert) FROM eds_silver.fact_monitoring") == 1_939
+def test_les_tuiles_de_synthese_reprennent_les_tables_gold(client):
+    """Une tuile qui recalcule son chiffre finit par diverger du graphique qui le détaille."""
+    sejours, dms, readm, taux, alertes, pct = client.query(
+        "SELECT nb_sejours, dms_globale_jours, nb_readmissions_30j, taux_readmission_pct, "
+        "       nb_releves_alerte, pct_releves_alerte FROM eds_gold_pilotage.kpi_synthese"
+    ).result_rows[0]
+    assert (sejours, dms, readm, taux, alertes, pct) == (6_729, 5.15, 780, 11.59, 3_314, 8.1)
 
 
 # ── RGPD ────────────────────────────────────────────────────────────────────
@@ -218,173 +400,176 @@ def test_le_pseudonyme_ne_ressemble_pas_a_un_ipp(client):
 
 
 def test_k_anonymat_respecte_sur_toutes_les_tables_de_recherche(client):
-    """Aucune cellule diffusée ne doit regrouper moins de 5 patients."""
-    tables = (
-        "cohorte_pathologie",
-        "prevalence_pathologie",
-        "cohorte_demographie",
-        "cohorte_demographie_region",
-    )
-    for table in tables:
-        minimum = scalar(client, f"SELECT min(nb_patients) FROM eds_gold_recherche.{table}")
-        assert minimum >= 5, f"{table} diffuse une cohorte de {minimum} patients"
+    """Aucun effectif diffusé ne doit décrire moins de 5 patients.
 
-
-def test_le_k_anonymat_resiste_a_l_attaque_par_differenciation(client):
-    """Une cellule supprimée ne doit pas se retrouver par soustraction.
-
-    Publier une marge et sa décomposition, en appliquant le seuil séparément aux
-    deux, laisse fuiter la cellule cachée : marge moins somme des cellules diffusées.
-    La suppression complémentaire retire la marge dès qu'une de ses cellules
-    fines manque. Ce test rejoue l'attaque et exige qu'elle ne rende rien.
+    Les cellules sous le seuil gardent leur ligne mais perdent leur effectif : ce
+    qui est contrôlé, c'est qu'aucune valeur NON NULLE ne passe sous le seuil.
     """
-    reconstructibles = scalar(
+    tables = ("prevalence_pathologie", "cohorte_demographie", "cohorte_demographie_globale")
+    for table in tables:
+        fuites = scalar(
+            client,
+            f"SELECT countIf(nb_patients IS NOT NULL AND nb_patients < 5) "
+            f"FROM eds_gold_recherche.{table}",
+        )
+        assert fuites == 0, f"{table} diffuse {fuites} effectif(s) sous le seuil"
+
+
+def test_le_masquage_et_le_drapeau_disent_la_meme_chose(client):
+    """Une cellule diffusable porte un effectif, une cellule masquée n'en porte aucun."""
+    tables = ("prevalence_pathologie", "cohorte_demographie", "cohorte_demographie_globale")
+    for table in tables:
+        incoherences = scalar(
+            client,
+            f"SELECT countIf(diffusable != (nb_patients IS NOT NULL)) "
+            f"FROM eds_gold_recherche.{table}",
+        )
+        assert incoherences == 0, table
+
+
+def test_aucune_pathologie_n_est_publiee_a_moitie(client):
+    """La parade contre l'attaque par différenciation, à sa racine.
+
+    Publier une partie des cellules d'une pathologie et en masquer d'autres casse
+    deux choses d'un coup : l'agrégation devient fausse (les cellules manquantes
+    sont systématiquement les plus petites), et la valeur masquée se retrouve par
+    soustraction dès qu'un total de la pathologie est diffusé ailleurs.
+
+    Ici la condition tient d'elle-même : les trois pathologies sous le seuil le sont
+    sur TOUTES leurs cellules. Le test existe pour que, le jour où elle cesserait de
+    tenir, on l'apprenne par un échec de build et non par une courbe fausse.
+    """
+    partielles = scalar(
         client,
         """
         SELECT count() FROM (
-            SELECT m.nb_patients - sum(r.nb_patients) AS reste
-            FROM eds_gold_recherche.cohorte_demographie AS m
-            LEFT JOIN eds_gold_recherche.cohorte_demographie_region AS r
-              ON  r.code_cim10  = m.code_cim10
-              AND r.sexe        = m.sexe
-              AND r.tranche_age = m.tranche_age
-            GROUP BY m.code_cim10, m.sexe, m.tranche_age, m.nb_patients
-            HAVING reste > 0
+            SELECT code_cim10
+            FROM eds_gold_recherche.cohorte_demographie
+            GROUP BY code_cim10
+            HAVING countIf(diffusable) > 0 AND countIf(NOT diffusable) > 0
         )
         """,
     )
-    assert reconstructibles == 0, (
-        f"{reconstructibles} cellule(s) sous le seuil reconstructibles par différenciation"
-    )
+    assert partielles == 0, f"{partielles} pathologie(s) publiées à moitié"
 
 
-def test_la_table_de_travail_du_k_anonymat_est_hors_de_portee(config, client):
-    """`cellules_demographie` porte les effectifs SOUS le seuil : elle doit rester interne.
-
-    C'est la table qui sait ce que le k-anonymat cache. La ranger dans la base
-    des chercheurs exposerait directement ce que la suppression complémentaire
-    protège — elle vit donc en silver, inaccessible aux comptes de restitution.
-    """
-    interne = scalar(
-        client,
-        "SELECT countIf(NOT diffusable) FROM eds_silver.cellules_demographie",
-    )
-    assert interne > 0, "la table de travail devrait contenir les cellules sous le seuil"
-
-    chercheur = connect(config, user="chu_recherche", password=config.recherche_password)
-    with pytest.raises(Exception):  # noqa: B017 — tout refus fait l'affaire
-        chercheur.query("SELECT count() FROM eds_silver.cellules_demographie")
-
-    exposee = scalar(
-        client,
-        "SELECT count() FROM system.tables "
-        "WHERE database = 'eds_gold_recherche' AND name = 'cellules_demographie'",
-    )
-    assert exposee == 0, "la table de travail ne doit pas exister dans la base des chercheurs"
-
-
-def test_le_k_anonymat_supprime_effectivement_des_cellules(client):
-    """Si rien n'était jamais supprimé, la règle ne serait pas démontrée.
-
-    Deux suppressions coexistent : celles du seuil lui-même au grain fin, et
-    celles que la protection contre la différenciation impose sur les marges.
-    """
+def test_le_k_anonymat_masque_effectivement_des_cellules(client):
+    """Si rien n'était jamais masqué, la règle ne serait pas démontrée."""
     mesures = {
-        table: (calculees, diffusees, supprimees)
-        for table, calculees, diffusees, supprimees in client.query(
-            "SELECT table_cible, cellules_calculees, cellules_diffusees, cellules_supprimees "
+        table: (calculees, diffusees, masquees)
+        for table, calculees, diffusees, masquees in client.query(
+            "SELECT table_cible, cellules_calculees, cellules_diffusees, cellules_masquees "
             "FROM eds_gold_recherche.k_anonymat_controle"
         ).result_rows
     }
-
-    # Grain fin : le seuil k >= 5 écarte 178 cellules sur 1 083.
-    assert mesures["cohorte_demographie_region"] == (1_083, 905, 178)
-
-    # Marges : 66 lignes retirées par suppression complémentaire, car leur
-    # décomposition départementale n'est pas intégralement diffusable. Le coût
-    # est élevé (44 %) : c'est le prix d'un grain fin à huit départements sur des
-    # cohortes de quelques centaines de patients — cf. rapport, §8.
-    calculees, diffusees, supprimees = mesures["cohorte_demographie"]
-    assert calculees == 149
-    assert supprimees == 66
-    assert diffusees == calculees - supprimees
+    assert mesures == {
+        "prevalence_pathologie": (13, 11, 2),
+        "cohorte_demographie": (102, 89, 13),
+        "cohorte_demographie_globale": (20, 20, 0),
+    }
 
 
-def test_le_k_anonymat_retire_des_pathologies_entieres(client):
-    """Le seuil ne mord pas qu'au grain fin : deux pathologies rares disparaissent.
+def test_le_seuil_mord_sur_des_pathologies_entieres(client):
+    """La mucoviscidose (4 patients) et la trisomie 21 (3) restent visibles, pas chiffrées.
 
-    La mucoviscidose (4 patients) et la trisomie 21 (3 patients) sont sous le seuil
-    dès la cohorte par pathologie. Elles existent dans le référentiel, dans silver,
-    et nulle part dans la base des chercheurs.
+    Faire disparaître la ligne serait moins protecteur, pas plus : le chercheur ne
+    saurait pas qu'une valeur a été retirée, et le dispositif ne serait vérifiable
+    nulle part. C'est l'effectif qui est protégé, et il ne sort pas de silver.
     """
     referentiel = scalar(client, "SELECT count() FROM eds_silver.dim_cim10")
-    diffusees = scalar(client, "SELECT count() FROM eds_gold_recherche.cohorte_pathologie")
-    assert (referentiel, diffusees) == (13, 11)
-
-    absentes = scalar(
-        client,
-        "SELECT arraySort(groupArray(code_cim10)) FROM eds_silver.dim_cim10 "
-        "WHERE code_cim10 NOT IN (SELECT code_cim10 FROM eds_gold_recherche.cohorte_pathologie)",
+    publiees = scalar(
+        client, "SELECT countIf(diffusable) FROM eds_gold_recherche.prevalence_pathologie"
     )
-    assert list(absentes) == ["E84", "Q90"]
+    assert (referentiel, publiees) == (13, 11)
 
-    for table in ("cohorte_pathologie", "prevalence_pathologie", "cohorte_demographie"):
+    masquees = scalar(
+        client,
+        "SELECT arraySort(groupArrayIf(code_cim10, NOT diffusable)) "
+        "FROM eds_gold_recherche.prevalence_pathologie",
+    )
+    assert list(masquees) == ["E84", "Q90"]
+
+    for table in ("prevalence_pathologie", "cohorte_demographie"):
         fuite = scalar(
             client,
-            f"SELECT count() FROM eds_gold_recherche.{table} WHERE code_cim10 IN ('E84', 'Q90')",
+            f"SELECT countIf(nb_patients IS NOT NULL) FROM eds_gold_recherche.{table} "
+            f"WHERE code_cim10 IN ('E84', 'Q90')",
         )
-        assert fuite == 0, f"{table} diffuse une pathologie sous le seuil"
+        assert fuite == 0, f"{table} chiffre une pathologie sous le seuil"
 
 
-def test_la_part_de_femmes_est_calculee_a_son_grain(client):
-    """Un pourcentage ne se calcule pas sur les restes d'une table filtrée.
+def test_les_effectifs_publies_sont_ceux_de_la_feuille_de_reponses(client):
+    """KPI 5 — la prévalence, code par code, y compris les deux cohortes masquées."""
+    publie = dict(
+        client.query(
+            "SELECT code_cim10, nb_patients FROM eds_gold_recherche.prevalence_pathologie"
+        ).result_rows
+    )
+    assert publie == KPI5_PREVALENCE
 
-    `cohorte_demographie` a subi le seuil et la suppression complémentaire : les
-    cellules qui en manquent sont les plus petites, jamais un échantillon au hasard.
-    En sommer les tranches d'âge donnait 71,5 % de femmes sur les infections urinaires
-    là où la vérité est 62,5 % — neuf points de biais, invisibles à la lecture.
-    La carte lit donc `cohorte_demographie_sexe`, bâtie à son propre grain.
+
+def test_kpi6_description_de_cohorte(client):
+    """Grain pathologie × tranche d'âge × sexe, sur le diagnostic PRINCIPAL.
+
+    Le rang du diagnostic n'est pas un détail : décrire une cohorte, c'est décrire
+    les patients pris en charge POUR cette pathologie. Compter aussi les comorbidités
+    gonflerait le diabète et l'insuffisance cardiaque de plus du double.
+    """
+    cellules, publiees = client.query(
+        "SELECT count(), countIf(diffusable) FROM eds_gold_recherche.cohorte_demographie"
+    ).result_rows[0]
+    assert (cellules, publiees) == (102, 89)
+
+    # Quatre cellules de la feuille de réponses, prises aux extrêmes de la table.
+    temoins = dict(
+        client.query(
+            "SELECT concat(code_cim10, '/', tranche_age, '/', sexe), nb_patients "
+            "FROM eds_gold_recherche.cohorte_demographie "
+            "WHERE concat(code_cim10, '/', tranche_age, '/', sexe) IN "
+            "  ('E11/40-49/M', 'K35/10-19/F', 'N39/90-99/F', 'G12/30-39/F')"
+        ).result_rows
+    )
+    assert temoins == {
+        "E11/40-49/M": 160,
+        "K35/10-19/F": 127,
+        "N39/90-99/F": 12,
+        "G12/30-39/F": None,
+    }
+
+
+def test_la_part_de_femmes_publiee_est_exacte(client):
+    """Un pourcentage tiré d'une table filtrée n'est vrai que si rien n'a été retiré.
+
+    Le tableau de bord somme les tranches d'âge d'une pathologie pour en tirer une
+    part de femmes. C'est légitime ici parce qu'aucune pathologie n'est publiée à
+    moitié — et ce test le vérifie sur le résultat, en comparant à la valeur
+    recalculée depuis silver.
     """
     ecarts = scalar(
         client,
         """
         SELECT count() FROM (
-            SELECT s.code_cim10,
-                   round(100.0 * sumIf(s.nb_patients, s.sexe = 'F')
-                               / sum(s.nb_patients), 1) AS publie,
+            SELECT c.code_cim10,
+                   round(100.0 * sumIf(c.nb_patients, c.sexe = 'F')
+                               / sum(c.nb_patients), 1) AS publie,
                    any(v.reel) AS reel
-            FROM eds_gold_recherche.cohorte_demographie_sexe AS s
+            FROM eds_gold_recherche.cohorte_demographie AS c
             INNER JOIN (
                 SELECT d.code_cim10 AS code,
                        round(100.0 * uniqExactIf(d.patient_pseudo, p.sex = 'F')
                                    / uniqExact(d.patient_pseudo), 1) AS reel
                 FROM eds_silver.fact_diagnostic AS d
                 INNER JOIN eds_silver.dim_patient AS p USING (patient_pseudo)
+                WHERE d.is_principal
                 GROUP BY code
-            ) AS v ON v.code = s.code_cim10
-            GROUP BY s.code_cim10
+            ) AS v ON v.code = c.code_cim10
+            WHERE c.diffusable
+            GROUP BY c.code_cim10
             HAVING abs(publie - reel) > 0.05
         )
         """,
     )
     assert ecarts == 0, f"{ecarts} pathologie(s) publient une part de femmes biaisée"
-
-    # La valeur qui avait révélé le défaut, figée pour qu'une régression se voie.
-    urinaires = scalar(
-        client,
-        "SELECT round(100.0 * sumIf(nb_patients, sexe = 'F') / sum(nb_patients), 1) "
-        "FROM eds_gold_recherche.cohorte_demographie_sexe WHERE code_cim10 = 'N39'",
-    )
-    assert urinaires == 62.5
-
-    # La suppression complémentaire s'applique aussi ici : l'amyotrophie spinale
-    # (8 patients) est diffusée en cohorte, mais pas décomposée par sexe — publier
-    # une seule cellule livrerait l'autre par soustraction du total.
-    cohortes, avec_sexe = client.query(
-        "SELECT (SELECT uniqExact(code_cim10) FROM eds_gold_recherche.cohorte_pathologie), "
-        "       (SELECT uniqExact(code_cim10) FROM eds_gold_recherche.cohorte_demographie_sexe)"
-    ).result_rows[0]
-    assert (cohortes, avec_sexe) == (11, 10)
 
 
 def test_la_deduplication_garde_la_version_la_plus_recente(client):
@@ -646,11 +831,17 @@ def test_le_rapport_qualite_est_renseigne(client):
     run_id = last_quality_run_id(client)
     assert run_id is not None, "aucun rapport qualité en base"
 
-    # Le compte exact est publié dans le rapport (§4.2) et dans le document
-    # d'exploitation : le figer ici empêche les deux de diverger en silence.
+    # Le compte exact est publié dans le rapport : le figer ici empêche les deux
+    # de diverger en silence. Quatre lignes en gold pour deux règles — le
+    # k-anonymat est chiffré table diffusée par table diffusée.
+    lignes, regles = client.query(
+        f"SELECT count(), uniqExact(rule) FROM ops.quality_report WHERE run_id = '{run_id}'"
+    ).result_rows[0]
+    assert (lignes, regles) == (18, 16)
+
     par_couche = dict(
         client.query(
-            "SELECT layer, uniqExact(rule) FROM ops.quality_report "
+            "SELECT layer, count() FROM ops.quality_report "
             f"WHERE run_id = '{run_id}' GROUP BY layer"
         ).result_rows
     )
@@ -658,22 +849,23 @@ def test_le_rapport_qualite_est_renseigne(client):
 
 
 def test_les_regles_rgpd_de_la_couche_gold_sont_chiffrees(client):
-    """Les quatre contrôles RGPD doivent produire les valeurs publiées au rapport."""
+    """Le coût du k-anonymat est publié table par table, pas résumé d'un seul chiffre."""
     from eds.state import last_quality_run_id
 
     mesures = {
-        rule: (rows_in, rows_kept, rows_rejected)
-        for rule, rows_in, rows_kept, rows_rejected in client.query(
-            "SELECT rule, rows_in, rows_kept, rows_rejected FROM ops.quality_report "
+        (rule, table): (rows_in, rows_kept, rows_rejected)
+        for rule, table, rows_in, rows_kept, rows_rejected in client.query(
+            "SELECT rule, table_name, rows_in, rows_kept, rows_rejected "
+            "FROM ops.quality_report "
             f"WHERE run_id = '{last_quality_run_id(client)}' AND layer = 'gold'"
         ).result_rows
     }
 
-    assert mesures["RGPD_k_anonymat"] == (1_083, 905, 178)
-    assert mesures["RGPD_suppression_complementaire"] == (149, 83, 66)
-    assert mesures["RGPD_cohortes_diffusees"] == (13, 11, 2)
+    assert mesures[("RGPD_k_anonymat", "prevalence_pathologie")] == (13, 11, 2)
+    assert mesures[("RGPD_k_anonymat", "cohorte_demographie")] == (102, 89, 13)
+    assert mesures[("RGPD_k_anonymat", "cohorte_demographie_globale")] == (20, 20, 0)
     # Aucune colonne identifiante ni pseudonyme dans la base des chercheurs.
-    assert mesures["RGPD_minimisation"][2] == 0
+    assert mesures[("RGPD_minimisation", "eds_gold_recherche")][2] == 0
 
 
 def test_les_comptes_de_restitution_sont_bornes(client):

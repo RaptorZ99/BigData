@@ -53,8 +53,10 @@ models:
   - name: fact_sejour
     description: >
       Fait séjour (grain : 1 séjour) — étoile sur dim_patient et dim_service.
-      Les séjours dont la sortie précède l'admission sont écartés vers sejours_rejets ;
-      un séjour sans date de sortie est conservé (patient encore hospitalisé).
+      Les séjours dont la sortie précède l'admission sont écartés vers sejours_rejets :
+      leurs horodatages sont inexploitables. Le rejet s'arrête là — leurs diagnostics et
+      leurs relevés restent dans l'entrepôt. Un séjour sans date de sortie est conservé
+      (patient encore hospitalisé).
     columns:
       - name: stay_id
         description: "Identifiant du séjour — dimension dégénérée commune aux trois faits"
@@ -93,7 +95,7 @@ models:
       - name: discharge_date
         description: "Jour de sortie"
       - name: duree_heures
-        description: "Durée du séjour en heures — NULL tant qu'il est en cours"
+        description: "Durée du séjour en heures, à la minute près — NULL tant qu'il est en cours"
       - name: duree_jours
         description: "Durée du séjour en jours — mesure de la DMS, NULL si en cours"
       - name: is_ongoing
@@ -111,7 +113,9 @@ models:
       - name: _built_at
 
   - name: sejours_rejets
-    description: "Séjours écartés par les contrôles qualité, avec le motif et le lignage."
+    description: >
+      Séjours écartés par le contrôle de cohérence temporelle, avec le motif et le
+      lignage. On n'écarte jamais en silence.
     columns:
       - name: stay_id
         data_tests: [unique, not_null]
@@ -125,16 +129,13 @@ models:
   - name: fact_diagnostic
     description: >
       Fait diagnostic (grain : 1 code CIM-10 par séjour) — fait sans mesure, support des
-      cohortes. Un diagnostic dont le séjour a été écarté part en cascade.
+      cohortes. Le patient est résolu depuis le référentiel de TOUS les séjours déposés :
+      un diagnostic est un fait clinique, il ne disparaît pas parce qu'une date de sortie
+      a été mal saisie.
     columns:
       - name: stay_id
         description: "Dimension dégénérée vers le séjour"
-        data_tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('fact_sejour')
-                field: stay_id
+        data_tests: [not_null]
       - name: patient_pseudo
         description: "Propagé depuis le séjour : évite toute jointure fait-à-fait"
         data_tests:
@@ -151,13 +152,13 @@ models:
                 to: ref('dim_cim10')
                 field: code_cim10
       - name: diag_type
-        description: "Rang du diagnostic"
+        description: "Rang du diagnostic ; en cas de conflit à la source, principal l'emporte"
         data_tests:
           - accepted_values:
               arguments:
                 values: ["principal", "associe"]
       - name: is_principal
-        description: "Diagnostic principal du séjour"
+        description: "Diagnostic principal du séjour — motif de l'hospitalisation"
       - name: admission_date
         description: "Jour d'admission du séjour parent (dénormalisé)"
       - name: service_code
@@ -167,15 +168,12 @@ models:
     description: >
       Fait monitoring (grain : 1 relevé) — étoile sur dim_service, sans identifiant
       patient : aucun besoin métier ne l'exige, la donnée ne descend donc pas jusqu'ici.
+      Un relevé porte son propre horodatage et reste valide même si le séjour parent a
+      une date de sortie aberrante.
     columns:
       - name: stay_id
         description: "Dimension dégénérée vers le séjour"
-        data_tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('fact_sejour')
-                field: stay_id
+        data_tests: [not_null]
       - name: service_code
         description: "Propagé depuis le séjour — permet l'agrégation par service sans jointure"
         data_tests:
@@ -195,30 +193,23 @@ models:
       - name: temp_c
         description: "Température (°C), dans la plage 30-45"
       - name: alert_hr
-        description: "Bradycardie (< 40) ou tachycardie (> 130)"
+        description: "Bradycardie (< 50) ou tachycardie (> 100)"
       - name: alert_spo2
-        description: "Désaturation (< 90 %)"
+        description: "Désaturation (< 92 %)"
       - name: alert_temp
-        description: "Fièvre (>= 38,5 °C)"
+        description: "Fièvre (> 38,5 °C)"
       - name: is_alert
-        description: "Au moins une constante en alerte"
+        description: "Au moins une constante hors seuil de vigilance"
       - name: is_after_discharge
-        description: "Relevé postérieur à la sortie — contrôle actif, attendu à 0"
+        description: >
+          Relevé postérieur à la sortie — contrôle actif, attendu à 0. Évalué sur les
+          seuls séjours temporellement cohérents.
 
   - name: monitoring_rejets
-    description: "Relevés écartés (hors plage physiologique ou séjour parent invalide), motif conservé."
+    description: >
+      Relevés écartés — hors plage physiologique, ou rattachés à un séjour absent du
+      dépôt. Motif conservé.
     columns:
       - name: reject_reason
         description: "Motifs cumulés, séparés par '+'"
         data_tests: [not_null]
-
-  - name: cellules_demographie
-    description: >
-      Travail interne du k-anonymat : grain fin AVEC les effectifs sous le seuil.
-      Jamais diffusée — elle vit en silver, hors de portée des comptes de restitution.
-    columns:
-      - name: nb_patients
-        description: "Effectif réel de la cellule, seuil non appliqué"
-        data_tests: [not_null]
-      - name: diffusable
-        description: "La cellule atteint-elle le seuil de k patients ?"

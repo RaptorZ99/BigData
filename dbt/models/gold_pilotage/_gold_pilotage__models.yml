@@ -3,57 +3,99 @@ version: 2
 models:
   - name: kpi_dms_service
     description: >
-      Durée moyenne de séjour par service et jour de sortie. Séjours terminés
+      KPI 1 — Durée moyenne de séjour par service. Grain : le service. Séjours terminés
       uniquement : une durée partielle tirerait la moyenne vers le bas.
     columns:
       - name: service_code
         description: "Service d'hospitalisation"
+        data_tests: [unique, not_null]
+      - name: nb_sejours
+        description: "Séjours terminés dans ce service sur la période"
         data_tests: [not_null]
-      - name: discharge_date
-        description: "Jour de sortie"
-      - name: nb_sorties
-        description: "Nombre de séjours terminés ce jour-là dans ce service"
       - name: dms_jours
         description: "Durée moyenne de séjour, en jours"
+        data_tests: [not_null]
+      - name: dms_heures
+        description: "La même durée en heures — lecture naturelle pour les séjours courts"
       - name: duree_mediane_jours
-        description: "Durée médiane — à lire avec la moyenne, les distributions sont asymétriques"
+        description: "Durée médiane exacte — à lire avec la moyenne, les distributions sont asymétriques"
 
   - name: kpi_urgences_jour
     description: >
-      Activité quotidienne des urgences, selon les deux définitions possibles :
-      passages dans l'unité URGENCES, et admissions en mode urgence tous services
-      confondus. Elles ne donnent pas le même chiffre ; les deux sont exposées.
+      KPI 3 — Activité quotidienne des urgences. Grain : le jour d'admission. Un passage
+      est un séjour dont l'unité d'hospitalisation est URGENCES ; les admissions en mode
+      « urgence » tous services confondus répondent à une autre question et vivent dans
+      kpi_flux.
     columns:
       - name: admission_date
+        data_tests: [unique, not_null]
+      - name: nb_passages
+        description: "Séjours admis ce jour-là dans l'unité URGENCES"
         data_tests: [not_null]
-      - name: nb_passages_service_urgences
-        description: "Séjours dont le service d'hospitalisation est URGENCES"
-      - name: nb_admissions_mode_urgence
-        description: "Séjours entrés en mode urgence, quel que soit le service"
+      - name: nb_encore_presents
+        description: "Parmi eux, ceux dont la sortie n'est pas renseignée"
+      - name: duree_moy_heures
+        description: "Durée moyenne des passages terminés, en heures"
 
   - name: kpi_readmissions_30j
     description: >
-      Taux de réadmission à 30 jours par service et jour de sortie. Chaque ligne porte
-      sa fenêtre d'observation : une sortie postérieure à la dernière admission connue
-      ne peut rien constater, et son taux de 0 % ne mesure rien.
+      KPI 2 — Taux de réadmission à 30 jours, au grain de l'établissement. Table à une
+      seule ligne. Borne basse : une sortie tardive ne peut pas être suivie d'une
+      réadmission observable dans une fenêtre de données qui s'arrête.
     columns:
-      - name: jours_observables
-        description: "Jours de la fenêtre de 30 jours réellement couverts par les données"
+      - name: nb_sejours
+        description: "Dénominateur : tous les séjours valides de la période"
         data_tests: [not_null]
-      - name: fenetre_complete
-        description: "Les 30 jours sont-ils intégralement couverts ?"
-      - name: sorties_eligibles
-        description: "Sorties vivantes — un patient décédé ne peut pas être réadmis"
-      - name: readmissions_30j
-        description: "Sorties suivies d'une nouvelle admission du même patient sous 30 jours"
-      - name: taux_readmission_pct
-        description: "Ne jamais lire sans jours_observables > 0"
+      - name: nb_readmissions_30j
+        description: "Séjours suivis d'une nouvelle admission du même patient sous 30 jours"
+        data_tests: [not_null]
+      - name: taux_readmission_30j_pct
+        data_tests: [not_null]
+
+  - name: kpi_readmissions_service
+    description: >
+      Ventilation par service du taux de réadmission à 30 jours. Le service porté est
+      celui du séjour initial. Se réconcilie avec kpi_readmissions_30j par construction.
+    columns:
+      - name: service_code
+        data_tests: [unique, not_null]
+      - name: taux_readmission_30j_pct
+        data_tests: [not_null]
+
+  - name: kpi_alertes_jour
+    description: >
+      KPI 4 — Relevés de constantes en alerte, par jour, tous services confondus.
+      Seuils de vigilance : FC < 50 ou > 100 bpm, SpO2 < 92 %, température > 38,5 °C.
+    columns:
+      - name: jour
+        data_tests: [unique, not_null]
+      - name: nb_releves
+        data_tests: [not_null]
+      - name: nb_alertes
+        description: "Relevés portant au moins une constante hors seuil"
+        data_tests: [not_null]
+      - name: taux_alertes_pct
+        description: "Part des relevés en alerte"
+        data_tests: [not_null]
+
+  - name: kpi_alertes_service
+    description: >
+      Ventilation par service de la surveillance des constantes. Le monitoring ne couvre
+      que les services équipés de capteurs au chevet : ne pas lire l'absence des autres
+      services comme une absence d'alertes.
+    columns:
+      - name: service_code
+        data_tests: [unique, not_null]
+      - name: nb_sejours_monitores
+        description: "Séjours ayant au moins un relevé"
 
   - name: kpi_activite_service
     description: >
       Activité quotidienne par service : entrées, sorties, décès et séjours ouverts.
-      Les séjours ouverts sont calculés par cumul sur le calendrier, jamais par produit
-      croisé jour × séjour — ce dernier devient quadratique avec l'historique.
+      Les séjours ouverts sont calculés par cumul sur un calendrier reconstruit jour par
+      jour — jamais par produit croisé jour × séjour, qui devient quadratique avec
+      l'historique, et jamais depuis les seuls jours porteurs d'un mouvement, qui
+      trouerait la courbe.
     columns:
       - name: jour
         data_tests: [not_null]
@@ -72,22 +114,11 @@ models:
       - name: mode
         description: "Mode d'entrée ou de sortie ; 'non renseigne' quand la source est muette"
 
-  - name: kpi_alertes_monitoring
-    description: >
-      Relevés de constantes en alerte, par jour et par service. Le monitoring ne couvre
-      que la réanimation et la cardiologie.
-    columns:
-      - name: releve_date
-        data_tests: [not_null]
-      - name: nb_alertes
-        description: "Relevés portant au moins une constante en alerte"
-      - name: pct_alertes
-        description: "Part des relevés en alerte"
-
   - name: kpi_synthese
     description: >
-      Chiffres clés pour les tuiles de tête du tableau de bord. Table à une seule ligne :
-      les mesures y sont déjà au grain de l'établissement.
+      Chiffres clés pour les tuiles de tête du tableau de bord. Table à une seule ligne,
+      dont chaque valeur est reprise telle quelle d'une autre table gold : une tuile et
+      le graphique qui la détaille ne peuvent pas diverger.
     columns:
       - name: nb_sejours
         data_tests: [not_null]
@@ -95,10 +126,10 @@ models:
         description: "Patients distincts ayant au moins un séjour — mesure NON additive"
       - name: dms_globale_jours
         description: "DMS tous services confondus"
-      - name: nb_sorties_observables
-        description: "Sorties dont la fenêtre de réadmission n'est pas vide"
-      - name: pct_sorties_observables
-        description: "Couverture de l'indicateur de réadmission"
+      - name: taux_readmission_pct
+        description: "Repris de kpi_readmissions_30j"
+      - name: pct_releves_alerte
+        description: "Repris de kpi_alertes_jour"
       - name: _built_at
         description: "Horodatage de construction de gold — comparé à celui de silver pour détecter un retard"
 

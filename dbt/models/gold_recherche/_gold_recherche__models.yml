@@ -1,30 +1,52 @@
 version: 2
 
 models:
-  - name: cohorte_pathologie
-    description: >
-      Taille des cohortes par diagnostic CIM-10. Une cohorte de moins de cinq patients
-      n'est pas diffusée.
-    columns:
-      - name: code_cim10
-        data_tests: [unique, not_null]
-      - name: nb_patients
-        description: "Patients distincts portant ce diagnostic — mesure NON additive"
-        data_tests: [not_null]
-      - name: nb_patients_diag_principal
-        description: "Patients pour qui ce code est le diagnostic principal"
-
   - name: prevalence_pathologie
     description: >
-      Part des patients concernés par chaque pathologie. Dénominateur : patients
-      distincts ayant au moins un séjour, calculé comme scalaire agrégé — jamais par
-      jointure entre deux tables de faits.
+      KPI 5 — Prévalence par pathologie : taille des cohortes par diagnostic CIM-10, tous
+      rangs confondus. Un patient est compté une fois par pathologie. Une cohorte de
+      moins de cinq patients garde sa ligne mais voit ses effectifs masqués.
     columns:
       - name: code_cim10
         data_tests: [unique, not_null]
-      - name: prevalence_pct
-        description: "Prévalence en pourcentage de la population suivie"
+      - name: libelle
         data_tests: [not_null]
+      - name: diffusable
+        description: "La cohorte atteint-elle le seuil de k patients ?"
+        data_tests: [not_null]
+      - name: nb_patients
+        description: "Patients distincts portant ce diagnostic — mesure NON additive, NULL si masquée"
+      - name: nb_sejours
+        description: "Séjours portant ce diagnostic — NULL si masquée"
+      - name: prevalence_pct
+        description: "Part de la population suivie — NULL si masquée"
+      - name: nb_patients_total
+        description: "Dénominateur : population suivie par l'entrepôt"
+        data_tests: [not_null]
+
+  - name: cohorte_demographie
+    description: >
+      KPI 6 — Description de cohorte : distribution par âge et sexe, au grain
+      pathologie × tranche d'âge × sexe. Restreinte au diagnostic PRINCIPAL, c'est-à-dire
+      au motif d'hospitalisation. Âges en tranches de dix ans, jamais en valeur exacte.
+      Une cellule de moins de cinq patients garde sa ligne, effectif masqué.
+    columns:
+      - name: code_cim10
+        data_tests: [not_null]
+      - name: tranche_age
+        description: "Tranche de dix ans — l'âge exact n'est jamais diffusé"
+        data_tests: [not_null]
+      - name: sexe
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["M", "F"]
+      - name: diffusable
+        description: "La cellule atteint-elle le seuil de k patients ?"
+        data_tests: [not_null]
+      - name: nb_patients
+        description: "Patients distincts de la cellule — NULL si masquée"
 
   - name: cohorte_demographie_globale
     description: >
@@ -34,60 +56,32 @@ models:
     columns:
       - name: sexe
         data_tests:
+          - not_null
           - accepted_values:
               arguments:
                 values: ["M", "F"]
       - name: tranche_age
         description: "Tranche de dix ans — l'âge exact n'est jamais diffusé"
-      - name: nb_patients
         data_tests: [not_null]
-
-  - name: cohorte_demographie_region
-    description: >
-      Grain fin diffusé : pathologie × sexe × tranche d'âge × département, pour les
-      cellules atteignant le seuil.
-    columns:
-      - name: nb_patients
+      - name: diffusable
         data_tests: [not_null]
-
-  - name: cohorte_demographie_sexe
-    description: >
-      Répartition par sexe de chaque cohorte, à son propre grain (pathologie × sexe).
-      Elle existe parce que sommer cohorte_demographie à travers les tranches d'âge
-      donnerait un ratio biaisé : les cellules qu'y retire le seuil sont les plus
-      petites, jamais un échantillon au hasard. Diffusée uniquement si toutes les
-      cellules de sexe de la pathologie atteignent le seuil — sinon l'effectif manquant
-      se retrouverait en soustrayant du total publié par cohorte_pathologie.
-    columns:
-      - name: sexe
-        data_tests:
-          - accepted_values:
-              arguments:
-                values: ["M", "F"]
       - name: nb_patients
-        data_tests: [not_null]
-
-  - name: cohorte_demographie
-    description: >
-      Marge par pathologie, sexe et tranche d'âge. Diffusée uniquement si sa
-      décomposition départementale l'est intégralement — sans quoi la cellule cachée
-      se retrouverait par soustraction.
-    columns:
-      - name: nb_patients
-        data_tests: [not_null]
+        description: "Patients distincts de la cellule — NULL si masquée"
 
   - name: k_anonymat_controle
     description: >
       Preuve du dispositif, volontairement diffusable : combien de cellules ont été
-      retirées et pourquoi, sans jamais révéler lesquelles ni leur effectif.
+      masquées et sur quel critère, sans jamais révéler lesquelles ni leur effectif.
     columns:
       - name: table_cible
         data_tests: [unique, not_null]
+      - name: motif
+        description: "Critère de masquage appliqué"
       - name: cellules_calculees
         description: "Cellules produites avant application du seuil"
       - name: cellules_diffusees
-        description: "Cellules effectivement publiées"
-      - name: cellules_supprimees
-        description: "Cellules retirées par le seuil ou la suppression complémentaire"
+        description: "Cellules dont l'effectif est publié"
+      - name: cellules_masquees
+        description: "Cellules dont l'effectif est retiré"
       - name: seuil_k
         description: "Valeur du seuil appliqué"

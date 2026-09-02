@@ -19,7 +19,7 @@ MODELS_DIR = DBT_DIR / "models"
 # Modèles éphémères : dbt les inline comme CTE, ils ne produisent aucune table.
 # Les exiger dans `EXPECTED_TABLES` reviendrait à attendre une table qui n'existe
 # pas — et ne pas les déclarer ici les ferait passer pour un oubli.
-EPHEMERES = {"stg_sejours", "stg_monitoring"}
+EPHEMERES = {"stg_sejours", "stg_monitoring", "readmission_sejour"}
 
 # Modèles hors des bases de l'entrepôt : le rapport qualité vit dans `ops`, base
 # d'exploitation à laquelle aucun compte de restitution n'a accès.
