@@ -552,6 +552,7 @@ version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "clickhouse-connect" },
+    { name = "dbt-clickhouse" },
     { name = "requests" },
     { name = "rich" },
     { name = "typer" },
@@ -561,9 +562,6 @@ dependencies = [
 azure = [
     { name = "azure-identity" },
     { name = "azure-storage-blob" },
-]
-dbt = [
-    { name = "dbt-clickhouse" },
 ]
 
 [package.dev-dependencies]
@@ -577,12 +575,12 @@ requires-dist = [
     { name = "azure-identity", marker = "extra == 'azure'", specifier = ">=1.19.0" },
     { name = "azure-storage-blob", marker = "extra == 'azure'", specifier = ">=12.23.0" },
     { name = "clickhouse-connect", specifier = ">=0.8.0" },
-    { name = "dbt-clickhouse", marker = "extra == 'dbt'", specifier = ">=1.10.2,<1.11" },
+    { name = "dbt-clickhouse", specifier = ">=1.10.2,<1.11" },
     { name = "requests", specifier = ">=2.32.0" },
     { name = "rich", specifier = ">=13.9.0" },
     { name = "typer", specifier = ">=0.15.0" },
 ]
-provides-extras = ["azure", "dbt"]
+provides-extras = ["azure"]
 
 [package.metadata.requires-dev]
 dev = [

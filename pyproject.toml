@@ -12,17 +12,17 @@ dependencies = [
     "typer>=0.15.0",
     "rich>=13.9.0",
     "requests>=2.32.0",
+    # dbt n'est pas optionnel : silver et gold sont des modèles dbt, `make demo` en a
+    # besoin. En extra, `uv run` sur un clone frais ne l'installait pas — la CI l'a vu.
+    "dbt-clickhouse>=1.10.2,<1.11",
 ]
 
-# Extras : le socle reste minimal pour `make demo`. Le cloud (stockage objet) et la
-# transformation dbt s'ajoutent explicitement — c'est l'image du job qui les installe.
+# Extra : le stockage objet ne sert qu'au déploiement Azure. C'est l'image du job qui
+# l'installe ; un poste local n'en a pas besoin.
 [project.optional-dependencies]
 azure = [
     "azure-storage-blob>=12.23.0",
     "azure-identity>=1.19.0",
-]
-dbt = [
-    "dbt-clickhouse>=1.10.2,<1.11",
 ]
 
 [project.scripts]

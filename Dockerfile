@@ -21,12 +21,12 @@ WORKDIR /app
 # réinstalle pas l'environnement. `--frozen` garantit que l'image utilise
 # exactement les versions du lock, y compris celles de dbt.
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --frozen --no-dev --no-install-project --extra azure --extra dbt
+RUN uv sync --frozen --no-dev --no-install-project --extra azure
 
 COPY src/ src/
 COPY sql/ sql/
 COPY dbt/ dbt/
-RUN uv sync --frozen --no-dev --extra azure --extra dbt
+RUN uv sync --frozen --no-dev --extra azure
 
 
 FROM python:3.13-slim
