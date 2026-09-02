@@ -24,7 +24,18 @@ DIAGRAMME = Path(__file__).resolve().parents[1] / "docs" / "data-model.puml"
 
 # Tables bronze et ops : elles ne figurent pas dans EXPECTED_TABLES, qui ne
 # couvre que les couches reconstruites à chaque run.
-BRONZE = ("patients", "sejours", "diagnostics", "monitoring", "services", "cim10")
+BRONZE = (
+    "patients",
+    "sejours",
+    "diagnostics",
+    "monitoring",
+    "services",
+    "cim10",
+    # Évolution du 29 août 2026.
+    "actes",
+    "description_service",
+    "ccam",
+)
 OPS = ("ingest_log", "pipeline_runs", "quality_report")
 
 

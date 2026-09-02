@@ -4,7 +4,8 @@
 {% set tables = [
     'dim_patient', 'dim_service', 'dim_cim10',
     'fact_sejour', 'fact_diagnostic', 'fact_monitoring',
-    'sejours_rejets', 'monitoring_rejets'
+    'sejours_rejets', 'monitoring_rejets',
+    'dim_ccam', 'fact_acte', 'actes_rejets'
 ] %}
 {% for t in tables %}
 SELECT '{{ t }}' AS table_cible, count() AS sans_lignage

@@ -119,6 +119,14 @@ class Storage(Protocol):
     def days(self, domain: str) -> list[str]:
         """Jours déposés pour un domaine, triés. Liste vide si le domaine est absent."""
 
+    def list_files(self, domain: str, day: str) -> list[str]:
+        """Fichiers réellement présents pour un domaine et un jour, triés.
+
+        Sert aux domaines dont le contenu d'un jour n'est pas connu d'avance — les
+        nomenclatures, dont le CHU ne dépose que celles qui changent. Un fichier
+        présent mais non reconnu doit pouvoir être signalé, pas ignoré en silence.
+        """
+
     def exists(self, source: SourceFile) -> bool: ...
 
     def open_read(self, source: SourceFile) -> IO[bytes]: ...
@@ -161,6 +169,17 @@ class LocalStorage:
                 continue
             jours.append(entry.name)
         return jours
+
+    def list_files(self, domain: str, day: str) -> list[str]:
+        directory = self.root / domain / day
+        if not directory.is_dir():
+            return []
+        # Les fichiers cachés (`.DS_Store` sur macOS) ne sont jamais un dépôt.
+        return sorted(
+            entry.name
+            for entry in directory.iterdir()
+            if entry.is_file() and not entry.name.startswith(".")
+        )
 
     def exists(self, source: SourceFile) -> bool:
         return self._path(source).is_file()
@@ -235,6 +254,16 @@ class AzureBlobStorage:
             if len(morceaux) >= 3 and DAY_PATTERN.match(morceaux[1]):
                 jours.add(morceaux[1])
         return sorted(jours)
+
+    def list_files(self, domain: str, day: str) -> list[str]:
+        """Blobs directement sous `domaine/jour/`, sans descendre plus bas."""
+        prefixe = f"{domain}/{day}/"
+        noms = []
+        for nom in self._client.list_blob_names(name_starts_with=prefixe):
+            reste = nom[len(prefixe) :]
+            if reste and "/" not in reste and not reste.startswith("."):
+                noms.append(reste)
+        return sorted(noms)
 
     def exists(self, source: SourceFile) -> bool:
         return self._client.get_blob_client(source.key).exists()

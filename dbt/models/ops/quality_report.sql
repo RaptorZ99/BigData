@@ -24,7 +24,7 @@
 --   * modèle → le graphe garantit qu'il s'exécute APRÈS tout ce qu'il compte. Dans la
 --     version SQL, cet ordre reposait sur le préfixe numérique des fichiers et sur une
 --     règle écrite à la main (« 05 en dernier »). Elle disparaît.
---   * append → une exécution ajoute ses 18 lignes sans effacer l'historique. Un `table`
+--   * append → une exécution ajoute ses 22 lignes sans effacer l'historique. Un `table`
 --     écraserait le rapport du run précédent.
 --
 -- ⚠ `eds run --full-refresh` ne doit JAMAIS passer `--full-refresh` à dbt : le premier
@@ -227,6 +227,56 @@ SELECT
                 (SELECT code_cim10 FROM {{ ref('dim_cim10') }}))
              FROM {{ ref('fact_diagnostic') }})),
     'Intégrité référentielle fact_diagnostic → dim_cim10',
+    now()
+
+UNION ALL
+-- ═══ Évolution du 29 août 2026 : description des services et actes ═════════
+-- ── Q9 · SIGNALEMENT ────────────────────────────────────────────────────────
+SELECT
+    '{{ run_id }}', 'silver', 'dim_service', 'Q9_service_non_decrit',
+    'Services absents du référentiel de description (catégorie, capacité, pôle)',
+    toInt64((SELECT count() FROM {{ ref('dim_service') }})),
+    toInt64((SELECT count() FROM {{ ref('dim_service') }})),
+    toInt64(0),
+    toInt64((SELECT countIf(NOT est_decrit) FROM {{ ref('dim_service') }})),
+    'Service conservé : catégorie et pôle « non renseigne », capacité NULL — jamais inventée',
+    now()
+
+UNION ALL
+-- ── C3 · CONTRÔLE (attendu à zéro) ──────────────────────────────────────────
+SELECT
+    '{{ run_id }}', 'silver', 'fact_acte', 'C3_sejour_inconnu',
+    'Contrôle : actes rattachés à un séjour absent du dépôt',
+    -- Lus au grain du fait (séjour, code, horodatage), celui de la déduplication.
+    toInt64((SELECT uniqExact((stay_id, code_ccam, acte_ts)) FROM {{ source('bronze', 'actes') }})),
+    toInt64((SELECT count() FROM {{ ref('fact_acte') }})),
+    toInt64((SELECT count() FROM {{ ref('actes_rejets') }})),
+    toInt64(0),
+    'Sans séjour parent, le service de l''acte n''est pas résoluble',
+    now()
+
+UNION ALL
+-- ── Q6 · CONTRÔLE (attendu à zéro) ──────────────────────────────────────────
+SELECT
+    '{{ run_id }}', 'silver', 'fact_acte', 'Q6_ccam_referentiel',
+    'Contrôle : code CCAM absent du référentiel',
+    toInt64((SELECT count() FROM {{ ref('fact_acte') }})),
+    toInt64((SELECT count() FROM {{ ref('fact_acte') }})),
+    toInt64(0),
+    toInt64((SELECT countIf(is_code_inconnu) FROM {{ ref('fact_acte') }})),
+    'Intégrité référentielle fact_acte → dim_ccam ; un acte sans tarif ne se facture pas',
+    now()
+
+UNION ALL
+-- ── Q10 · CONTRÔLE (attendu à zéro) ─────────────────────────────────────────
+SELECT
+    '{{ run_id }}', 'silver', 'fact_acte', 'Q10_acte_hors_sejour',
+    'Contrôle : actes réalisés avant l''admission ou après la sortie',
+    toInt64((SELECT count() FROM {{ ref('fact_acte') }})),
+    toInt64((SELECT count() FROM {{ ref('fact_acte') }})),
+    toInt64(0),
+    toInt64((SELECT countIf(is_hors_sejour) FROM {{ ref('fact_acte') }})),
+    'Évalué sur les seuls séjours temporellement cohérents',
     now()
 
 UNION ALL

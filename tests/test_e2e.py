@@ -5,9 +5,14 @@ données du CHU — c'est la garantie que les indicateurs sont reproductibles et
 qu'une régression de la logique de transformation serait détectée.
 
 Les six KPI du sujet sont ancrés valeur par valeur sur la feuille de réponses
-fournie avec le jeu de données corrigé (`docs/REPONSES-KPI-niveau1.pdf`). Ce
-n'est pas un test de non-régression : c'est la vérification que l'entrepôt
-produit la bonne réponse, pas seulement la même qu'hier.
+remise par l'intervenant avec le jeu de données corrigé — non distribuée avec le
+dépôt, ses valeurs sont reprises ici littéralement. Ce n'est pas un test de
+non-régression : c'est la vérification que l'entrepôt produit la bonne réponse,
+pas seulement la même qu'hier.
+
+Depuis le 29 août 2026, le dépôt porte aussi les actes médicaux et la description des
+services : la section « Évolution » vérifie que l'entrepôt les exploite sans que rien
+d'antérieur n'ait bougé.
 
 Prérequis : `make up && make pipeline`.
 Lancement : `make test-e2e`.
@@ -43,6 +48,10 @@ BRONZE_ATTENDU = {
     "sejours": 6_797,
     "diagnostics": 12_720,
     "monitoring": 41_778,
+    # Dépôt du 29 août : un flux de faits et deux nomenclatures.
+    "actes": 8_112,
+    "description_service": 7,  # NEURO n'y figure pas
+    "ccam": 8,
 }
 
 SILVER_ATTENDU = {
@@ -52,6 +61,9 @@ SILVER_ATTENDU = {
     "fact_diagnostic": 12_720,  # aucune perte : le rejet Q2 ne cascade pas
     "fact_monitoring": 40_920,  # 41 778 - 858 capteurs hors plage
     "monitoring_rejets": 858,  # hors plage physiologique, et rien d'autre
+    "dim_ccam": 8,
+    "fact_acte": 8_112,  # tous rattachés à un séjour déposé
+    "actes_rejets": 0,
 }
 
 
@@ -183,7 +195,7 @@ def test_le_monitoring_ne_couvre_que_la_reanimation_et_la_cardiologie(client):
 
 
 # ── Indicateurs : ancrés sur la feuille de réponses du jeu corrigé ──────────
-# Chaque valeur ci-dessous vient de `docs/REPONSES-KPI-niveau1.pdf`. Un écart
+# Chaque valeur ci-dessous vient de la feuille de réponses de l'intervenant. Un écart
 # signifie que l'entrepôt ne répond pas à la question posée — pas qu'il a changé.
 
 KPI1_DMS_PAR_SERVICE = {
@@ -484,6 +496,204 @@ def test_les_tuiles_de_synthese_reprennent_les_tables_gold(client):
         "       nb_releves_alerte, pct_releves_alerte FROM eds_gold_pilotage.kpi_synthese"
     ).result_rows[0]
     assert (sejours, dms, readm, taux, alertes, pct) == (6_729, 5.15, 780, 11.59, 3_314, 8.1)
+
+
+# ── Évolution du 29 août 2026 : actes médicaux et description des services ──
+# Le CHU a ajouté des données ; rien de ce qui précède ne doit avoir bougé.
+
+KPI_EVO1_ACTIVITE_PAR_CATEGORIE = {
+    # catégorie : (services, séjours, séjours terminés, DMS en jours)
+    "medecine": (3, 2_652, 2_397, 5.71),  # CARDIO, PNEUMO, ONCO
+    "urgences": (1, 1_423, 1_277, 2.15),
+    "non renseigne": (1, 1_208, 1_077, 7.06),  # NEURO, absent de la description
+    "pediatrie": (1, 503, 448, 3.19),
+    "chirurgie": (1, 476, 424, 4.39),
+    "reanimation": (1, 467, 423, 9.05),
+}
+
+KPI_EVO2_ACTES_PAR_SERVICE = {
+    # service : (actes, séjours, actes par séjour, lits, actes par lit, montant €)
+    "CARDIO": (1_935, 1_601, 1.21, 30, 64.5, 521_655),
+    "URGENCES": (1_731, 1_423, 1.22, 20, 86.6, 478_585),
+    "NEURO": (1_471, 1_208, 1.22, None, None, 393_850),  # capacité inconnue → densité NULL
+    "PNEUMO": (1_009, 840, 1.20, 28, 36.0, 268_045),
+    "PEDIA": (598, 503, 1.19, 22, 27.2, 171_165),
+    "CHIR": (564, 476, 1.18, 40, 14.1, 147_145),
+    "REA": (563, 467, 1.21, 16, 35.2, 154_740),
+    "ONCO": (241, 211, 1.14, 35, 6.9, 64_265),
+}
+
+KPI_EVO3_ACTES_PAR_TYPE = {
+    # code CCAM : (actes, tarif €, montant €)
+    "ZBQK001": (1_043, 25, 26_075),
+    "YYYY010": (1_039, 25, 25_975),
+    "DZEA001": (1_030, 450, 463_500),
+    "EBLA003": (1_025, 120, 123_000),
+    "HGQD001": (1_015, 260, 263_900),
+    "GLLD001": (1_000, 220, 220_000),
+    "NEJA001": (982, 300, 294_600),
+    "HHFA001": (978, 800, 782_400),
+}
+
+
+def test_les_kpi_historiques_sont_inchanges_apres_l_evolution(client):
+    """Non-régression, en une ligne : les six indicateurs du corrigé valent toujours pareil.
+
+    Chacun a son propre test plus haut ; celui-ci existe pour que la promesse de
+    l'évolution — « sans rien casser » — soit vérifiée à un seul endroit, nommément.
+    """
+    invariants = client.query(
+        "SELECT (SELECT count() FROM eds_silver.fact_sejour), "
+        "       (SELECT dms_jours FROM eds_gold_pilotage.kpi_dms_service "
+        "        WHERE service_code = 'REA'), "
+        "       (SELECT taux_readmission_30j_pct FROM eds_gold_pilotage.kpi_readmissions_30j), "
+        "       (SELECT sum(nb_passages) FROM eds_gold_pilotage.kpi_urgences_jour), "
+        "       (SELECT sum(nb_alertes) FROM eds_gold_pilotage.kpi_alertes_jour), "
+        "       (SELECT nb_patients FROM eds_gold_recherche.prevalence_pathologie "
+        "        WHERE code_cim10 = 'N39'), "
+        "       (SELECT countIf(diffusable) FROM eds_gold_recherche.cohorte_demographie)"
+    ).result_rows[0]
+    assert invariants == (6_729, 9.05, 11.59, 1_423, 3_314, 2_234, 89)
+
+
+def test_dim_service_est_completee_sans_perdre_le_service_non_decrit(client):
+    """Le référentiel de description ne couvre que sept services sur huit.
+
+    NEURO en est absent — le piège annoncé par le sujet. Il reste dans la dimension :
+    catégorie et pôle « non renseigne », capacité NULL et jamais inventée, et le fait
+    est porté par `est_decrit` puis compté par la règle Q9.
+    """
+    lignes = {
+        code: (categorie, pole, lits, decrit)
+        for code, categorie, pole, lits, decrit in client.query(
+            "SELECT service_code, categorie, pole, capacite_lits, est_decrit "
+            "FROM eds_silver.dim_service"
+        ).result_rows
+    }
+    assert len(lignes) == 8, "un service a disparu de la dimension"
+    assert lignes["NEURO"] == ("non renseigne", "non renseigne", None, False)
+    assert lignes["CARDIO"] == ("medecine", "Coeur-Poumon", 30, True)
+    assert lignes["REA"] == ("reanimation", "Soins critiques", 16, True)
+    assert sum(1 for _, _, _, decrit in lignes.values() if decrit) == 7
+
+
+def test_fact_acte_porte_le_service_du_sejour_sans_jointure_fait_a_fait(client):
+    """Le service est résolu au build et rangé sur le fait — c'est la réponse au piège n° 2.
+
+    Il vient du référentiel de tous les séjours déposés : les 82 actes réalisés
+    pendant les 68 séjours aux horodatages incohérents gardent leur service et
+    restent comptés, comme les diagnostics et les relevés (un rejet ne vaut que
+    pour la table où vit l'anomalie).
+    """
+    actes, codes_inconnus, hors_sejour, montant, sur_rejetes, sejours = client.query(
+        "SELECT count(), countIf(is_code_inconnu), countIf(is_hors_sejour), "
+        "       sum(montant_euros), "
+        "       countIf(stay_id IN (SELECT stay_id FROM eds_silver.sejours_rejets)), "
+        "       uniqExact(stay_id) "
+        "FROM eds_silver.fact_acte"
+    ).result_rows[0]
+    assert (actes, codes_inconnus, hors_sejour, sur_rejetes, sejours) == (8_112, 0, 0, 82, 5_096)
+    assert montant == 2_199_450
+
+    sans_service = scalar(
+        client,
+        "SELECT count() FROM eds_silver.fact_acte "
+        "WHERE service_code NOT IN (SELECT service_code FROM eds_silver.dim_service)",
+    )
+    assert sans_service == 0
+
+    # Minimisation : aucun indicateur d'actes ne compte des patients, le pseudonyme
+    # ne descend donc pas jusqu'à cette table.
+    colonnes = scalar(
+        client,
+        "SELECT groupArray(name) FROM system.columns "
+        "WHERE database = 'eds_silver' AND table = 'fact_acte'",
+    )
+    assert "patient_pseudo" not in colonnes
+
+
+def test_kpi_evolution_1_activite_et_dms_par_categorie(client):
+    """Grain : la catégorie de service. Le service non décrit y apparaît, sous son nom."""
+    lignes = {
+        categorie: (services, sejours, termines, dms)
+        for categorie, services, sejours, termines, dms in client.query(
+            "SELECT categorie, nb_services, nb_sejours, nb_sejours_termines, dms_jours "
+            "FROM eds_gold_pilotage.kpi_activite_categorie"
+        ).result_rows
+    }
+    assert lignes == KPI_EVO1_ACTIVITE_PAR_CATEGORIE
+    assert sum(v[1] for v in lignes.values()) == 6_729, "les catégories partitionnent les séjours"
+
+
+def test_kpi_evolution_2_4_5_actes_densite_et_facturation_par_service(client):
+    """Trois indicateurs, un grain, une table — bâtie par drill-across.
+
+    La densité par lit vaut NULL pour NEURO : sa capacité n'est pas connue, et l'on
+    ne divise pas par un nombre de lits inventé.
+    """
+    lignes = {
+        code: (actes, sejours, par_sejour, lits, par_lit, montant)
+        for code, actes, sejours, par_sejour, lits, par_lit, montant in client.query(
+            "SELECT service_code, nb_actes, nb_sejours, actes_par_sejour, capacite_lits, "
+            "       actes_par_lit, montant_facture_euros "
+            "FROM eds_gold_pilotage.kpi_actes_service"
+        ).result_rows
+    }
+    assert lignes == KPI_EVO2_ACTES_PAR_SERVICE
+
+
+def test_kpi_evolution_3_repartition_des_actes_par_type(client):
+    """Grain : le code CCAM. Chaque acte porte un code : les parts se somment à 100 %."""
+    lignes = {
+        code: (actes, tarif, montant)
+        for code, actes, tarif, montant in client.query(
+            "SELECT code_ccam, nb_actes, tarif_euros, montant_facture_euros "
+            "FROM eds_gold_pilotage.kpi_actes_type"
+        ).result_rows
+    }
+    assert lignes == KPI_EVO3_ACTES_PAR_TYPE
+    assert (
+        scalar(client, "SELECT round(sum(part_pct)) FROM eds_gold_pilotage.kpi_actes_type") == 100
+    )
+
+
+def test_les_vues_d_actes_se_reconcilient_avec_le_fait(client):
+    """Le garde-fou du drill-across : une jointure fait-à-fait ferait exploser ces sommes."""
+    faits, par_service, par_type, montant_service = client.query(
+        "SELECT (SELECT count() FROM eds_silver.fact_acte), "
+        "       (SELECT sum(nb_actes) FROM eds_gold_pilotage.kpi_actes_service), "
+        "       (SELECT sum(nb_actes) FROM eds_gold_pilotage.kpi_actes_type), "
+        "       (SELECT sum(montant_facture_euros) FROM eds_gold_pilotage.kpi_actes_service)"
+    ).result_rows[0]
+    assert faits == par_service == par_type == 8_112
+    assert montant_service == 2_199_450
+
+    tuiles = client.query(
+        "SELECT nb_actes, montant_facture_euros FROM eds_gold_pilotage.kpi_synthese"
+    ).result_rows[0]
+    assert tuiles == (8_112, 2_199_450)
+
+
+def test_les_regles_qualite_de_l_evolution_sont_chiffrees(client):
+    """Quatre règles de plus : un signalement (Q9) et trois contrôles attendus à zéro."""
+    from eds.state import last_quality_run_id
+
+    mesures = {
+        rule: (rows_in, rows_kept, rows_rejected, rows_flagged)
+        for rule, rows_in, rows_kept, rows_rejected, rows_flagged in client.query(
+            "SELECT rule, rows_in, rows_kept, rows_rejected, rows_flagged "
+            "FROM ops.quality_report "
+            f"WHERE run_id = '{last_quality_run_id(client)}' "
+            "  AND rule IN ('Q9_service_non_decrit', 'C3_sejour_inconnu', "
+            "               'Q6_ccam_referentiel', 'Q10_acte_hors_sejour')"
+        ).result_rows
+    }
+    assert mesures == {
+        "Q9_service_non_decrit": (8, 8, 0, 1),
+        "C3_sejour_inconnu": (8_112, 8_112, 0, 0),
+        "Q6_ccam_referentiel": (8_112, 8_112, 0, 0),
+        "Q10_acte_hors_sejour": (8_112, 8_112, 0, 0),
+    }
 
 
 # ── RGPD ────────────────────────────────────────────────────────────────────
@@ -906,14 +1116,29 @@ def test_toutes_les_lignes_portent_leur_lignage(client, database, table):
 
 
 def test_l_ingestion_est_journalisee(client):
-    """89 fichiers déposés sur vingt-huit jours, tous chargés avec succès."""
-    total, succes, jours = client.query(
-        "SELECT count(), countIf(status = 'success'), uniqExact(ingest_date) "
-        "FROM ops.ingest_log FINAL"
+    """92 fichiers sur vingt-neuf jours et six domaines, tous chargés avec succès.
+
+    Les 89 premiers viennent des vingt-huit jours du dépôt initial ; les trois
+    derniers, du 29 août — un flux d'actes et deux nomenclatures, ingérés par le
+    même pipeline incrémental sans qu'aucun des 89 autres ne soit retraité.
+    """
+    total, succes, jours, domaines = client.query(
+        "SELECT count(), countIf(status = 'success'), uniqExact(ingest_date), "
+        "       uniqExact(domain) FROM ops.ingest_log FINAL"
     ).result_rows[0]
-    assert total == 89
-    assert succes == 89
-    assert jours == 28
+    assert (total, succes, jours, domaines) == (92, 92, 29, 6)
+
+    evolution = sorted(
+        client.query(
+            "SELECT domain, source_file, rows_loaded FROM ops.ingest_log FINAL "
+            "WHERE ingest_date = '2026-08-29'"
+        ).result_rows
+    )
+    assert evolution == [
+        ("actes", "actes.parquet", 8_112),
+        ("referentiels", "ccam.csv", 8),
+        ("referentiels", "description_service.csv", 7),
+    ]
 
 
 def test_le_rapport_qualite_est_renseigne(client):
@@ -929,11 +1154,12 @@ def test_le_rapport_qualite_est_renseigne(client):
 
     # Le compte exact est publié dans le rapport : le figer ici empêche les deux
     # de diverger en silence. Quatre lignes en gold pour deux règles — le
-    # k-anonymat est chiffré table diffusée par table diffusée.
+    # k-anonymat est chiffré table diffusée par table diffusée. Dix-huit en silver,
+    # dont les quatre de l'évolution du 29 août.
     lignes, regles = client.query(
         f"SELECT count(), uniqExact(rule) FROM ops.quality_report WHERE run_id = '{run_id}'"
     ).result_rows[0]
-    assert (lignes, regles) == (18, 16)
+    assert (lignes, regles) == (22, 20)
 
     par_couche = dict(
         client.query(
@@ -941,7 +1167,7 @@ def test_le_rapport_qualite_est_renseigne(client):
             f"WHERE run_id = '{run_id}' GROUP BY layer"
         ).result_rows
     )
-    assert par_couche == {"silver": 14, "gold": 4}
+    assert par_couche == {"silver": 18, "gold": 4}
 
 
 def test_les_regles_rgpd_de_la_couche_gold_sont_chiffrees(client):

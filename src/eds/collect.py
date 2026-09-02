@@ -143,13 +143,29 @@ _COLLECTORS: dict[str, Callable[[IO[bytes], IO[bytes], Config], int]] = {
     "sejours": _collect_sejours,
 }
 
+# Flux quotidiens : chaque jour déposé doit contenir ce fichier. Un jour partiel n'est
+# pas un run normal, il alerte (voir `missing_files`).
 EXPECTED_FILES: dict[str, tuple[str, ...]] = {
     "patients": ("patients.csv",),
     "sejours": ("sejours.csv",),
     "diagnostics": ("diagnostics.json",),
     "monitoring": ("monitoring.parquet",),
-    "referentiels": ("services.csv", "cim10.csv"),
+    # Évolution du 29 août 2026 : nouveau flux de faits.
+    "actes": ("actes.parquet",),
 }
+
+# Nomenclatures : le CHU ne dépose que celles qui changent — les services et la CIM-10
+# le premier jour, la description des services et la CCAM le 29 août. Un jour donné,
+# chaque fichier est donc facultatif. Ce qui est anormal, c'est un jour de dépôt qui
+# n'en contient aucun de reconnu, ou un fichier inconnu qui serait passé sous silence.
+REFERENTIEL_DOMAIN = "referentiels"
+REFERENTIEL_FILES: tuple[str, ...] = (
+    "services.csv",
+    "cim10.csv",
+    "description_service.csv",
+    "ccam.csv",
+)
+AUCUNE_NOMENCLATURE = "(aucune nomenclature reconnue)"
 
 
 def discover(storage: Storage) -> Iterator[SourceFile]:
@@ -170,22 +186,50 @@ def missing_files(storage: Storage) -> list[str]:
     reconstruit sur une source amputée. Le pipeline le traite donc comme un
     échec, afin que le code de sortie alerte plutôt que de laisser croire à une
     exécution nominale.
+
+    Pour les nomenclatures, le manque est un jour de dépôt sans aucun fichier
+    reconnu : le CHU a créé le dossier, mais rien dedans ne peut être chargé.
     """
     return [source.label for source, present in _scan(storage) if not present]
 
 
 def _scan(storage: Storage) -> Iterator[tuple[SourceFile, bool]]:
     """Énumère tous les fichiers attendus, présents ou non."""
-    for domain in sorted(EXPECTED_FILES):
+    for domain in sorted({*EXPECTED_FILES, REFERENTIEL_DOMAIN}):
         jours = storage.days(domain)
         if not jours:
             log.warning("Domaine absent du dépôt : %s", domain)
             continue
 
         for day in jours:
+            if domain == REFERENTIEL_DOMAIN:
+                yield from _scan_referentiels(storage, day)
+                continue
             for filename in EXPECTED_FILES[domain]:
                 source = SourceFile(domain, day, filename)
                 yield source, storage.exists(source)
+
+
+def _scan_referentiels(storage: Storage, day: str) -> Iterator[tuple[SourceFile, bool]]:
+    """Un jour de nomenclatures : ce qui est reconnu se charge, le reste se signale."""
+    presents = storage.list_files(REFERENTIEL_DOMAIN, day)
+    reconnus = [nom for nom in REFERENTIEL_FILES if nom in presents]
+
+    for inconnu in sorted(set(presents) - set(REFERENTIEL_FILES)):
+        log.warning(
+            "Fichier non reconnu dans %s/%s, ignoré : %s (attendus : %s)",
+            REFERENTIEL_DOMAIN,
+            day,
+            inconnu,
+            ", ".join(REFERENTIEL_FILES),
+        )
+
+    if not reconnus:
+        yield SourceFile(REFERENTIEL_DOMAIN, day, AUCUNE_NOMENCLATURE), False
+        return
+
+    for nom in reconnus:
+        yield SourceFile(REFERENTIEL_DOMAIN, day, nom), True
 
 
 def collect(source: SourceFile, depot: Storage, lake: Storage, config: Config) -> CollectResult:

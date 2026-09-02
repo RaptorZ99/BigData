@@ -75,6 +75,10 @@ EXPECTED_TABLES: dict[str, tuple[str, ...]] = {
         "fact_monitoring",
         "sejours_rejets",
         "monitoring_rejets",
+        # Évolution du 29 août 2026.
+        "dim_ccam",
+        "fact_acte",
+        "actes_rejets",
     ),
     "eds_gold_pilotage": (
         "kpi_dms_service",
@@ -88,6 +92,10 @@ EXPECTED_TABLES: dict[str, tuple[str, ...]] = {
         "kpi_synthese",
         "kpi_qualite_pipeline",
         "kpi_ingestion",
+        # Évolution du 29 août 2026.
+        "kpi_activite_categorie",
+        "kpi_actes_service",
+        "kpi_actes_type",
     ),
     "eds_gold_recherche": (
         "prevalence_pathologie",
@@ -152,6 +160,7 @@ def is_stale(client: Client) -> bool:
             UNION ALL SELECT max(_loaded_at) FROM eds_bronze.patients
             UNION ALL SELECT max(_loaded_at) FROM eds_bronze.diagnostics
             UNION ALL SELECT max(_loaded_at) FROM eds_bronze.monitoring
+            UNION ALL SELECT max(_loaded_at) FROM eds_bronze.actes
         )
         """,
     )

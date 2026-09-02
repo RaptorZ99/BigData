@@ -31,13 +31,28 @@ models:
         description: "Horodatage de construction de la couche silver"
 
   - name: dim_service
-    description: "Dimension conformée service hospitalier (référentiel du CHU)."
+    description: >
+      Dimension conformée service hospitalier (référentiel du CHU), complétée depuis le
+      29 août 2026 par sa description : catégorie, capacité en lits, pôle. Un service
+      absent de la description est conservé — catégorie et pôle « non renseigne »,
+      capacité NULL, jamais inventée.
     columns:
       - name: service_code
         description: "Code du service d'hospitalisation"
         data_tests: [unique, not_null]
       - name: service_label
         description: "Libellé du service"
+        data_tests: [not_null]
+      - name: categorie
+        description: "Type de service — regroupe plusieurs services ; « non renseigne » si non décrit"
+        data_tests: [not_null]
+      - name: pole
+        description: "Pôle hospitalier ; « non renseigne » si non décrit"
+        data_tests: [not_null]
+      - name: capacite_lits
+        description: "Nombre de lits — NULL si le service n'est pas décrit"
+      - name: est_decrit
+        description: "Le service figure-t-il dans le référentiel de description ?"
         data_tests: [not_null]
 
   - name: dim_cim10
@@ -212,4 +227,63 @@ models:
     columns:
       - name: reject_reason
         description: "Motifs cumulés, séparés par '+'"
+        data_tests: [not_null]
+
+  # ── Évolution du 29 août 2026 ─────────────────────────────────────────────
+  - name: dim_ccam
+    description: "Dimension CCAM : code d'acte médical → libellé et tarif T2A."
+    columns:
+      - name: code_ccam
+        description: "Code de l'acte"
+        data_tests: [unique, not_null]
+      - name: libelle
+        description: "Libellé de l'acte"
+        data_tests: [not_null]
+      - name: tarif_euros
+        description: "Tarif T2A en euros — NULL si absent du référentiel"
+
+  - name: fact_acte
+    description: >
+      Fait acte médical (grain : 1 acte) — étoile sur dim_service et dim_ccam. Le service
+      est résolu au build depuis le référentiel des séjours et rangé sur le fait : aucune
+      jointure entre tables de faits n'est jamais nécessaire. Sans identifiant patient,
+      aucun indicateur d'actes n'en ayant besoin.
+    columns:
+      - name: stay_id
+        description: "Dimension dégénérée vers le séjour"
+        data_tests: [not_null]
+      - name: service_code
+        description: "Propagé depuis le séjour — c'est ce qui rend « actes par service » calculable sans jointure fait-à-fait"
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_service')
+                field: service_code
+      - name: code_ccam
+        description: "Clé vers dim_ccam"
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_ccam')
+                field: code_ccam
+      - name: acte_ts
+        description: "Date et heure de l'acte"
+        data_tests: [not_null]
+      - name: acte_date
+        description: "Jour de l'acte"
+      - name: montant_euros
+        description: "Tarif T2A de l'acte au moment du build — NULL si le code est inconnu"
+      - name: is_code_inconnu
+        description: "Code absent du référentiel CCAM — contrôle actif, attendu à 0"
+      - name: is_hors_sejour
+        description: "Acte avant l'admission ou après la sortie — évalué sur les seuls séjours cohérents"
+
+  - name: actes_rejets
+    description: "Actes écartés : séjour absent du dépôt. Motif conservé, lignes consultables."
+    columns:
+      - name: reject_reason
+        data_tests: [not_null]
+      - name: reject_label
         data_tests: [not_null]

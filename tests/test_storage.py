@@ -124,6 +124,9 @@ class ZoneEnMemoire:
     def days(self, domain: str) -> list[str]:  # pragma: no cover - non sollicité
         return []
 
+    def list_files(self, domain: str, day: str) -> list[str]:  # pragma: no cover
+        return []
+
     def exists(self, source: SourceFile) -> bool:
         return source.key in self.contenus
 

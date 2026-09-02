@@ -9,3 +9,9 @@ UNION ALL
 SELECT 'monitoring_rejets', concat(stay_id, '@', toString(ts))
 FROM {{ ref('monitoring_rejets') }}
 WHERE reject_reason = '' OR reject_reason IS NULL
+
+UNION ALL
+
+SELECT 'actes_rejets', concat(stay_id, '@', toString(acte_ts))
+FROM {{ ref('actes_rejets') }}
+WHERE reject_reason = '' OR reject_reason IS NULL

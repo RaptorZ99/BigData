@@ -78,3 +78,61 @@ def test_un_run_sans_chargement_ne_declare_pas_de_changement():
     assert RunReport(run_id="x").has_changes is False
     assert RunReport(run_id="x", files_skipped=14).has_changes is False
     assert RunReport(run_id="x", files_ok=1).has_changes is True
+
+
+# ── Nomenclatures : un jour ne porte que celles qui changent ────────────────
+def _deposer_referentiel(source_dir: Path, day: str, *fichiers: str) -> Path:
+    dossier = source_dir / "referentiels" / day
+    dossier.mkdir(parents=True, exist_ok=True)
+    for nom in fichiers:
+        (dossier / nom).write_text("a,b\n1,2\n", encoding="utf-8")
+    return dossier
+
+
+def test_un_jour_de_nomenclatures_partiel_est_normal(config: Config, source_dir: Path):
+    """Le 29 août n'apporte que la description des services et la CCAM.
+
+    Exiger les quatre nomenclatures à chaque dépôt ferait échouer précisément le
+    dépôt d'évolution : le premier jour n'a que services et CIM-10, le 29 août
+    seulement les deux nouvelles.
+    """
+    _deposer_referentiel(source_dir, "2026-08-01", "services.csv", "cim10.csv")
+    _deposer_referentiel(source_dir, "2026-08-29", "description_service.csv", "ccam.csv")
+
+    depot = storage.for_source(config)
+    assert missing_files(depot) == []
+    reconnus = sorted(
+        (s.ingest_date, s.relative_name) for s in discover(depot) if s.domain == "referentiels"
+    )
+    assert reconnus == [
+        ("2026-08-01", "cim10.csv"),
+        ("2026-08-01", "services.csv"),
+        ("2026-08-29", "ccam.csv"),
+        ("2026-08-29", "description_service.csv"),
+    ]
+
+
+def test_un_jour_de_nomenclatures_vide_est_signale(config: Config, source_dir: Path):
+    """Un dossier de dépôt sans aucune nomenclature reconnue ne peut pas passer inaperçu."""
+    _deposer_referentiel(source_dir, "2026-08-29", "nomenclature_inconnue.csv")
+
+    manquants = missing_files(storage.for_source(config))
+    assert manquants == ["referentiels/2026-08-29/(aucune nomenclature reconnue)"]
+
+
+def test_un_fichier_inconnu_n_est_pas_charge_mais_les_autres_le_sont(
+    config: Config, source_dir: Path
+):
+    """Une faute de frappe dans un nom de fichier ne doit ni bloquer le dépôt ni être chargée."""
+    _deposer_referentiel(source_dir, "2026-08-29", "ccam.csv", "ccam.CSV.bak")
+
+    depot = storage.for_source(config)
+    assert missing_files(depot) == []
+    noms = [s.relative_name for s in discover(depot) if s.domain == "referentiels"]
+    assert noms == ["ccam.csv"]
+
+
+def test_le_flux_d_actes_est_un_domaine_quotidien(config: Config, source_dir: Path):
+    """Comme le monitoring : un jour déposé sans son fichier alerte."""
+    (source_dir / "actes" / "2026-08-29").mkdir(parents=True)
+    assert missing_files(storage.for_source(config)) == ["actes/2026-08-29/actes.parquet"]

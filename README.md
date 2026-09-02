@@ -25,14 +25,14 @@ git clone <url-du-depot> && cd <dossier>
 make demo
 ```
 
-Rien d'autre à fournir : le dépôt du CHU (`source-filestorage/`, vingt-huit jours de
-fichiers) est versionné. C'est le jeu de données **synthétique** de l'épreuve ; dans un
+Rien d'autre à fournir : le dépôt du CHU (`source-filestorage/`, vingt-neuf jours de
+fichiers, dont l'évolution du 29 août) est versionné. C'est le jeu de données **synthétique** de l'épreuve ; dans un
 déploiement réel, il ne serait jamais dans Git — il contient l'identité (fictive ici) des
 patients, et c'est précisément ce que la chaîne détruit à l'entrée.
 
 Environ deux minutes au premier lancement. La commande crée `.env`, y tire au hasard le
 sel de pseudonymisation et les six mots de passe, démarre ClickHouse et Metabase, ingère
-les vingt-huit jours de dépôt, construit les indicateurs et crée les tableaux de bord.
+les vingt-neuf jours de dépôt, construit les indicateurs et crée les tableaux de bord.
 Elle affiche à la fin les accès de **votre** installation :
 
 | Interface | URL | Compte |
@@ -63,11 +63,11 @@ source-filestorage/   ──▶   data/lake/   ──▶   bronze   ──▶   
 |---|---|---|
 | **Lake** | Copie de travail | Pseudonymisée dès l'écriture : l'identité ne sort jamais du dépôt du CHU |
 | **Bronze** | Tables typées | Aucune règle métier ; partitionnée par jour, donc rejouable sans doublon |
-| **Silver** | Données fiables | Constellation Kimball : 3 faits sur dimensions conformées ; anomalies écartées **et tracées** |
+| **Silver** | Données fiables | Constellation Kimball : 4 faits sur dimensions conformées ; anomalies écartées **et tracées** |
 | **Gold** | Indicateurs | Une base par usage — c'est le socle du cloisonnement |
 | **ops** | Exploitation | Journal d'ingestion, historique des runs, rapport qualité chiffré |
 
-**Les transformations s'exécutent en SQL dans ClickHouse**, orchestrées par dbt (27 modèles).
+**Les transformations s'exécutent en SQL dans ClickHouse**, orchestrées par dbt (34 modèles).
 Python copie des fichiers et lance `dbt build` : aucune donnée métier ne remonte côté client
 pour y être transformée. Seuls les deux CSV à pseudonymiser traversent Python, en flux ligne
 à ligne. Le monitoring — le plus volumineux — est lu directement par le moteur.
@@ -75,6 +75,14 @@ pour y être transformée. Seuls les deux CSV à pseudonymiser traversent Python
 Le [**modèle de données**](docs/img/eds-data-model.png) est commenté en
 [§3.2 du rapport](docs/RAPPORT.md#32-le-modèle-de-données). Source :
 [`docs/data-model.puml`](docs/data-model.puml).
+
+**Évolution du 29 août.** Le CHU a ajouté un flux d'actes médicaux et la description de ses
+services. Le pipeline incrémental a chargé les trois nouveaux fichiers sans retraiter les
+89 autres ; `dim_service` est complétée, `dim_ccam` et `fact_acte` ajoutées, cinq
+indicateurs de plus au tableau de bord de pilotage — et les six KPI historiques valent
+toujours exactement pareil. Le détail, dont la réponse aux deux pièges du sujet (un service
+non décrit, « actes par service » sans jointure entre faits), est en
+[§9 du rapport](docs/RAPPORT.md#9-évolution-du-29-août--actes-médicaux-et-description-des-services).
 
 ---
 
@@ -84,10 +92,10 @@ Le [**modèle de données**](docs/img/eds-data-model.png) est commenté en
 make demo         Démonstration complète depuis zéro
 make pipeline     Ingestion incrémentale (jours non encore traités)
 make status       État de l'ingestion et volumétrie par couche
-make quality      Rapport qualité du dernier traitement (18 lignes, 16 règles)
+make quality      Rapport qualité du dernier traitement (22 lignes, 20 règles)
 make provision    (Re)crée connexions, permissions et tableaux de bord Metabase
-make test         115 tests unitaires        ·  make test-e2e   72 tests d'intégration
-make dbt-test     90 tests dbt               ·  make dbt-docs   graphe des 27 modèles
+make test         128 tests unitaires        ·  make test-e2e   86 tests d'intégration
+make dbt-test     117 tests dbt              ·  make dbt-docs   graphe des 34 modèles
 make lint         Style (ruff)               ·  make logs       Logs des conteneurs
 make down         Arrête (données gardées)   ·  make reset      ⚠ Détruit tout
 ```
@@ -112,8 +120,8 @@ cron ; sur Azure, un job planifié le déclenche chaque nuit.
 | Commande | Ce qu'elle montre |
 |---|---|
 | `make status` | Jours ingérés, volumétrie par couche, dernier run et son statut |
-| `make quality` | Les 18 lignes du dernier traitement : lues / conservées / écartées / signalées |
-| `make test-e2e` | Les 72 invariants de l'entrepôt, dont les six KPI ancrés sur la feuille de réponses |
+| `make quality` | Les 22 lignes du dernier traitement : lues / conservées / écartées / signalées |
+| `make test-e2e` | Les 86 invariants de l'entrepôt, dont les six KPI ancrés sur la feuille de réponses et les cinq de l'évolution |
 
 Le bas du tableau de bord de pilotage porte le rapport qualité et le journal d'ingestion :
 un utilisateur qui doute d'un chiffre voit sans quitter l'interface combien de lignes ont
@@ -134,7 +142,7 @@ message d'erreur, `ops.ingest_log` le checksum de chaque fichier déjà chargé.
 toujours sûr.
 
 **Intégration continue.** À chaque poussée, la CI rejoue exactement le parcours d'un
-correcteur sur une machine vierge — clone, `make demo`, les 187 tests, la preuve du
+correcteur sur une machine vierge — clone, `make demo`, les 214 tests, la preuve du
 cloisonnement — en plus du style, de la compilation dbt et de la validation Terraform.
 
 ---
@@ -163,12 +171,12 @@ une propriété de l'infrastructure. Détail dans [`terraform/README.md`](terraf
 ## Structure du dépôt
 
 ```
-source-filestorage/   Dépôt du CHU — 28 jours, 89 fichiers, jeu synthétique de l'épreuve
+source-filestorage/   Dépôt du CHU — 29 jours, 92 fichiers, jeu synthétique de l'épreuve (évolution du 29 août comprise)
 src/eds/              Orchestrateur Python — pseudonymisation, collecte, chargement, pilotage dbt
-dbt/                  Transformation silver et gold — 27 modèles, 90 tests
+dbt/                  Transformation silver et gold — 34 modèles, 117 tests
 sql/                  Initialisation de l'entrepôt, schémas bronze, chargements par jour
 terraform/            Infrastructure Azure
-tests/                187 tests (115 unitaires, 72 d'intégration)
+tests/                214 tests (128 unitaires, 86 d'intégration)
 docs/                 RAPPORT.md (dossier de conception), modèle de données, captures, énoncé
 benchmarks/           Banc d'essai : 20 M de relevés par le chemin réel du pipeline
 ```

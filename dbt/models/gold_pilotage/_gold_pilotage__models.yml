@@ -130,6 +130,10 @@ models:
         description: "Repris de kpi_readmissions_30j"
       - name: pct_releves_alerte
         description: "Repris de kpi_alertes_jour"
+      - name: nb_actes
+        description: "Repris de kpi_actes_service"
+      - name: montant_facture_euros
+        description: "Repris de kpi_actes_service"
       - name: _built_at
         description: "Horodatage de construction de gold — comparé à celui de silver pour détecter un retard"
 
@@ -158,3 +162,46 @@ models:
           - accepted_values:
               arguments:
                 values: ["success", "failed"]
+
+  # ── Évolution du 29 août 2026 ─────────────────────────────────────────────
+  - name: kpi_activite_categorie
+    description: >
+      Activité et DMS par catégorie de service — niveau intermédiaire de la hiérarchie
+      service → catégorie → pôle. Le service non décrit apparaît sous « non renseigne ».
+    columns:
+      - name: categorie
+        data_tests: [unique, not_null]
+      - name: nb_sejours
+        data_tests: [not_null]
+      - name: dms_jours
+        description: "DMS des séjours terminés de la catégorie"
+
+  - name: kpi_actes_service
+    description: >
+      Actes par service, actes par séjour, densité par lit et montant facturé (T2A).
+      Un grain, une table, trois indicateurs. Bâtie par drill-across : chaque fait agrégé
+      seul au grain du service, puis rejoints sur dim_service — jamais fait à fait.
+    columns:
+      - name: service_code
+        data_tests: [unique, not_null]
+      - name: nb_actes
+        data_tests: [not_null]
+      - name: actes_par_sejour
+        description: "nb_actes / nb_sejours valides du service"
+      - name: actes_par_lit
+        description: "nb_actes / capacite_lits — NULL quand la capacité est inconnue"
+      - name: montant_facture_euros
+        description: "Somme des tarifs T2A des actes du service"
+        data_tests: [not_null]
+
+  - name: kpi_actes_type
+    description: >
+      Répartition des actes par code et libellé CCAM, avec la part de chaque type et le
+      montant facturé. Les parts se somment à 100 %.
+    columns:
+      - name: code_ccam
+        data_tests: [unique, not_null]
+      - name: nb_actes
+        data_tests: [not_null]
+      - name: part_pct
+        data_tests: [not_null]

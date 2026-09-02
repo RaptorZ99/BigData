@@ -20,6 +20,13 @@ sources:
         description: "Référentiel des services hospitaliers"
       - name: cim10
         description: "Référentiel CIM-10 : code diagnostic → libellé"
+      # ── Évolution du 29 août 2026 ──
+      - name: actes
+        description: "Actes médicaux réalisés pendant les séjours (Parquet), déposés à partir du 29 août"
+      - name: description_service
+        description: "Description des services : catégorie, capacité en lits, pôle"
+      - name: ccam
+        description: "Référentiel CCAM : code d'acte → libellé et tarif T2A"
 
   - name: ops
     schema: ops

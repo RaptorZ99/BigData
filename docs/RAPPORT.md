@@ -19,6 +19,7 @@ tableaux de bord cloisonnés, avec pseudonymisation dès l'entrée de la zone de
 | [6](#6-restitution-et-cloisonnement) | Qui voit quoi ? |
 | [7](#7-gouvernance-rgpd) | Comment tient la conformité ? |
 | [8](#8-limites-et-recommandations) | Ce qu'il ne faut pas conclure de ces données |
+| [9](#9-évolution-du-29-août--actes-médicaux-et-description-des-services) | Que change le nouveau dépôt du CHU, et que reste-t-il inchangé ? |
 
 ---
 
@@ -47,9 +48,10 @@ conséquences structurantes, prises dès le premier jour :
 
 ### 2.1 Ce que le CHU dépose
 
-Vingt-huit jours de dépôt (1er → 28 août), cinq domaines, quatre formats — en lecture
-seule. Tout n'arrive pas tous les jours : les référentiels une fois, le premier jour ; les
-patients trois fois, en fin de période, et à chaque fois en intégralité.
+Vingt-neuf jours de dépôt (1er → 29 août), six domaines, quatre formats — en lecture
+seule. Tout n'arrive pas tous les jours : les nomenclatures seulement quand elles changent ;
+les patients trois fois, en fin de période, et à chaque fois en intégralité ; les actes
+médicaux en un seul dépôt, le 29 août, avec tout leur historique (§9).
 
 | Fichier | Format | Contenu | Jours | Volume brut |
 |---|---|---|---:|---:|
@@ -57,7 +59,8 @@ patients trois fois, en fin de période, et à chaque fois en intégralité.
 | `sejours/<jour>/sejours.csv` | CSV | Séjour : `stay_id`, patient, service, admission, sortie, modes | 28 | 6 797 |
 | `diagnostics/<jour>/diagnostics.json` | JSON imbriqué | 1..n codes CIM-10 par séjour | 28 | 12 720 |
 | `monitoring/<jour>/monitoring.parquet` | Parquet | Constantes au chevet : FC, SpO2, température | 28 | 41 778 |
-| `referentiels/<jour>/{services,cim10}.csv` | CSV | Nomenclatures | 1 | 8 + 13 |
+| `actes/<jour>/actes.parquet` | Parquet | Acte médical : séjour, code CCAM, horodatage — **dépôt du 29 août** | 1 | 8 112 |
+| `referentiels/<jour>/*.csv` | CSV | Nomenclatures : services et CIM-10 le 1er août ; **description des services et CCAM le 29** | 2 | 8 + 13 · 7 + 8 |
 
 Le jeu est **synthétique** — c'est celui de l'épreuve — et il est versionné avec le code
 pour que le projet se lance après un simple clone. Dans un déploiement réel, ce dépôt ne
@@ -111,8 +114,8 @@ SQL dans le bon ordre et teste le résultat.** dbt ne stocke rien et ne calcule 
 
 ### 3.2 Le modèle de données
 
-Silver est modélisé en **constellation Kimball : trois étoiles, une par fait**, sur
-dimensions conformées.
+Silver est modélisé en **constellation Kimball : quatre étoiles, une par fait**, sur
+dimensions conformées — trois depuis l'origine, la quatrième depuis le dépôt du 29 août.
 
 ![Modèle de données de l'entrepôt](img/eds-data-model.png)
 
@@ -121,13 +124,14 @@ dimensions conformées.
 | `fact_sejour` | un séjour | `dim_patient`, `dim_service` | 6 729 |
 | `fact_diagnostic` | un code CIM-10 par séjour | `dim_patient`, `dim_cim10` | 12 720 |
 | `fact_monitoring` | un relevé (`stay_id`, `ts`) | `dim_service` | 40 920 |
+| `fact_acte` | un acte médical | `dim_service`, `dim_ccam` | 8 112 |
 
 Trois propriétés à retenir :
 
 - **Chaque fait porte les clés de ses propres dimensions**, propagées au build silver. Il
   n'y a donc **aucune jointure fait-à-fait** dans le modèle ni dans les requêtes gold — un
   produit croisé entre deux tables de faits gonflerait silencieusement tous les comptages.
-- **`stay_id` est la dimension dégénérée** commune aux trois faits : c'est elle qui permet
+- **`stay_id` est la dimension dégénérée** commune aux quatre faits : c'est elle qui permet
   le *drill-across* (partir d'une alerte de constante et remonter au séjour).
 - **Les mesures non additives sont isolées.** `nb_patients` ne se somme jamais hors de son
   grain : la pyramide des âges lit une table au grain sexe × tranche, pas la table au grain
@@ -179,10 +183,15 @@ Trois natures de règles, à ne pas confondre :
 | **C1** Relevé rattaché à un séjour inconnu | Contrôle | 41 778 | 40 920 | 0 | **0** |
 | **C2** Diagnostic rattaché à un séjour inconnu | Contrôle | 12 720 | 12 720 | 0 | **0** |
 | **Q6** Formats et intégrité référentielle (5 règles) | Contrôle | — | — | 0 | **0** |
+| **Q9** Service absent du référentiel de description | Signalement | 8 | 8 | 0 | 1 |
+| **C3** Acte rattaché à un séjour inconnu | Contrôle | 8 112 | 8 112 | 0 | **0** |
+| **Q6** Code CCAM absent du référentiel | Contrôle | 8 112 | 8 112 | 0 | **0** |
+| **Q10** Acte avant l'admission ou après la sortie | Contrôle | 8 112 | 8 112 | 0 | **0** |
 
-Avec les contrôles RGPD de la couche gold (§7), `ops.quality_report` compte **dix-huit
-lignes** pour seize règles — le k-anonymat est chiffré table diffusée par table diffusée.
-Elles sont recalculées à chaque run et affichées au bas du tableau de bord de pilotage.
+Avec les contrôles RGPD de la couche gold (§7), `ops.quality_report` compte **vingt-deux
+lignes** pour vingt règles — le k-anonymat est chiffré table diffusée par table diffusée.
+Elles sont recalculées à chaque run et affichées au bas du tableau de bord de pilotage. Les
+quatre dernières sont celles de l'évolution du 29 août (§9).
 
 **La décision qui structure toute la couche : un rejet ne vaut que pour la table où vit
 l'anomalie.**
@@ -265,9 +274,10 @@ Quelques définitions qui méritent d'être explicitées :
 ### 5.2 Les chiffres sont vérifiés, pas seulement reproductibles
 
 Un indicateur reproductible peut être faux : il suffit qu'il le soit à chaque exécution. Le
-jeu de données corrigé est fourni avec une **feuille de réponses**
-([`REPONSES-KPI-niveau1.pdf`](REPONSES-KPI-niveau1.pdf)) qui donne les valeurs attendues
-pour les six KPI et pour les trois points de contrôle bronze → silver.
+jeu de données corrigé est accompagné d'une **feuille de réponses** de l'intervenant, qui
+donne les valeurs attendues pour les six KPI et pour les trois points de contrôle
+bronze → silver. Elle n'est pas distribuée avec ce dépôt ; ses valeurs sont reprises,
+littéralement, dans `tests/test_e2e.py`.
 
 La suite d'intégration les ancre **valeur par valeur** :
 
@@ -348,8 +358,8 @@ recherche en compte 6 000 — la population que le CHU a déposée. L'écart est
 comptés (§4), et les exclure de la population de référence fausserait la prévalence. Chaque
 table porte son dénominateur en colonne pour que la lecture ne dépende pas de cette note.
 
-Trois commandes rejouent l'ensemble : `make quality` (les 18 lignes du rapport qualité),
-`make test-e2e` (les 72 invariants, dont chacun de ces chiffres), `uv run eds
+Trois commandes rejouent l'ensemble : `make quality` (les 22 lignes du rapport qualité),
+`make test-e2e` (les 86 invariants, dont chacun de ces chiffres), `uv run eds
 check-cloisonnement`. **La suite d'intégration ancre ces valeurs** : modifier une règle sans
 le vouloir fait échouer un test nommé, cela ne fait pas dériver un chiffre en silence.
 
@@ -540,6 +550,8 @@ aucune population. Les cohortes valident la chaîne de traitement, **pas** une c
 | Monitoring limité à REA et CARDIO | Les alertes ne couvrent pas tout l'hôpital | Étendre l'équipement, ou afficher la couverture à côté du taux |
 | Vingt-huit jours de dépôt | Volumétrie de démonstration | Le banc d'essai (`benchmarks/`) valide 20 M de relevés par le chemin réel du pipeline |
 | Seuils d'alerte non validés cliniquement | Le nombre d'alertes en dépend directement | Faire arbitrer par les équipes soignantes avant tout usage |
+| La neurologie n'est pas décrite par le CHU | Sa densité d'actes par lit reste vide, sa catégorie est « non renseigne » (§9) | Obtenir la ligne manquante du référentiel — le pipeline la prendra au prochain dépôt sans autre changement |
+| Le tarif d'un acte est celui du référentiel courant | Un changement de tarif recalculerait tout l'historique facturé (§9.5) | Historiser `dim_ccam` (dimension à évolution lente) le jour où la T2A change |
 
 **Trois recommandations de gouvernance**, qui relèvent de l'organisation et non du code :
 
@@ -551,5 +563,129 @@ aucune population. Les cohortes valident la chaîne de traitement, **pas** une c
 
 ---
 
-*Énoncé de l'épreuve : [`FICHE-SUJET.md`](FICHE-SUJET.md) · Mise en service et exploitation :
+## 9. Évolution du 29 août : actes médicaux et description des services
+
+Le CHU ajoute des données sans rien retirer : une description plus fine de ses services
+et un flux d'actes médicaux, déposés le 29 août. La consigne tient en une phrase — faire
+évoluer l'entrepôt **sans tout refaire, sans rien casser** — et c'est exactement ce que
+mesure cette section.
+
+### 9.1 Ce que le dépôt contient
+
+| Fichier | Contenu | Lignes | Ce que le profilage a révélé |
+|---|---|---:|---|
+| `referentiels/2026-08-29/description_service.csv` | catégorie, capacité en lits, pôle | **7** | **NEURO n'y figure pas.** Le référentiel est incomplet, comme le sujet le laissait craindre |
+| `referentiels/2026-08-29/ccam.csv` | code d'acte → libellé, tarif T2A | 8 | Tarifs de 25 à 800 € |
+| `actes/2026-08-29/actes.parquet` | séjour, code CCAM, horodatage | **8 112** | Tout l'historique en un dépôt (actes du 1er au 29 août), 5 096 séjours ; aucun doublon, aucun code inconnu, aucun séjour inconnu ; **82 actes pendant les 68 séjours écartés par Q2** ; tous les autres dans les bornes de leur séjour |
+
+Une observation de plus, qui a une conséquence de modélisation : la hiérarchie annoncée
+service → catégorie → pôle n'est stricte qu'au premier niveau. La catégorie « medecine »
+relève de **deux** pôles — Coeur-Poumon pour la cardiologie et la pneumologie, Cancerologie
+pour l'oncologie. Le pôle est une propriété du service, pas de la catégorie ; aucune vue au
+grain de la catégorie ne peut donc le porter.
+
+### 9.2 Ingérer sans retraiter
+
+Le pipeline incrémental a chargé **les trois fichiers, et rien d'autre** : 89 fichiers
+ignorés, empreintes inchangées ; journal d'ingestion à 92 fichiers, 29 jours, 6 domaines.
+Deux évolutions du collecteur l'ont permis :
+
+- `actes` est un **flux quotidien**, comme le monitoring : un jour déposé sans son fichier
+  alerte ;
+- les **nomenclatures** cessent d'être une liste fixe. Le CHU ne dépose que celles qui
+  changent — services et CIM-10 le 1er août, description et CCAM le 29. Exiger les quatre
+  à chaque dépôt aurait fait échouer précisément le dépôt d'évolution. Un fichier est donc
+  facultatif un jour donné ; un jour sans aucune nomenclature reconnue alerte ; un fichier
+  inconnu est signalé, pas chargé en silence.
+
+Côté bronze, trois tables dans un fichier DDL séparé
+(`sql/10_bronze/02_actes_et_descriptions.sql`) : les six tables historiques n'ont pas changé
+d'une ligne. Même partition par jour de dépôt, même lignage — un rejeu du 29 août est un
+`DROP PARTITION` suivi d'un `INSERT`, comme pour n'importe quel autre jour.
+
+### 9.3 Le modèle : un incrément
+
+| Demandé | Fait | Décision structurante |
+|---|---|---|
+| Compléter `dim_service` | catégorie, pôle, capacité, `est_decrit` | **Jointure externe** vers la description — piège n° 1 |
+| Ajouter `dim_ccam` | code, libellé, tarif | Dernière version déposée, comme les autres dimensions |
+| Ajouter `fact_acte` | grain : un acte ; 8 112 lignes | Le **service est résolu au build** et rangé sur le fait — piège n° 2 ; le montant T2A est une mesure du fait ; pas de pseudonyme (minimisation) |
+| Non-régression | les six KPI du corrigé | **Identiques** : 6 729 · 9,05 j · 11,59 % · 1 423 · 3 314 · 2 234 · 89 — vérifiés par un test nommé |
+
+**Piège n° 1 — le service non décrit.** NEURO reste dans la dimension avec ses 1 208
+séjours. Sa catégorie et son pôle prennent le libellé explicite « non renseigne », qui se
+regroupe et s'affiche comme n'importe quelle valeur ; sa capacité reste **NULL** — on ne
+fabrique pas un nombre de lits, et sa densité d'actes par lit sera vide plutôt que fausse ;
+le fait est porté par `est_decrit` et compté par la règle Q9. Retirer le service aurait
+cassé tous les indicateurs historiques ; lui inventer une capacité aurait produit un chiffre
+faux sans le moindre signe extérieur d'erreur. Le jour où le CHU dépose la ligne manquante,
+elle est prise au run suivant sans autre changement.
+
+**Piège n° 2 — le service d'un acte.** Il vient du séjour, et le sujet interdit de relier
+deux tables de faits. La réponse est celle déjà donnée pour les constantes et les
+diagnostics : le service est **propagé sur le fait au moment de la construction**, depuis le
+référentiel de tous les séjours déposés. « Actes par service » devient un simple
+`GROUP BY` sur `fact_acte`. Les 82 actes réalisés pendant les séjours aux horodatages
+incohérents gardent ainsi leur service et restent comptés — un acte est un fait clinique,
+une date de sortie fausse ne l'annule pas (§4).
+
+« Actes par séjour » demande, lui, deux faits : les actes viennent de `fact_acte`, les
+séjours de `fact_sejour`. Ils ne se rencontrent jamais ligne à ligne. Chaque fait est agrégé
+**seul** au grain du service, puis les deux agrégats — huit lignes chacun — se rejoignent
+sur `dim_service` : c'est le *drill-across* de Kimball. Le test `assert_actes_reconcilies`
+en est le garde-fou : la somme des actes de la vue doit valoir exactement le nombre de
+lignes de `fact_acte`, ce qu'une jointure fait-à-fait ferait exploser.
+
+Quatre règles qualité s'ajoutent au rapport, qui passe à 22 lignes pour 20 règles : Q9
+signale le service non décrit (1) ; C3, Q6 et Q10 — séjour inconnu, code CCAM inconnu, acte
+hors des bornes de son séjour — sont des contrôles attendus à zéro, et valent zéro.
+
+### 9.4 Les cinq indicateurs
+
+| # | Indicateur | Grain | Table gold | Résultat |
+|---|---|---|---|---|
+| 1 | Activité et DMS par catégorie | catégorie | `kpi_activite_categorie` | 6 catégories ; médecine 2 652 séjours, DMS 5,71 j ; « non renseigne » 1 208 séjours, 7,06 j |
+| 2 | Actes par service, actes par séjour | service | `kpi_actes_service` | 1 935 en cardiologie → 241 en oncologie ; 1,14 à 1,22 acte par séjour |
+| 3 | Actes par type | code CCAM | `kpi_actes_type` | 8 types, de 12,1 % à 12,9 % chacun |
+| 4 | Densité d'actes par lit | service | `kpi_actes_service` | 86,6 aux urgences → 6,9 en oncologie ; **vide en neurologie** |
+| 5 | Montant facturé (T2A) | service | `kpi_actes_service` | **2 199 450 €**, de 521 655 € (cardiologie) à 64 265 € (oncologie) |
+
+Les indicateurs 2, 4 et 5 partagent le grain du service : une seule table les porte. Les
+publier séparément recopierait trois fois la même agrégation, qui finirait par diverger.
+
+| Service | Catégorie | Lits | Séjours | Actes | Actes / séjour | Actes / lit | Facturé |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Cardiologie | medecine | 30 | 1 601 | 1 935 | 1,21 | 64,5 | 521 655 € |
+| Urgences | urgences | 20 | 1 423 | 1 731 | 1,22 | 86,6 | 478 585 € |
+| Neurologie | **non renseigne** | — | 1 208 | 1 471 | 1,22 | — | 393 850 € |
+| Pneumologie | medecine | 28 | 840 | 1 009 | 1,20 | 36,0 | 268 045 € |
+| Pédiatrie | pediatrie | 22 | 503 | 598 | 1,19 | 27,2 | 171 165 € |
+| Réanimation | reanimation | 16 | 467 | 563 | 1,21 | 35,2 | 154 740 € |
+| Chirurgie | chirurgie | 40 | 476 | 564 | 1,18 | 14,1 | 147 145 € |
+| Oncologie | medecine | 35 | 211 | 241 | 1,14 | 6,9 | 64 265 € |
+
+![Actes médicaux et facturation sur le tableau de bord de pilotage](img/pilotage-actes.jpg)
+
+Chaque chiffre a été recalculé par un chemin indépendant — une jointure directe entre
+`bronze.actes` et `bronze.ccam` rend 8 112 actes et 2 199 450 € — puis ancré dans la suite
+d'intégration : les trois vues, la dimension complétée, le fait, les quatre règles qualité
+et le tuple de non-régression y sont littéraux.
+
+### 9.5 Limites propres à l'évolution
+
+- **Le dépôt d'actes est un rattrapage** : vingt-neuf jours d'actes dans un seul fichier.
+  L'incrémentalité est démontrée sur ce fichier ; un flux réellement quotidien produirait
+  une partition par jour, par le même mécanisme, sans rien changer au code.
+- **Deux dénominateurs coexistent** dans « actes par séjour » : les actes comptent ceux des
+  82 séjours écartés, les séjours ne comptent que les valides. L'écart est de l'ordre du
+  pour cent et la colonne `nb_sejours_avec_acte` permet la lecture alternative.
+- **Le tarif est celui du référentiel courant.** Un changement de tarif recalculerait tout
+  l'historique facturé. Facturer par période exigerait d'historiser `dim_ccam` (§8).
+- **Le pôle n'est pas modélisé au grain de la catégorie**, faute de hiérarchie stricte dans
+  les données (§9.1). Il reste disponible au grain du service, dans `dim_service`.
+
+---
+
+*Énoncé de l'épreuve : [`FICHE-SUJET.md`](FICHE-SUJET.md) · Consigne d'évolution :
+[`SUJET-EVOLUTION-nouvelles-kpi.md`](SUJET-EVOLUTION-nouvelles-kpi.md) · Mise en service et exploitation :
 [`README`](../README.md) · Infrastructure Azure : [`terraform/README.md`](../terraform/README.md)*

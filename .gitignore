@@ -35,3 +35,8 @@ terraform/backend.hcl
 .idea/
 .vscode/
 .claude/
+
+# Dossiers de dépôt bruts remis par l'intervenant : leur contenu est recopié dans
+# source-filestorage/, qui seul fait foi et est versionné.
+source-evolution/
+source-filestorage-corrigé/

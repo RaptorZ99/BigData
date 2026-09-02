@@ -1,5 +1,5 @@
 @startuml eds-data-model
-title <b>EDS CHU — Modèle de données ClickHouse</b>\n<size:12>Médaillon : bronze (typé) → silver (constellation : 3 étoiles — 1 par fait — sur dimensions conformées) → gold (KPI par usage)</size>
+title <b>EDS CHU — Modèle de données ClickHouse</b>\n<size:12>Médaillon : bronze (typé) → silver (constellation : 4 étoiles — 1 par fait — sur dimensions conformées) → gold (KPI par usage)</size>
 
 hide circle
 hide empty members
@@ -73,15 +73,47 @@ package "eds_bronze — tables typées, append-only, PARTITION BY _ingest_date" 
     code_cim10 : String
     libelle : String
   }
+
+  entity "**actes**\n<i>dépôt du 29 août</i>" as b_actes #E0F2F1 {
+    stay_id : String
+    {field} code_ccam : LowCardinality(String)
+    acte_ts : DateTime
+  }
+
+  entity "**description_service** (réf.)\n<i>dépôt du 29 août</i>" as b_descr #E0F2F1 {
+    service_code : String
+    categorie · pole
+    {field} capacite_lits : Nullable(UInt16)
+  }
+
+  entity "**ccam** (réf.)\n<i>dépôt du 29 août</i>" as b_ccam #E0F2F1 {
+    code_ccam : String
+    libelle : String
+    {field} tarif_euros : Nullable(UInt32)
+  }
 }
 
 ' ═══ SILVER — CONSTELLATION : 3 ÉTOILES, DIMENSIONS CONFORMÉES ═══
-package "eds_silver — constellation : 3 étoiles (1 par fait) sur dimensions conformées (rebuild complet à chaque run)" as silver #E8F5E9 {
+package "eds_silver — constellation : 4 étoiles (1 par fait) sur dimensions conformées (rebuild complet à chaque run)" as silver #E8F5E9 {
 
   entity "**dim_service**\n<i>dimension conformée</i>" as dim_service #FFFDE7 {
     * **service_code** : String <<PK>>
     --
     service_label : String
+    <i>complétée le 29 août :</i>
+    categorie · pole
+    {field} capacite_lits : Nullable
+    est_decrit : Bool
+    <i>non décrit → « non renseigne »,</i>
+    <i>capacité NULL, jamais inventée</i>
+    ..lignage..
+  }
+
+  entity "**dim_ccam**\n<i>dimension</i>" as dim_ccam #FFFDE7 {
+    * **code_ccam** : String <<PK>>
+    --
+    libelle : String
+    {field} tarif_euros : Nullable(UInt32)
     ..lignage..
   }
 
@@ -149,6 +181,29 @@ package "eds_silver — constellation : 3 étoiles (1 par fait) sur dimensions c
     <i>→ évite la jointure fact-to-fact</i>
   }
 
+  entity "**fact_acte**\n<i>grain : 1 acte médical</i>" as fact_acte {
+    # service_code <<FK dim_service>>
+    # code_ccam <<FK dim_ccam>>
+    stay_id <<DD>> · acte_ts : DateTime
+    acte_date : Date
+    --
+    <i>mesure</i>
+    {field} montant_euros : Nullable (tarif T2A)
+    --
+    <i>flags</i>
+    is_code_inconnu · is_hors_sejour : Bool
+    --
+    <i>service résolu depuis le référentiel</i>
+    <i>des séjours, rangé sur le fait :</i>
+    <i>« actes par service » = GROUP BY</i>
+  }
+
+  entity "**actes_rejets**" as s_actes_rejets #FFEBEE {
+    reject_reason : String
+    <i>séjour absent du dépôt</i>
+    ..colonnes d'origine + lignage..
+  }
+
   entity "**sejours_rejets**" as s_sejours_rejets #FFEBEE {
     reject_reason : String
     reject_label : String
@@ -161,7 +216,7 @@ package "eds_silver — constellation : 3 étoiles (1 par fait) sur dimensions c
     ..colonnes d'origine + lignage..
   }
 
-  note "<b>stay_id = dimension dégénérée (DD)</b> portée par les 3 faits :\nelle relie logiquement les étoiles (drill-across)\n<b>sans aucune jointure fact-to-fact</b>.\nFK propagées au build silver depuis le référentiel des séjours\n(patient_pseudo → fact_diagnostic, service_code → fact_monitoring)." as n_dd
+  note "<b>stay_id = dimension dégénérée (DD)</b> portée par les 4 faits :\nelle relie logiquement les étoiles (drill-across)\n<b>sans aucune jointure fact-to-fact</b>.\nFK propagées au build silver depuis le référentiel des séjours\n(patient_pseudo → fact_diagnostic, service_code → fact_monitoring et fact_acte)." as n_dd
 
   note "<b>Un rejet ne vaut que pour la table où vit l'anomalie.</b>\nQ2 invalide les HORODATAGES du séjour, pas le séjour :\nfact_sejour l'écarte (6 729 / 6 797), mais ses diagnostics\net ses relevés restent dans l'entrepôt — ils résolvent leur\npatient et leur service depuis le référentiel complet.\nLa cascade coûtait 15 patients de prévalence et 528 relevés." as n_rejet
 }
@@ -174,6 +229,9 @@ dim_service ||--o{ fact_monitoring : service_code
 ' Étoile 3 — fact_diagnostic (prévalence, cohortes, démographie)
 dim_patient ||--o{ fact_diagnostic : patient_pseudo
 dim_cim10 ||--o{ fact_diagnostic : code_cim10
+' Étoile 4 — fact_acte (actes par service et par type, densité par lit, T2A)
+dim_service ||--o{ fact_acte : service_code
+dim_ccam ||--o{ fact_acte : code_ccam
 
 ' ══════════════════════ GOLD PILOTAGE ═══════════════════════
 package "eds_gold_pilotage — user SQL : chu_pilotage (SELECT only)" as gold_p #E3F2FD {
@@ -271,6 +329,34 @@ package "eds_gold_pilotage — user SQL : chu_pilotage (SELECT only)" as gold_p 
     domaine · fichier source
     lignes chargées · statut
   }
+
+  entity "**kpi_activite_categorie**\n<i>évolution · KPI 1</i>" as g_cat #E0F2F1 {
+    grain : <b>catégorie de service</b>
+    --
+    nb_services · nb_sejours
+    nb_sejours_termines · dms_jours
+    <i>« non renseigne » = service</i>
+    <i>absent de la description</i>
+  }
+
+  entity "**kpi_actes_service**\n<i>évolution · KPI 2, 4, 5</i>" as g_actes_svc #E0F2F1 {
+    grain : <b>service</b>
+    --
+    nb_actes · actes_par_sejour
+    capacite_lits · actes_par_lit
+    montant_facture_euros
+    --
+    <i>drill-across : deux faits agrégés</i>
+    <i>séparément, joints sur dim_service</i>
+  }
+
+  entity "**kpi_actes_type**\n<i>évolution · KPI 3</i>" as g_actes_type #E0F2F1 {
+    grain : <b>code CCAM</b>
+    --
+    libelle · tarif_euros
+    nb_actes · part_pct
+    montant_facture_euros
+  }
 }
 
 ' ══════════════════════ GOLD RECHERCHE ══════════════════════
@@ -365,17 +451,23 @@ b_diagnostics -[hidden]right- b_services
 b_services -[hidden]right- b_cim10
 b_sejours -[hidden]down- b_services
 b_monitoring -[hidden]down- b_cim10
+b_diagnostics -[hidden]down- b_actes
+b_actes -[hidden]right- b_descr
+b_descr -[hidden]right- b_ccam
 
 ' silver : dimensions en haut (service | patient | cim10), faits au centre, rejets + note en bas
 dim_service -[hidden]right- dim_patient
 dim_patient -[hidden]right- dim_cim10
+dim_cim10 -[hidden]right- dim_ccam
 fact_monitoring -[hidden]right- fact_sejour
 fact_sejour -[hidden]right- fact_diagnostic
+fact_diagnostic -[hidden]right- fact_acte
 fact_monitoring -[hidden]down- s_monitoring_rejets
 s_monitoring_rejets -[hidden]right- s_sejours_rejets
-s_sejours_rejets -[hidden]right- n_rejet
+s_sejours_rejets -[hidden]right- s_actes_rejets
+s_actes_rejets -[hidden]right- n_rejet
 n_rejet -[hidden]right- n_dd
-fact_diagnostic -[hidden]down- n_dd
+fact_acte -[hidden]down- n_dd
 
 ' forcer la rangée gold/ops SOUS la couche silver
 s_monitoring_rejets -[hidden]down- g_preval
@@ -386,7 +478,7 @@ g_preval -[hidden]right- g_demo
 g_preval -[hidden]down- g_demo_glob
 g_demo_glob -[hidden]right- g_kanon
 
-' gold pilotage : grille 4 + 4 + 3
+' gold pilotage : grille 4 + 4 + 3 + 3 (la dernière rangée est l'évolution)
 g_dms -[hidden]right- g_urg
 g_urg -[hidden]right- g_readm
 g_readm -[hidden]right- g_readm_svc
@@ -397,6 +489,9 @@ g_act -[hidden]right- g_flux
 g_alert_j -[hidden]down- g_qual
 g_qual -[hidden]right- g_synth
 g_synth -[hidden]right- g_ing
+g_qual -[hidden]down- g_cat
+g_cat -[hidden]right- g_actes_svc
+g_actes_svc -[hidden]right- g_actes_type
 
 ' ops : colonne
 o_ingest -[hidden]down- o_runs
@@ -407,11 +502,13 @@ gold_r -[hidden]right- gold_p
 gold_p -[hidden]right- ops
 
 legend bottom
-  <b>Modélisation</b> — silver en constellation (Kimball) : 3 étoiles, une par fait, sur dimensions conformées — chaque besoin métier = 1 fait × ses dimensions,
-  sans jointure fact-to-fact : DMS, urgences, réadmissions → fact_sejour ⋆ (dim_patient, dim_service) ·
-  alertes constantes → fact_monitoring ⋆ (dim_service) · prévalence, cohortes & démographie → fact_diagnostic ⋆ (dim_patient, dim_cim10).
+  <b>Modélisation</b> — silver en constellation (Kimball) : 4 étoiles, une par fait, sur dimensions conformées — chaque besoin métier = 1 fait × ses dimensions,
+  sans jointure fact-to-fact : DMS, urgences, réadmissions → fact_sejour ⋆ (dim_patient, dim_service) · alertes constantes → fact_monitoring ⋆ (dim_service) ·
+  prévalence, cohortes & démographie → fact_diagnostic ⋆ (dim_patient, dim_cim10) · actes, densité, T2A → fact_acte ⋆ (dim_service, dim_ccam).
+  <b>Évolution du 29 août</b> (entités teintées) — trois tables bronze, une dimension complétée, une dimension et un fait ajoutés, trois vues gold :
+  un incrément, aucune table historique modifiée. « Actes par séjour » se calcule par drill-across (deux agrégats joints sur dim_service), jamais fait à fait.
   Pas de dim_date physique : les fonctions temporelles ClickHouse (toDate, tranches) jouent ce rôle — choix documenté au rapport.
-  <b>Lignage</b> — les 14 tables de bronze et silver, dimensions comprises, portent : _source_file · _ingest_date · horodatage de traitement.
+  <b>Lignage</b> — les 20 tables de bronze et silver, dimensions comprises, portent : _source_file · _ingest_date · horodatage de traitement.
   <b>Idempotence</b> — bronze : MergeTree partitionné par _ingest_date → rejeu d'un jour = DROP PARTITION + INSERT.
   <b>Qualité</b> — un rejet ne vaut que pour la table où vit l'anomalie : les 68 séjours aux horodatages incohérents quittent fact_sejour, mais leurs
   diagnostics et leurs relevés restent — ils résolvent patient et service depuis le référentiel des 6 797 séjours déposés, jamais depuis fact_sejour.

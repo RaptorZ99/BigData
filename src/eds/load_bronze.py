@@ -95,12 +95,30 @@ _TARGETS: dict[str, LakeFile] = {
         format="CSVWithNames",
         structure="code_cim10 String, libelle String",
     ),
+    # ── Évolution du 29 août 2026 : actes médicaux et description des services ──
+    "actes": LakeFile(
+        table="actes",
+        script="08_load_actes.sql",
+        format="Parquet",
+    ),
+    "description_service.csv": LakeFile(
+        table="description_service",
+        script="09_load_description_service.sql",
+        format="CSVWithNames",
+        structure="service_code String, categorie String, capacite_lits String, pole String",
+    ),
+    "ccam.csv": LakeFile(
+        table="ccam",
+        script="10_load_ccam.sql",
+        format="CSVWithNames",
+        structure="code_ccam String, libelle String, tarif_euros String",
+    ),
 }
 
 
 def target_for(source: SourceFile) -> LakeFile:
     """Description du fichier du lake associée à un fichier source."""
-    # Les référentiels partagent un domaine mais visent deux tables distinctes :
+    # Les référentiels partagent un domaine mais visent chacun leur table :
     # c'est le nom du fichier qui tranche.
     key = source.relative_name if source.domain == "referentiels" else source.domain
 
