@@ -1,5 +1,6 @@
-# Données de santé — ne jamais versionner
-source-filestorage/
+# Zone de travail (lake, volumes) : dérivée, reconstructible
+# Le dépôt du CHU (source-filestorage/) est versionné : c'est le jeu de données
+# synthétique de l'épreuve, pour que le projet se lance après un simple clone.
 data/
 
 # Secrets

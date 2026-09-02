@@ -17,17 +17,20 @@ architecture, indicateurs, RGPD, limites.
 
 **Prérequis** : Docker et [uv](https://docs.astral.sh/uv/).
 
-Le dépôt du CHU (`source-filestorage/`) n'est **pas versionné** — il contient l'identité
-réelle des patients. Placez-le à la racine avant de lancer la démonstration.
-
 ```bash
+git clone <url-du-depot> && cd <dossier>
 make demo
 ```
 
+Rien d'autre à fournir : le dépôt du CHU (`source-filestorage/`, vingt-huit jours de
+fichiers) est versionné. C'est le jeu de données **synthétique** de l'épreuve ; dans un
+déploiement réel, il ne serait jamais dans Git — il contient l'identité (fictive ici) des
+patients, et c'est précisément ce que la chaîne détruit à l'entrée.
+
 Environ deux minutes au premier lancement. La commande crée `.env`, y tire au hasard le
 sel de pseudonymisation et les six mots de passe, démarre ClickHouse et Metabase, ingère
-les trois jours de dépôt, construit les indicateurs et crée les tableaux de bord. Elle
-affiche à la fin les accès de **votre** installation :
+les vingt-huit jours de dépôt, construit les indicateurs et crée les tableaux de bord.
+Elle affiche à la fin les accès de **votre** installation :
 
 | Interface | URL | Compte |
 |---|---|---|
@@ -80,8 +83,8 @@ make pipeline     Ingestion incrémentale (jours non encore traités)
 make status       État de l'ingestion et volumétrie par couche
 make quality      Rapport qualité du dernier traitement (18 règles)
 make provision    (Re)crée connexions, permissions et tableaux de bord Metabase
-make test         116 tests unitaires        ·  make test-e2e   63 tests d'intégration
-make dbt-test     78 tests dbt               ·  make dbt-docs   graphe des 27 modèles
+make test         116 tests unitaires        ·  make test-e2e   65 tests d'intégration
+make dbt-test     69 tests dbt               ·  make dbt-docs   graphe des 27 modèles
 make lint         Style (ruff)               ·  make logs       Logs des conteneurs
 make down         Arrête (données gardées)   ·  make reset      ⚠ Détruit tout
 ```
@@ -107,7 +110,7 @@ cron ; sur Azure, un job planifié le déclenche chaque nuit.
 |---|---|
 | `make status` | Jours ingérés, volumétrie par couche, dernier run et son statut |
 | `make quality` | Les 18 règles du dernier traitement : lues / conservées / écartées / signalées |
-| `make test-e2e` | Les 63 invariants de l'entrepôt — un chiffre qui bouge fait échouer un test nommé |
+| `make test-e2e` | Les 65 invariants de l'entrepôt — un chiffre qui bouge fait échouer un test nommé |
 
 Le bas du tableau de bord de pilotage porte le rapport qualité et le journal d'ingestion :
 un utilisateur qui doute d'un chiffre voit sans quitter l'interface combien de lignes ont
@@ -126,6 +129,10 @@ un utilisateur qui doute d'un chiffre voit sans quitter l'interface combien de l
 Une exécution qui échoue laisse une trace : `ops.pipeline_runs` porte son statut et son
 message d'erreur, `ops.ingest_log` le checksum de chaque fichier déjà chargé. Relancer est
 toujours sûr.
+
+**Intégration continue.** À chaque poussée, la CI rejoue exactement le parcours d'un
+correcteur sur une machine vierge — clone, `make demo`, les 181 tests, la preuve du
+cloisonnement — en plus du style, de la compilation dbt et de la validation Terraform.
 
 ---
 
@@ -153,13 +160,14 @@ une propriété de l'infrastructure. Détail dans [`terraform/README.md`](terraf
 ## Structure du dépôt
 
 ```
-src/eds/        Orchestrateur Python — pseudonymisation, collecte, chargement, pilotage dbt
-dbt/            Transformation silver et gold — 27 modèles, 78 tests
-sql/            Initialisation de l'entrepôt, schémas bronze, chargements par jour
-terraform/      Infrastructure Azure
-tests/          179 tests (116 unitaires, 63 d'intégration)
-docs/           RAPPORT.md (dossier de conception), modèle de données, captures, énoncé
-benchmarks/     Banc d'essai : 20 M de relevés par le chemin réel du pipeline
+source-filestorage/   Dépôt du CHU — 28 jours, 89 fichiers, jeu synthétique de l'épreuve
+src/eds/              Orchestrateur Python — pseudonymisation, collecte, chargement, pilotage dbt
+dbt/                  Transformation silver et gold — 27 modèles, 69 tests
+sql/                  Initialisation de l'entrepôt, schémas bronze, chargements par jour
+terraform/            Infrastructure Azure
+tests/                181 tests (116 unitaires, 65 d'intégration)
+docs/                 RAPPORT.md (dossier de conception), modèle de données, captures, énoncé
+benchmarks/           Banc d'essai : 20 M de relevés par le chemin réel du pipeline
 ```
 
 ---
@@ -171,7 +179,7 @@ benchmarks/     Banc d'essai : 20 M de relevés par le chemin réel du pipeline
 | **Pseudonymisation** | `HMAC-SHA256(sel, IPP)` à la copie vers le lake. Stable — les jointures tiennent — et non réversible sans le sel, qui n'est ni versionné ni journalisé |
 | **Minimisation** | NIR, nom et prénom jamais copiés ; date de naissance réduite à l'année ; la table des constantes ne porte même pas de pseudonyme |
 | **Cloisonnement** | Deux comptes SQL en lecture seule sur leur seule base gold, deux connexions et deux collections Metabase. Une requête hors périmètre est refusée **par le moteur** |
-| **Petits effectifs** | `HAVING uniqExact(patient_pseudo) >= 5` sur chaque cellule diffusée, plus une **suppression complémentaire** contre l'attaque par différenciation. Effet mesuré : 4 cellules sur 1 600, 3 marges sur 200 |
+| **Petits effectifs** | `HAVING uniqExact(patient_pseudo) >= 5` sur chaque cellule diffusée, plus une **suppression complémentaire** contre l'attaque par différenciation. Effet mesuré : deux pathologies rares entièrement retirées, 178 cellules sur 1 083 au grain fin, 66 marges sur 149 |
 | **Traçabilité** | Chaque ligne bronze et silver porte son fichier d'origine, son jour de dépôt et son horodatage. Chaque run est journalisé, chaque règle qualité chiffrée |
 
 `uv run eds check-cloisonnement` rejoue les 9 scénarios de cloisonnement sur votre

@@ -12,7 +12,7 @@ SELECT
      WHERE discharge_ts IS NOT NULL)                                        AS dms_globale_jours,
     -- Réadmissions : restreintes aux sorties dont la fenêtre d'observation n'est pas
     -- vide. Les sorties postérieures à la dernière admission connue ne peuvent rien
-    -- constater ; les inclure diluerait le taux d'un facteur 8 sur ce jeu de données.
+    -- constater ; les inclure diluerait le taux, d'autant plus que la période est courte.
     (SELECT sum(readmissions_30j) FROM {{ ref('kpi_readmissions_30j') }}
      WHERE jours_observables > 0)                                           AS nb_readmissions_30j,
     (SELECT sum(sorties_eligibles) FROM {{ ref('kpi_readmissions_30j') }}

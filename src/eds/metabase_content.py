@@ -237,12 +237,12 @@ _PILOTAGE_CARDS = [
         "kind": "text",
         "text": (
             "### ↩️ Réadmissions à 30 jours\n"
-            "⚠️ **Le taux ne porte que sur une fraction des sorties.** Une réadmission ne "
+            "⚠️ **Aucune sortie ne dispose des 30 jours complets.** Une réadmission ne "
             "peut être constatée que si l'entrepôt couvre la période où elle surviendrait. "
-            "Les admissions s'arrêtent au dernier jour déposé, les sorties s'étalent bien "
-            "au-delà : seules **12 % des sorties** ont une fenêtre d'observation non vide, "
-            "et **aucune** n'a les 30 jours complets. Le taux affiché porte sur ces seules "
-            "sorties ; il n'est pas comparable à un taux calculé sur un historique complet."
+            "Les admissions s'arrêtent au dernier jour déposé : une sortie de fin de "
+            "période n'a que quelques jours de fenêtre, et les sorties postérieures n'en "
+            "ont aucune. Le taux affiché porte sur les seules sorties observables et "
+            "**sous-estime** le taux réel ; la couverture est affichée à côté, jour par jour."
         ),
         "row": 21,
         "col": 0,
@@ -403,11 +403,9 @@ _RECHERCHE_CARDS = [
             "**Données pseudonymisées et agrégées.** Aucune information "
             "identifiante n'est accessible depuis cet espace, et toute cellule "
             "regroupant moins de 5 patients est retirée de la diffusion.\n\n"
-            "⚠️ **Jeu de données synthétique.** Les dix pathologies affichent chacune une "
-            "prévalence voisine de 50 %, soit une somme de l'ordre de 500 % : chaque patient "
-            "porte en moyenne cinq diagnostics, tirés au hasard. Les cohortes sont donc "
-            "exploitables pour valider la chaîne de traitement, **pas** pour conclure quoi "
-            "que ce soit d'épidémiologique."
+            "⚠️ **Jeu de données synthétique.** Les prévalences ont des ordres de grandeur "
+            "plausibles, mais elles sont générées : les cohortes servent à valider la chaîne "
+            "de traitement, **pas** à conclure quoi que ce soit d'épidémiologique."
         ),
         "row": 0,
         "col": 0,
@@ -442,9 +440,8 @@ _RECHERCHE_CARDS = [
     {
         "name": "Prévalence par pathologie",
         "description": (
-            "Part des patients de l'entrepôt concernés par chaque pathologie. Les valeurs "
-            "voisines de 50 % pour les dix pathologies sont un artefact du jeu synthétique "
-            "(diagnostics tirés au hasard), non une observation clinique."
+            "Part des patients de l'entrepôt concernés par chaque pathologie. Une "
+            "pathologie dont la cohorte compte moins de 5 patients n'est pas diffusée."
         ),
         "display": "row",
         "sql": (
@@ -500,12 +497,13 @@ _RECHERCHE_CARDS = [
         "description": (
             "Composition des cohortes par sexe, exprimée en part de femmes. "
             "Une série unique : Metabase regrouperait les catégories excédentaires "
-            "sous « Autre » au-delà de huit séries, ce qui masquerait deux pathologies."
+            "sous « Autre » au-delà de huit séries, ce qui masquerait une partie des "
+            "pathologies."
         ),
         "display": "row",
-        # Le ratio est plus lisible que deux séries d'effectifs quasi identiques :
-        # toutes les cohortes comptent environ 2 700 patients, les barres absolues
-        # ne se distinguaient pas les unes des autres.
+        # Le ratio est plus lisible que deux séries d'effectifs : les cohortes vont
+        # de 8 à plus de 2 000 patients, et deux barres absolues côte à côte ne
+        # laisseraient pas lire la composition des petites.
         "sql": (
             "SELECT libelle AS pathologie,\n"
             "       round(100.0 * sumIf(nb_patients, sexe = 'F')\n"

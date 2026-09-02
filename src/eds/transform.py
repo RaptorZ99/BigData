@@ -16,7 +16,7 @@ Pourquoi dbt plutôt que des scripts SQL numérotés :
   run, donc suspend la publication, exactement comme un fichier en échec.
 
 Ce que dbt ne remplace pas : `ops.quality_report`. Un test répond « ça passe ou
-ça casse » ; le rapport qualité répond « 15 000 lues, 14 864 conservées, 136
+ça casse » ; le rapport qualité répond « 6 797 lues, 6 729 conservées, 68
 écartées par Q2 ». Le rapport est donc lui-même un modèle dbt (`models/ops/`).
 """
 

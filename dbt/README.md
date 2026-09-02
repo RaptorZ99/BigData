@@ -21,7 +21,7 @@ Trois gains concrets, au-delà de l'effet vitrine :
    suspend la publication — exactement comme un fichier en échec.
 
 Ce que dbt **ne remplace pas** : `ops.quality_report`. Un test répond « ça passe ou ça
-casse » ; le rapport qualité répond « 15 000 lues, 14 864 conservées, 136 écartées par
+casse » ; le rapport qualité répond « 6 797 lues, 6 729 conservées, 68 écartées par
 la règle Q2 ». Le rapport est donc lui-même un modèle dbt — ce qui lui vaut, au
 passage, d'être ordonné par le graphe plutôt qu'à la main.
 
@@ -38,7 +38,7 @@ tests/                     9 tests singuliers — les propriétés qui font le p
 macros/                    surcharge du nommage de schéma, tranches d'âge
 ```
 
-**27 modèles matérialisés, 2 éphémères, 78 tests.** Le graphe complet se visualise
+**27 modèles matérialisés, 2 éphémères, 69 tests.** Le graphe complet se visualise
 avec `make dbt-docs`.
 
 ## Lancer

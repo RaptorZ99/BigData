@@ -30,23 +30,23 @@ def client(config):
 
 
 # ── Volumétrie attendue, couche par couche ──────────────────────────────────
-# Ces valeurs découlent des trois jours de dépôt fournis et des règles qualité.
+# Ces valeurs découlent des vingt-huit jours de dépôt fournis et des règles qualité.
 # Les faire évoluer suppose d'expliquer pourquoi : c'est le but.
 
 BRONZE_ATTENDU = {
-    "patients": 16_200,  # fichiers cumulatifs : 4 800 + 5 400 + 6 000
-    "sejours": 15_000,
-    "diagnostics": 37_380,
-    "monitoring": 66_677,
+    "patients": 18_000,  # les 6 000 patients redéposés trois fois (26, 27, 28 août)
+    "sejours": 6_797,
+    "diagnostics": 12_720,
+    "monitoring": 41_778,
 }
 
 SILVER_ATTENDU = {
-    "dim_patient": 6_000,  # 16 200 lignes → 6 000 patients distincts
-    "fact_sejour": 14_864,  # 15 000 - 136 séjours incohérents
-    "sejours_rejets": 136,
-    "fact_diagnostic": 37_040,  # 37 380 - 340 en cascade
-    "fact_monitoring": 64_799,  # 66 677 - 1 878 rejets
-    "monitoring_rejets": 1_878,  # 1 369 hors plage + 520 cascade - 11 cumulés
+    "dim_patient": 6_000,  # 18 000 lignes → 6 000 patients distincts
+    "fact_sejour": 6_729,  # 6 797 - 68 séjours incohérents
+    "sejours_rejets": 68,
+    "fact_diagnostic": 12_593,  # 12 720 - 127 en cascade
+    "fact_monitoring": 40_400,  # 41 778 - 1 378 rejets
+    "monitoring_rejets": 1_378,  # 858 hors plage + 528 cascade - 8 cumulés
 }
 
 
@@ -66,7 +66,7 @@ def test_toutes_les_tables_attendues_existent(client):
 
 # ── Règles qualité ──────────────────────────────────────────────────────────
 def test_aucun_sejour_conserve_avec_sortie_avant_admission(client):
-    """Q2 : la règle qui motive les 136 rejets doit être sans exception."""
+    """Q2 : la règle qui motive les 68 rejets doit être sans exception."""
     restants = scalar(
         client,
         "SELECT count() FROM eds_silver.fact_sejour "
@@ -77,7 +77,7 @@ def test_aucun_sejour_conserve_avec_sortie_avant_admission(client):
 
 def test_les_sejours_en_cours_sont_conserves(client):
     """Q3 : une sortie non renseignée est un cas métier, pas une anomalie."""
-    assert scalar(client, "SELECT countIf(is_ongoing) FROM eds_silver.fact_sejour") == 1_190
+    assert scalar(client, "SELECT countIf(is_ongoing) FROM eds_silver.fact_sejour") == 683
 
 
 def test_aucune_constante_hors_plage_physiologique(client):
@@ -102,7 +102,7 @@ def test_chaque_rejet_porte_un_motif(client):
 def test_flag_admission_post_deces(client):
     """Q7 : anomalie signalée, pas rejetée."""
     flags = scalar(client, "SELECT countIf(is_post_mortem_anomaly) FROM eds_silver.fact_sejour")
-    assert flags == 192
+    assert flags == 136
 
 
 def test_aucun_releve_posterieur_a_la_sortie(client):
@@ -150,24 +150,26 @@ def test_readmissions_30_jours(client):
         "SELECT sum(sorties_eligibles), sum(readmissions_30j) "
         "FROM eds_gold_pilotage.kpi_readmissions_30j"
     ).result_rows[0]
-    assert eligibles == 11_678
-    assert readmissions == 687
+    assert eligibles == 5_051
+    assert readmissions == 647
 
 
 def test_la_fenetre_d_observation_des_readmissions_est_explicite(client):
     """Une sortie postérieure à la dernière admission ne peut rien constater.
 
-    Sans ce marquage, 96 des 120 lignes afficheraient un 0 % qui ne mesure rien,
-    et le taux publié serait dilué d'un facteur 8. L'indicateur doit dire sur
-    quelle part des sorties il se prononce.
+    Sans ce marquage, 67 des 271 lignes afficheraient un 0 % qui ne mesure rien.
+    L'indicateur doit dire sur quelle part des sorties il se prononce — et, la
+    dernière admission connue étant le 28 août, aucune sortie n'a ses 30 jours.
     """
-    muettes, total, completes = client.query(
-        "SELECT countIf(jours_observables = 0), count(), countIf(fenetre_complete) "
+    muettes, total, completes, maximum = client.query(
+        "SELECT countIf(jours_observables = 0), count(), countIf(fenetre_complete), "
+        "       max(jours_observables) "
         "FROM eds_gold_pilotage.kpi_readmissions_30j"
     ).result_rows[0]
-    assert muettes == 96, "lignes sans fenêtre d'observation"
-    assert total == 120
-    assert completes == 0, "trois jours de dépôt ne peuvent pas couvrir 30 jours"
+    assert muettes == 67, "lignes sans fenêtre d'observation"
+    assert total == 271
+    assert completes == 0, "vingt-huit jours d'admissions ne peuvent pas couvrir 30 jours"
+    assert maximum == 27, "une sortie du 2 août voit les admissions jusqu'au 28"
 
 
 def test_le_taux_publie_ne_porte_que_sur_les_sorties_observables(client):
@@ -177,10 +179,10 @@ def test_le_taux_publie_ne_porte_que_sur_les_sorties_observables(client):
         "       pct_sorties_observables "
         "FROM eds_gold_pilotage.kpi_synthese"
     ).result_rows[0]
-    assert readmissions == 687
-    assert observables == 1_421
-    assert taux == 48.3
-    assert couverture == 12.2, "part des sorties sur lesquelles l'indicateur se prononce"
+    assert readmissions == 647
+    assert observables == 4_499
+    assert taux == 14.4
+    assert couverture == 89.1, "part des sorties sur lesquelles l'indicateur se prononce"
 
 
 def test_la_dms_ignore_les_sejours_en_cours(client):
@@ -193,7 +195,7 @@ def test_la_dms_ignore_les_sejours_en_cours(client):
 
 
 def test_relevés_en_alerte(client):
-    assert scalar(client, "SELECT countIf(is_alert) FROM eds_silver.fact_monitoring") == 3_053
+    assert scalar(client, "SELECT countIf(is_alert) FROM eds_silver.fact_monitoring") == 1_939
 
 
 # ── RGPD ────────────────────────────────────────────────────────────────────
@@ -295,15 +297,72 @@ def test_le_k_anonymat_supprime_effectivement_des_cellules(client):
         ).result_rows
     }
 
-    # Grain fin : le seuil k >= 5 écarte 4 cellules sur 1 600.
-    assert mesures["cohorte_demographie_region"] == (1_600, 1_596, 4)
+    # Grain fin : le seuil k >= 5 écarte 178 cellules sur 1 083.
+    assert mesures["cohorte_demographie_region"] == (1_083, 905, 178)
 
-    # Marges : 3 lignes retirées par suppression complémentaire, car leur
-    # décomposition départementale n'est pas intégralement diffusable.
+    # Marges : 66 lignes retirées par suppression complémentaire, car leur
+    # décomposition départementale n'est pas intégralement diffusable. Le coût
+    # est élevé (44 %) : c'est le prix d'un grain fin à huit départements sur des
+    # cohortes de quelques centaines de patients — cf. rapport, §8.
     calculees, diffusees, supprimees = mesures["cohorte_demographie"]
-    assert calculees == 200
-    assert supprimees == 3
+    assert calculees == 149
+    assert supprimees == 66
     assert diffusees == calculees - supprimees
+
+
+def test_le_k_anonymat_retire_des_pathologies_entieres(client):
+    """Le seuil ne mord pas qu'au grain fin : deux pathologies rares disparaissent.
+
+    La mucoviscidose (4 patients) et la trisomie 21 (3 patients) sont sous le seuil
+    dès la cohorte par pathologie. Elles existent dans le référentiel, dans silver,
+    et nulle part dans la base des chercheurs.
+    """
+    referentiel = scalar(client, "SELECT count() FROM eds_silver.dim_cim10")
+    diffusees = scalar(client, "SELECT count() FROM eds_gold_recherche.cohorte_pathologie")
+    assert (referentiel, diffusees) == (13, 11)
+
+    absentes = scalar(
+        client,
+        "SELECT arraySort(groupArray(code_cim10)) FROM eds_silver.dim_cim10 "
+        "WHERE code_cim10 NOT IN (SELECT code_cim10 FROM eds_gold_recherche.cohorte_pathologie)",
+    )
+    assert list(absentes) == ["E84", "Q90"]
+
+    for table in ("cohorte_pathologie", "prevalence_pathologie", "cohorte_demographie"):
+        fuite = scalar(
+            client,
+            f"SELECT count() FROM eds_gold_recherche.{table} WHERE code_cim10 IN ('E84', 'Q90')",
+        )
+        assert fuite == 0, f"{table} diffuse une pathologie sous le seuil"
+
+
+def test_la_deduplication_garde_la_version_la_plus_recente(client):
+    """Q1 : le CHU redépose ses patients chaque jour, et certains changent de département.
+
+    « Garder la version la plus récente » n'est démontrable que si des versions
+    diffèrent : 118 patients ont un département différent entre deux dépôts. La
+    dimension doit porter celui du dernier dépôt, sans exception.
+    """
+    versions = scalar(
+        client,
+        "SELECT count() FROM (SELECT patient_pseudo FROM eds_bronze.patients "
+        "GROUP BY patient_pseudo HAVING uniqExact(region_code) > 1)",
+    )
+    assert versions == 118, "sans divergence entre dépôts, la règle ne serait pas exercée"
+
+    perimes = scalar(
+        client,
+        """
+        SELECT count()
+        FROM eds_silver.dim_patient AS d
+        INNER JOIN (
+            SELECT patient_pseudo, argMax(region_code, _ingest_date) AS dernier
+            FROM eds_bronze.patients GROUP BY patient_pseudo
+        ) AS b USING (patient_pseudo)
+        WHERE d.region_code != b.dernier
+        """,
+    )
+    assert perimes == 0, "dim_patient porte une version périmée"
 
 
 @pytest.mark.parametrize("base", ["eds_gold_recherche", "eds_gold_pilotage"])
@@ -515,12 +574,14 @@ def test_toutes_les_lignes_portent_leur_lignage(client, database, table):
 
 
 def test_l_ingestion_est_journalisee(client):
-    """14 fichiers déposés sur trois jours, tous chargés avec succès."""
-    total, succes = client.query(
-        "SELECT count(), countIf(status = 'success') FROM ops.ingest_log FINAL"
+    """89 fichiers déposés sur vingt-huit jours, tous chargés avec succès."""
+    total, succes, jours = client.query(
+        "SELECT count(), countIf(status = 'success'), uniqExact(ingest_date) "
+        "FROM ops.ingest_log FINAL"
     ).result_rows[0]
-    assert total == 14
-    assert succes == 14
+    assert total == 89
+    assert succes == 89
+    assert jours == 28
 
 
 def test_le_rapport_qualite_est_renseigne(client):
@@ -557,9 +618,9 @@ def test_les_regles_rgpd_de_la_couche_gold_sont_chiffrees(client):
         ).result_rows
     }
 
-    assert mesures["RGPD_k_anonymat"] == (1_600, 1_596, 4)
-    assert mesures["RGPD_suppression_complementaire"] == (200, 197, 3)
-    assert mesures["RGPD_cohortes_diffusees"] == (10, 10, 0)
+    assert mesures["RGPD_k_anonymat"] == (1_083, 905, 178)
+    assert mesures["RGPD_suppression_complementaire"] == (149, 83, 66)
+    assert mesures["RGPD_cohortes_diffusees"] == (13, 11, 2)
     # Aucune colonne identifiante ni pseudonyme dans la base des chercheurs.
     assert mesures["RGPD_minimisation"][2] == 0
 

@@ -45,29 +45,37 @@ conséquences structurantes, prises dès le premier jour :
 
 ### 2.1 Ce que le CHU dépose
 
-Trois jours de dépôt, cinq domaines, quatre formats — en lecture seule.
+Vingt-huit jours de dépôt (1er → 28 août), cinq domaines, quatre formats — en lecture
+seule. Tout n'arrive pas tous les jours : les référentiels une fois, le premier jour ; les
+patients trois fois, en fin de période, et à chaque fois en intégralité.
 
-| Fichier | Format | Contenu | Volume brut |
-|---|---|---|---:|
-| `patients/<jour>/patients.csv` | CSV | ⚠ **identité en clair** : IPP, NIR, nom, prénom, date de naissance, sexe, département | 16 200 |
-| `sejours/<jour>/sejours.csv` | CSV | Séjour : `stay_id`, patient, service, admission, sortie, modes | 15 000 |
-| `diagnostics/<jour>/diagnostics.json` | JSON imbriqué | 1..n codes CIM-10 par séjour | 37 380 |
-| `monitoring/<jour>/monitoring.parquet` | Parquet | Constantes au chevet : FC, SpO2, température | 66 677 |
-| `referentiels/<jour>/{services,cim10}.csv` | CSV | Nomenclatures, déposées le premier jour | 15 + 10 |
+| Fichier | Format | Contenu | Jours | Volume brut |
+|---|---|---|---:|---:|
+| `patients/<jour>/patients.csv` | CSV | ⚠ **identité en clair** : IPP, NIR, nom, prénom, date de naissance, sexe, département | 3 | 18 000 (3 × 6 000) |
+| `sejours/<jour>/sejours.csv` | CSV | Séjour : `stay_id`, patient, service, admission, sortie, modes | 28 | 6 797 |
+| `diagnostics/<jour>/diagnostics.json` | JSON imbriqué | 1..n codes CIM-10 par séjour | 28 | 12 720 |
+| `monitoring/<jour>/monitoring.parquet` | Parquet | Constantes au chevet : FC, SpO2, température | 28 | 41 778 |
+| `referentiels/<jour>/{services,cim10}.csv` | CSV | Nomenclatures | 1 | 8 + 13 |
+
+Le jeu est **synthétique** — c'est celui de l'épreuve — et il est versionné avec le code
+pour que le projet se lance après un simple clone. Dans un déploiement réel, ce dépôt ne
+serait jamais dans Git.
 
 ### 2.2 Ce que le profilage a révélé
 
-Explorer avant de coder a évité quatre erreurs de conception. Chacune de ces observations a
-une conséquence directe dans la chaîne.
+Explorer avant de coder a évité plusieurs erreurs de conception. Chacune de ces
+observations a une conséquence directe dans la chaîne.
 
 | Observation | Conséquence retenue |
 |---|---|
-| `patients/` est **cumulatif** — 4 800 → 5 400 → 6 000, chaque jour re-contient les précédents | Déduplication par `argMax` sur le jour d'ingestion : **16 200 lignes → 6 000 patients** |
+| `patients/` est redéposé **en intégralité** à chaque fois — 6 000 lignes, trois fois — et **118 patients changent de département** d'un dépôt à l'autre | Déduplication par `argMax` sur le jour d'ingestion : **18 000 lignes → 6 000 patients**, chacun dans sa version la plus récente. Un test vérifie que la dimension ne porte aucune version périmée |
 | ~2 % du monitoring porte FC **et** SpO2 aberrantes **sur les mêmes lignes** (0/500 bpm, 0/120 %), la température restant toujours valide | Signature d'un **capteur en panne**, pas d'un patient en détresse → rejet, et non alerte clinique |
-| 1 992 séjours ont une sortie datée mais un mode de sortie vide | Valeur manquante légitime → conservée en `NULL`, signalée, jamais rejetée |
-| 220 séjours admis **après un décès antérieur** du même patient | Anomalie de source → conservée et **marquée**, pour ne pas masquer un problème amont |
-| 520 relevés horodatés **après la sortie** du patient | Tous rattachés aux 136 séjours à sortie antérieure à l'admission → rejet **en cascade** (§4) |
-| 8 362 séjours **chevauchent** le précédent du même patient — plus de la moitié | Artefact du jeu synthétique. Les rejeter viderait l'entrepôt → conservés et documentés. **Mais cela casse un calcul de réadmission naïf** (§5.2) |
+| 683 séjours sans date de sortie — et le mode de sortie n'est vide **que** dans ce cas | Patient encore hospitalisé → conservé, signalé, exclu de la seule DMS |
+| 68 séjours dont la sortie **précède** l'admission | Incohérence temporelle → rejet, et avec eux 528 relevés et 127 diagnostics, **en cascade** (§4) |
+| 136 séjours admis **après un décès antérieur** du même patient | Anomalie de source → conservée et **marquée**, pour ne pas masquer un problème amont |
+| Aucun séjour ne chevauche le précédent du même patient ; 1,13 séjour par patient, 3 au plus | Le calcul de réadmission est néanmoins écrit pour résister aux chevauchements (§5.2) : la bonne définition ne dépend pas de la propreté du jeu |
+| 13 codes CIM-10, dont trois maladies rares portées par 8, 4 et 3 patients | Le seuil de 5 patients **retire deux pathologies entières** de la base de recherche (§7.2) |
+| Activité **inégale** entre services — 1 615 séjours en cardiologie, 212 en oncologie — et 49 % des admissions en mode urgence | Les indicateurs par service discriminent réellement : la DMS va de 2 à 9 jours (§5.1) |
 | Le monitoring ne couvre que **REA** et **CARDIO** | Les alertes de constantes ne concernent que ces deux services — ce n'est pas une lacune de la chaîne |
 
 ---
@@ -91,7 +99,7 @@ source-filestorage/   ──▶   data/lake/   ──▶   bronze   ──▶   
 |---|---|---|
 | **ClickHouse** comme entrepôt | PostgreSQL | Colonne, compressé, conçu pour l'agrégation. Le monitoring seul justifie ce choix ; il lit le Parquet directement, sans passer par Python |
 | **Pseudonymiser au lake**, pas en bronze | Charger puis anonymiser | Un chargement intermédiaire laisserait l'identité dans le moteur, ne serait-ce qu'un instant. Ici elle ne l'atteint jamais |
-| **dbt** pour silver et gold | SQL ordonné à la main | dbt déduit l'ordre d'exécution du graphe des `ref()` — plus aucune convention de nommage à respecter — et exécute **78 tests pendant** le run, pas après |
+| **dbt** pour silver et gold | SQL ordonné à la main | dbt déduit l'ordre d'exécution du graphe des `ref()` — plus aucune convention de nommage à respecter — et exécute **69 tests pendant** le run, pas après |
 | **Python n'orchestre que** | pandas | Sortir les données du moteur pour les transformer ne passe pas à l'échelle. Seuls les deux CSV à pseudonymiser traversent Python, en flux ligne à ligne, à mémoire constante |
 | **Deux bases gold** | Une base + des vues | Le cloisonnement devient un `GRANT`, donc une propriété du moteur, et non une règle applicative |
 | **Partition bronze par jour** | Table unique | Rejouer un jour = `DROP PARTITION` + rechargement. L'idempotence est structurelle, pas défendue par du code |
@@ -108,9 +116,9 @@ dimensions conformées.
 
 | Fait | Grain | Dimensions | Lignes |
 |---|---|---|---:|
-| `fact_sejour` | un séjour | `dim_patient`, `dim_service` | 14 864 |
-| `fact_diagnostic` | un code CIM-10 par séjour | `dim_patient`, `dim_cim10` | 37 040 |
-| `fact_monitoring` | un relevé (`stay_id`, `ts`) | `dim_service` | 64 799 |
+| `fact_sejour` | un séjour | `dim_patient`, `dim_service` | 6 729 |
+| `fact_diagnostic` | un code CIM-10 par séjour | `dim_patient`, `dim_cim10` | 12 593 |
+| `fact_monitoring` | un relevé (`stay_id`, `ts`) | `dim_service` | 40 400 |
 
 Trois propriétés à retenir :
 
@@ -156,16 +164,19 @@ Trois natures de règles, à ne pas confondre :
 
 | Règle | Nature | Lues | Conservées | Écartées | Signalées |
 |---|---|---:|---:|---:|---:|
-| **Q1** Patients redéposés chaque jour | Déduplication | 16 200 | 6 000 | 10 200 | — |
-| **Q2** Sortie antérieure à l'admission | Rejet | 15 000 | 14 864 | 136 | — |
-| **Q4** Constantes hors plage physiologique | Rejet | 66 677 | 64 799 | 1 369 | — |
-| **C1** Relevé dont le séjour est écarté | Cascade | 66 677 | 64 799 | 520 | — |
-| **C2** Diagnostic dont le séjour est écarté | Cascade | 37 380 | 37 040 | 340 | — |
-| **Q3** Séjour sans date de sortie | Signalement | 14 864 | 14 864 | 0 | 1 190 |
-| **Q5** Sortie datée, mode non renseigné | Signalement | 14 864 | 14 864 | 0 | 1 975 |
-| **Q7** Admission après un décès antérieur | Signalement | 14 864 | 14 864 | 0 | 192 |
-| **Q8** Relevé postérieur à la sortie | Contrôle | 64 799 | 64 799 | 0 | **0** |
+| **Q1** Patients redéposés à chaque dépôt | Déduplication | 18 000 | 6 000 | 12 000 | — |
+| **Q2** Sortie antérieure à l'admission | Rejet | 6 797 | 6 729 | 68 | — |
+| **Q4** Constantes hors plage physiologique | Rejet | 41 778 | 40 400 | 858 | — |
+| **C1** Relevé dont le séjour est écarté | Cascade | 41 778 | 40 400 | 528 | — |
+| **C2** Diagnostic dont le séjour est écarté | Cascade | 12 720 | 12 593 | 127 | — |
+| **Q3** Séjour sans date de sortie | Signalement | 6 729 | 6 729 | 0 | 683 |
+| **Q5** Sortie datée, mode non renseigné | Signalement | 6 729 | 6 729 | 0 | 0 |
+| **Q7** Admission après un décès antérieur | Signalement | 6 729 | 6 729 | 0 | 136 |
+| **Q8** Relevé postérieur à la sortie | Contrôle | 40 400 | 40 400 | 0 | **0** |
 | **Q6** Formats et intégrité référentielle (5 règles) | Contrôle | — | — | 0 | **0** |
+
+Q4 et C1 se recoupent sur 8 relevés, qui portent les deux motifs : 1 378 lignes de monitoring
+écartées au total, chacune avec **tous** ses motifs.
 
 Avec les quatre contrôles RGPD de la couche gold (§7), `ops.quality_report` compte
 **dix-huit règles**, recalculées à chaque run et affichées au bas du tableau de bord de
@@ -174,15 +185,17 @@ pilotage.
 Trois décisions à défendre :
 
 - **Une sortie non renseignée n'est pas une anomalie** — c'est un patient encore
-  hospitalisé. Les 1 190 séjours concernés sont conservés, marqués, et exclus du seul calcul
+  hospitalisé. Les 683 séjours concernés sont conservés, marqués, et exclus du seul calcul
   où ils fausseraient le résultat : la DMS.
 - **Les cascades ne sont pas cosmétiques.** Un relevé dont le séjour parent est écarté ne
   peut pas recevoir son code de service — ce code vient du séjour. Le garder produirait une
   ligne inexploitable.
-- **Q8 est passé de 520 à zéro, et c'est un résultat.** Ces 520 relevés « post-sortie »
-  appartenaient **tous** aux 136 séjours dont la sortie précède l'admission : une telle
-  sortie rend mécaniquement tout relevé postérieur à la sortie. Q8 n'était qu'un symptôme de
-  Q2. Le contrôle est conservé, désormais attendu à zéro.
+- **Q8 vaut zéro, et c'est un résultat.** Les relevés postérieurs à la sortie appartiennent
+  tous aux 68 séjours dont la sortie précède l'admission — une telle sortie rend
+  mécaniquement tout relevé « postérieur ». Q8 n'est qu'un symptôme de Q2 : une fois ceux-ci
+  écartés en cascade, le contrôle passe au vert, et il est conservé pour cette raison. Même
+  logique pour Q5, à zéro sur ce jeu : c'est la règle qui fait l'entrepôt, pas le jeu de
+  données.
 
 **Traçabilité.** Chaque ligne de bronze et de silver porte son fichier d'origine, son jour
 de dépôt et son horodatage de traitement. Chaque exécution est enregistrée dans
@@ -199,65 +212,72 @@ de bord se réduisent à des `SELECT` : aucun calcul métier n'est enfoui dans M
 
 | Indicateur | Définition retenue | Résultat |
 |---|---|---|
-| **DMS par service** | Moyenne de `sortie − admission`, par service et jour de sortie. **Séjours en cours exclus** — une durée partielle tirerait la moyenne vers le bas et simulerait une amélioration | **6,08 j** (6,01 cardio → 6,23 urgences) |
-| **Activité des urgences** | Deux acceptions légitimes, **publiées côte à côte** : séjours dont le *service* est URGENCES, et admissions en *mode* urgence tous services. La seconde vaut 2,7× la première | 581→639 /j et 1 627→1 721 /j |
-| **Réadmission à 30 j** | Existe-t-il, pour le même patient, **une** admission dans les 30 jours suivant sa sortie ? Dénominateur : sorties **vivantes** — un patient décédé ne peut pas être réadmis | **687 / 1 421 = 48,3 %** (§5.2) |
-| **Alertes de constantes** | FC hors [40 ; 130] **ou** SpO2 < 90 % **ou** T ≥ 38,5 °C. Distinct des rejets : une FC à 500 bpm est un capteur en panne, écartée en amont | **3 053 / 64 799 = 4,7 %** |
-| **Taille de cohorte** | Nombre de **patients distincts** portant un diagnostic — pas de séjours. Un patient hospitalisé trois fois compte une fois | 2 689 → 2 764 |
-| **Prévalence** | Part des 5 358 patients ayant au moins un séjour. Dénominateur calculé comme scalaire indépendant, **jamais par jointure** entre deux faits | cf. §8 |
+| **DMS par service** | Moyenne de `sortie − admission`, par service et jour de sortie. **Séjours en cours exclus** — une durée partielle tirerait la moyenne vers le bas et simulerait une amélioration | **5,15 j** — de 2,15 aux urgences à 9,05 en réanimation |
+| **Activité des urgences** | Deux acceptions légitimes, **publiées côte à côte** : séjours dont le *service* est URGENCES, et admissions en *mode* urgence tous services. La seconde vaut 2,3× la première | 9 → 82 passages/j ; 18 → 158 admissions/j |
+| **Réadmission à 30 j** | Existe-t-il, pour le même patient, **une** admission dans les 30 jours suivant sa sortie ? Dénominateur : sorties **vivantes** — un patient décédé ne peut pas être réadmis | **647 / 4 499 = 14,4 %**, sur 89 % des sorties (§5.2) |
+| **Alertes de constantes** | FC hors [40 ; 130] **ou** SpO2 < 90 % **ou** T ≥ 38,5 °C. Distinct des rejets : une FC à 500 bpm est un capteur en panne, écartée en amont | **1 939 / 40 400 = 4,8 %** |
+| **Taille de cohorte** | Nombre de **patients distincts** portant un diagnostic — pas de séjours. Un patient hospitalisé trois fois compte une fois | de 8 (amyotrophie spinale) à 2 219 (infections urinaires) — 11 pathologies diffusées sur 13 |
+| **Prévalence** | Part des 5 949 patients ayant au moins un séjour. Dénominateur calculé comme scalaire indépendant, **jamais par jointure** entre deux faits | 37,3 % → 0,13 % |
 
-Les seuils d'alerte sont des **hypothèses de travail**, à valider avec les équipes
-soignantes avant tout usage réel.
+La DMS est ordonnée comme on l'attend cliniquement — urgences courtes, réanimation longue —
+et ne l'est que parce que les séjours en cours en sont exclus. Les seuils d'alerte sont des
+**hypothèses de travail**, à valider avec les équipes soignantes avant tout usage réel.
 
 ### 5.2 Le taux de réadmission : l'indicateur qui demandait le plus de soin
 
-Deux pièges, dont un qui aurait produit un chiffre faux publié en toute confiance.
+**Définition robuste.** On teste **toutes** les admissions du patient, pas seulement la
+suivante. Sur ce jeu, aucun séjour ne se chevauche et les deux écritures donnent le même
+compte ; sur des données réelles, l'admission « suivante » est souvent un séjour concurrent
+commencé avant la sortie, qui masque la réadmission réelle. La bonne définition ne doit pas
+dépendre de la propreté du jeu.
 
-**Piège 1 — la fonction de fenêtrage.** La première implémentation regardait l'admission
-chronologiquement *suivante*. Sur des données normales, c'est équivalent. Ici, avec 8 362
-séjours qui se chevauchent (§2.2), l'admission « suivante » est souvent un séjour concurrent
-commencé **avant** la sortie considérée, qui masque la réadmission réelle survenue plus
-tard. Le comptage tombait de **687 à 370** — près de la moitié perdue. Correction : tester
-**l'ensemble** des admissions du patient. C'est aussi la définition cliniquement correcte.
+**Le piège : la fenêtre d'observation.** Une réadmission ne peut être constatée que si
+l'entrepôt couvre la période où elle surviendrait. Les admissions s'arrêtent au 28 août ;
+les sorties s'étalent du 2 août au 14 septembre. Une sortie du 2 août dispose de 27 jours
+d'observation, une sortie du 27 août d'un seul, une sortie de septembre d'**aucun**.
 
-**Piège 2 — la fenêtre d'observation, et c'est celui qui commande le chiffre publié.** Nos
-admissions s'arrêtent au 28 août ; les sorties s'étalent jusqu'au 9 septembre.
+| Fenêtre observable | Sorties | Réadmissions | Taux |
+|---|---:|---:|---:|
+| 22 à 27 jours | 471 | 120 | 25,5 % |
+| 15 à 21 jours | 1 306 | 287 | 22,0 % |
+| 8 à 14 jours | 1 406 | 194 | 13,8 % |
+| 1 à 7 jours | 1 316 | 46 | 3,5 % |
+| aucune — sortie après le 28 août | 552 | 0 | 0 % |
 
-| Jour de sortie | Sorties | Réadmissions | Taux | Fenêtre observable |
-|---|---:|---:|---:|---:|
-| 26 août | 133 | 115 | 86,5 % | 3 j sur 30 |
-| 27 août | 474 | 323 | 68,1 % | 2 j sur 30 |
-| 28 août | 814 | 249 | 30,6 % | 1 j sur 30 |
-| 29 août → 9 septembre | 10 257 | 0 | 0 % | **aucune** |
+Le taux **croît avec la fenêtre** : c'est la signature d'une censure à droite, pas d'une
+tendance. Agréger tout donnerait 12,8 % ; publier un « taux à 30 jours » alors qu'aucune
+sortie n'a trente jours serait arithmétiquement exact et faux.
 
-Agréger ces lignes donnerait **5,9 %** — arithmétiquement exact, et parfaitement trompeur :
-**88 % du dénominateur ne mesure rien.** Nous publions donc **687 / 1 421 sorties
-observables = 48,3 %**, avec la couverture affichée à côté (12,2 % des sorties ; aucune ne
-dispose des 30 jours complets), et l'avertissement placé **au-dessus** des graphiques qu'il
-qualifie — un avertissement sous le chiffre qu'il corrige n'est pas lu.
+**Ce que nous publions** : **647 réadmissions sur 4 499 sorties observables, soit 14,4 %**,
+avec la couverture affichée à côté (89,1 % des sorties ; fenêtre maximale 27 jours) et
+l'avertissement placé **au-dessus** des graphiques qu'il qualifie — un avertissement sous le
+chiffre qu'il corrige n'est pas lu. Ce 14,4 % est une **borne basse** : les sorties les mieux
+observées tournent autour de 25 %, et soixante jours d'historique permettraient de le
+confirmer (§8).
 
 ![Réadmissions et couverture de l'indicateur](img/pilotage-readmissions.jpg)
 
-Ce 48,3 % n'est pas non plus un taux de réadmission à 30 jours au sens clinique : il porte
-sur une fenêtre de un à trois jours. Il est publié parce qu'il mesure quelque chose de réel,
-accompagné de sa portée, plutôt que dilué dans un chiffre qui n'en mesure aucun.
+Par service, le taux va de 10,7 % en réanimation à 18 % en oncologie et en pédiatrie — un
+classement à lire avec la même précaution, les services n'ayant pas le même profil de sortie
+dans la fenêtre observable.
 
 ### 5.3 Retrouver n'importe quel chiffre
 
 | Chiffre affiché | Valeur | Table gold | Expression déterminante |
 |---|---:|---|---|
-| Séjours pris en charge | 14 864 | `kpi_synthese` | `count()` sur `fact_sejour` |
-| Patients suivis | 5 358 | `kpi_synthese` | `uniqExact(patient_pseudo)` |
-| DMS globale | 6,08 j | `kpi_synthese` | `avg(duree_jours)` **où** `discharge_ts IS NOT NULL` |
-| DMS par service | 6,01 → 6,23 j | `kpi_dms_service` | `sum(dms × nb_sorties) / sum(nb_sorties)` — moyenne **repondérée** ; une moyenne de moyennes serait fausse |
-| Réadmissions | 687 / 1 421 | `kpi_readmissions_30j` | `arrayExists(adm -> adm > discharge_ts AND adm <= discharge_ts + INTERVAL 30 DAY, admissions_du_patient)` |
-| Relevés en alerte | 3 053 / 64 799 | `kpi_alertes_monitoring` | `countIf(is_alert)` |
-| Séjours en cours | 1 190 | `kpi_synthese` | `countIf(is_ongoing)` |
-| Pyramide des âges | total 5 358 | `cohorte_demographie_globale` | grain sexe × tranche : un patient compté **une** fois |
-| Cellules supprimées (k<5) | 4 / 1 600 | `k_anonymat_controle` | cellules calculées − cellules diffusées |
+| Séjours pris en charge | 6 729 | `kpi_synthese` | `count()` sur `fact_sejour` |
+| Patients suivis | 5 949 | `kpi_synthese` | `uniqExact(patient_pseudo)` |
+| DMS globale | 5,15 j | `kpi_synthese` | `avg(duree_jours)` **où** `discharge_ts IS NOT NULL` |
+| DMS par service | 2,15 → 9,05 j | `kpi_dms_service` | `sum(dms × nb_sorties) / sum(nb_sorties)` — moyenne **repondérée** ; une moyenne de moyennes serait fausse |
+| Réadmissions | 647 / 4 499 | `kpi_readmissions_30j` | `arrayExists(adm -> adm > discharge_ts AND adm <= discharge_ts + INTERVAL 30 DAY, admissions_du_patient)` |
+| Relevés en alerte | 1 939 / 40 400 | `kpi_alertes_monitoring` | `countIf(is_alert)` |
+| Séjours en cours | 683 | `kpi_synthese` | `countIf(is_ongoing)` |
+| Pyramide des âges | total 5 949 | `cohorte_demographie_globale` | grain sexe × tranche : un patient compté **une** fois |
+| Pathologies diffusées | 11 / 13 | `cohorte_pathologie` | `HAVING uniqExact(patient_pseudo) >= 5` |
+| Cellules supprimées (k<5) | 178 / 1 083 | `k_anonymat_controle` | cellules calculées − cellules diffusées |
 
 Trois commandes rejouent l'ensemble : `make quality` (les 18 règles), `make test-e2e` (les
-63 invariants, dont chacun de ces chiffres), `uv run eds check-cloisonnement`. **La suite
+65 invariants, dont chacun de ces chiffres), `uv run eds check-cloisonnement`. **La suite
 d'intégration ancre ces valeurs** : modifier une règle sans le vouloir fait échouer un test
 nommé, cela ne fait pas dériver un chiffre en silence.
 
@@ -332,9 +352,11 @@ Un test d'intégration vérifie qu'aucune colonne nommée `nir`, `nom`, `prenom`
 ### 7.2 Petits effectifs : le seuil ne suffit pas
 
 Toute table diffusée à la recherche applique `HAVING uniqExact(patient_pseudo) >= 5`, et les
-âges sont publiés en tranches de dix ans. Aux grains courants, les cohortes comptent des
-centaines de patients : le mécanisme resterait invisible. D'où une vue au grain le plus fin
-— pathologie × sexe × tranche × département — où la règle mord réellement.
+âges sont publiés en tranches de dix ans. Le seuil mord dès le premier niveau : la
+mucoviscidose (4 patients) et la trisomie 21 (3) disparaissent de la cohorte par pathologie,
+de la prévalence et de toute vue démographique — elles existent dans le référentiel et en
+silver, nulle part dans la base des chercheurs. Au grain le plus fin — pathologie × sexe ×
+tranche d'âge × département — 178 cellules sur 1 083 tombent sous le seuil.
 
 **Et c'est là que le piège classique apparaît.** Publier une vue agrégée **et** sa
 décomposition, en appliquant le seuil séparément aux deux, laisse fuiter les cellules
@@ -354,11 +376,15 @@ disparaît aussi ; il n'y a plus rien à soustraire.
 
 | Vue | Calculées | Diffusées | Supprimées | Motif |
 |---|---:|---:|---:|---|
-| Grain fin (× département) | 1 600 | 1 596 | **4** | seuil k ≥ 5 |
-| Marge (pathologie × sexe × âge) | 200 | 197 | **3** | décomposition incomplète |
+| Cohorte par pathologie | 13 | 11 | **2** | seuil k ≥ 5 |
+| Grain fin (× département) | 1 083 | 905 | **178** | seuil k ≥ 5 |
+| Marge (pathologie × sexe × âge) | 149 | 83 | **66** | décomposition incomplète |
 
-Coût assumé : trois lignes agrégées sur deux cents. Une donnée dont la diffusion permettrait
-d'en déduire une autre ne se diffuse pas, même agrégée.
+Le coût est assumé, et il est élevé : 66 marges sur 149, soit 44 %. C'est le prix d'un grain
+à huit départements sur des cohortes de quelques centaines de patients — dès qu'une marge
+compte moins d'une soixantaine de patients, l'un de ses départements passe presque sûrement
+sous le seuil. Une donnée dont la diffusion permettrait d'en déduire une autre ne se diffuse
+pas, même agrégée ; c'est le grain départemental lui-même qu'il faudrait revoir (§8).
 
 ![Protection des petits effectifs et son effet mesuré](img/recherche-k-anonymat.jpg)
 
@@ -373,9 +399,9 @@ que les contrôles de qualité :
 
 | Règle | Ce qu'elle mesure | Attendu |
 |---|---|---|
-| `RGPD_k_anonymat` | Cellules retirées par le seuil, au grain le plus fin | 4 / 1 600 |
-| `RGPD_suppression_complementaire` | Marges retirées, décomposition incomplète | 3 / 200 |
-| `RGPD_cohortes_diffusees` | Cohortes par pathologie effectivement diffusées | 10 / 10 |
+| `RGPD_k_anonymat` | Cellules retirées par le seuil, au grain le plus fin | 178 / 1 083 |
+| `RGPD_suppression_complementaire` | Marges retirées, décomposition incomplète | 66 / 149 |
+| `RGPD_cohortes_diffusees` | Cohortes par pathologie effectivement diffusées | 11 / 13 |
 | `RGPD_minimisation` | Colonnes identifiantes **ou pseudonyme** dans la base recherche | **0** |
 
 ### 7.4 Registre des hypothèses
@@ -392,19 +418,19 @@ Ce que nous avons tranché sans que le sujet le fasse, et qu'il faudrait valider
 
 ## 8. Limites et recommandations
 
-**⚠ La limite qui prime toutes les autres.** Les diagnostics du jeu de données sont tirés au
-hasard : les dix pathologies ont chacune ~51 % de prévalence, pour une somme de **508,9 %**
-(≈ 5 diagnostics par patient), **sans corrélation** avec le service, l'âge ou le sexe. Les
-cohortes valident la chaîne de traitement, **pas** une conclusion épidémiologique. Cet
-avertissement figure en tête du tableau de bord de recherche, pas seulement ici.
+**⚠ La limite qui prime toutes les autres.** Le jeu de données est synthétique. Ses
+prévalences ont des ordres de grandeur plausibles — 37 % d'infections urinaires, 4 % de
+cancers bronchiques, 0,1 % d'amyotrophie spinale — mais elles sont générées et ne décrivent
+aucune population. Les cohortes valident la chaîne de traitement, **pas** une conclusion
+épidémiologique. Cet avertissement figure en tête du tableau de bord de recherche.
 
 | Limite | Portée | Recommandation |
 |---|---|---|
-| Fenêtre d'observation de 1 à 3 jours | Le taux de réadmission ne couvre que 12,2 % des sorties | Attendre **60 jours d'historique** avant de publier cet indicateur en production |
-| 8 362 séjours chevauchants | Artefact synthétique, mais il a déjà cassé un calcul (§5.2) | Vérifier sur données réelles ; si le chevauchement persiste, c'est un problème du système source |
+| Aucune sortie n'a 30 jours d'observation (27 au plus) | Le taux de réadmission publié est une borne basse (§5.2) | Attendre **60 jours d'historique** avant de publier cet indicateur en production |
+| Suppression complémentaire coûteuse : 44 % des marges | Le grain départemental protège peu de patients et retire beaucoup de lignes | Publier le grain fin par **région** plutôt que par département, ou le réserver à un accès sur convention |
 | Âge dérivé de la seule année | Approximation d'un an au plus | Conséquence assumée de la minimisation — ne pas revenir sur `birth_year` pour la corriger |
 | Monitoring limité à REA et CARDIO | Les alertes ne couvrent pas tout l'hôpital | Étendre l'équipement, ou afficher la couverture à côté du taux |
-| Trois jours de dépôt | Volumétrie de démonstration | Le banc d'essai (`benchmarks/`) valide 20 M de relevés par le chemin réel du pipeline |
+| Vingt-huit jours de dépôt | Volumétrie de démonstration | Le banc d'essai (`benchmarks/`) valide 20 M de relevés par le chemin réel du pipeline |
 | Seuils d'alerte non validés cliniquement | Le nombre d'alertes en dépend directement | Faire arbitrer par les équipes soignantes avant tout usage |
 
 **Trois recommandations de gouvernance**, qui relèvent de l'organisation et non du code :

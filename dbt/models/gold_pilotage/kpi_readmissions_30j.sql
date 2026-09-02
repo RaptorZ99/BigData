@@ -18,9 +18,9 @@
 -- patient, une admission postérieure à la sortie et survenant dans les 30 jours.
 --
 -- On teste l'ensemble des admissions du patient, et non la seule admission
--- chronologiquement suivante : ces données comportent beaucoup de séjours qui se
--- chevauchent, si bien que l'admission « suivante » est souvent un séjour concurrent
--- commencé avant la sortie — il masquerait la réadmission réelle.
+-- chronologiquement suivante : c'est la définition cliniquement correcte, et elle
+-- résiste à des séjours qui se chevaucheraient — l'admission « suivante » serait alors
+-- un séjour concurrent commencé avant la sortie, qui masquerait la réadmission réelle.
 --
 -- Dénominateur : sorties vivantes uniquement — un patient décédé ne peut pas être
 -- réadmis, l'inclure minorerait artificiellement le taux.

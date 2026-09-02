@@ -5,9 +5,9 @@ name: CI
 #   * `qualite` ne demande rien d'autre que le dépôt — style et tests unitaires,
 #     dont ceux qui garantissent qu'aucune donnée identifiante ne quitte la
 #     source. Il tourne en quelques secondes sur chaque poussée.
-#   * `entrepot` monte ClickHouse et rejoue les invariants chiffrés. Il exige le
-#     dépôt du CHU, qui n'est pas versionné : il ne s'exécute donc que si un
-#     jeu de données est mis à disposition du runner.
+#   * `entrepot` monte ClickHouse et Metabase, rejoue la démonstration complète
+#     depuis un clone nu, puis les invariants chiffrés et le cloisonnement. Le jeu de
+#     données synthétique de l'épreuve est versionné : rien à fournir au runner.
 
 on:
   push:
@@ -44,8 +44,8 @@ jobs:
     runs-on: ubuntu-latest
     # `dbt parse` compile tout le projet — Jinja, `ref()`, `source()`, macros — et
     # échoue sur une dépendance introuvable ou un cycle. C'est le contrôle qui
-    # remplace la relecture de l'ordre des scripts numérotés, et il ne demande
-    # aucune donnée : le dépôt du CHU n'est pas versionné.
+    # remplace la relecture de l'ordre des scripts numérotés, en quelques secondes
+    # et sans monter l'entrepôt.
     services:
       clickhouse:
         image: clickhouse/clickhouse-server:26.3
@@ -97,9 +97,8 @@ jobs:
   entrepot:
     name: Invariants de l'entrepôt
     runs-on: ubuntu-latest
-    # Le dépôt du CHU contient l'identité réelle des patients : il n'est pas
-    # versionné. Ce job ne s'exécute que si le runner y a accès.
-    if: ${{ vars.EDS_SOURCE_AVAILABLE == 'true' }}
+    # C'est exactement le parcours d'un correcteur : cloner, `make demo`, vérifier.
+    # Si ce job passe, le projet se lance sur une machine vierge.
     steps:
       - uses: actions/checkout@v4
 
@@ -107,14 +106,9 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+          python-version: "3.13"
 
-      - name: Récupérer le dépôt du CHU
-        run: |
-          mkdir -p source-filestorage
-          # À adapter à votre hébergement (stockage objet, partage réseau…).
-          echo "::notice::Placez ici la récupération de source-filestorage/"
-
-      - name: Démarrer l'entrepôt et ingérer
+      - name: Démonstration complète depuis un clone nu
         run: make demo
 
       - name: Invariants et cloisonnement

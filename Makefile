@@ -152,9 +152,11 @@ cloud-apply: ## terraform apply — crée ou met à jour l'infrastructure
 cloud-seed: ## Téléverse source-filestorage/ vers le dépôt du CHU (conteneur filestorage)
 	@ACC=$$($(TF) output -raw compte_stockage); \
 	 echo "→ Dépôt du CHU vers $$ACC/filestorage…"; \
-	 az storage blob upload-batch --account-name $$ACC --auth-mode login \
-	   -d filestorage -s source-filestorage --overwrite \
-	   --exclude-pattern "*.DS_Store"
+	 for EXT in csv json parquet; do \
+	   az storage blob upload-batch --account-name $$ACC --auth-mode login \
+	     -d filestorage -s source-filestorage --overwrite --pattern "*.$$EXT" -o none; \
+	 done; \
+	 echo "→ $$(az storage blob list --account-name $$ACC --auth-mode login -c filestorage --query 'length(@)' -o tsv) fichiers déposés."
 
 cloud-provision: ## Déclenche job-eds-provision (entrepôt, Metabase, documentation dbt)
 	az containerapp job start -n job-eds-provision -g $(RG) -o none

@@ -2,7 +2,8 @@
 -- Dimension conformée patient — pseudonymisée, une ligne par patient.
 --
 -- Règle qualité Q1 : le CHU redépose chaque jour l'intégralité de ses patients
--- (4 800 → 5 400 → 6 000 lignes). On conserve la version la plus récente de chacun.
+-- (6 000 lignes par dépôt, dont une centaine changent de département d'un jour à
+-- l'autre). On conserve la version la plus récente de chacun.
 SELECT
     patient_pseudo,
     birth_year,
