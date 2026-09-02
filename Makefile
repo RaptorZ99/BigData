@@ -61,7 +61,10 @@ up: env ## Démarre ClickHouse + Metabase, puis provisionne l'entrepôt
 	@# Le lake doit exister avant le démarrage : Docker le monte dans ClickHouse,
 	@# et un montage créé sur un dossier absent devient invalide s'il est recréé.
 	@mkdir -p data/lake data/clickhouse data/metabase
-	docker compose up -d
+	@# En cas d'échec au démarrage, Docker se contente de « dependency failed to
+	@# start » : le journal du conteneur, lui, dit pourquoi. Sans cette ligne, un
+	@# échec en intégration continue n'est pas diagnosticable a posteriori.
+	@docker compose up -d || { echo "── journal de ClickHouse ──"; docker compose logs --tail 60 clickhouse; exit 1; }
 	@echo "→ Attente de ClickHouse…"
 	@until docker compose exec -T clickhouse wget -q --spider http://localhost:8123/ping 2>/dev/null; do sleep 2; done
 	@echo "→ ClickHouse prêt."
