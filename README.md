@@ -83,8 +83,8 @@ make pipeline     Ingestion incrémentale (jours non encore traités)
 make status       État de l'ingestion et volumétrie par couche
 make quality      Rapport qualité du dernier traitement (18 règles)
 make provision    (Re)crée connexions, permissions et tableaux de bord Metabase
-make test         116 tests unitaires        ·  make test-e2e   65 tests d'intégration
-make dbt-test     69 tests dbt               ·  make dbt-docs   graphe des 27 modèles
+make test         117 tests unitaires        ·  make test-e2e   66 tests d'intégration
+make dbt-test     72 tests dbt               ·  make dbt-docs   graphe des 28 modèles
 make lint         Style (ruff)               ·  make logs       Logs des conteneurs
 make down         Arrête (données gardées)   ·  make reset      ⚠ Détruit tout
 ```
@@ -110,7 +110,7 @@ cron ; sur Azure, un job planifié le déclenche chaque nuit.
 |---|---|
 | `make status` | Jours ingérés, volumétrie par couche, dernier run et son statut |
 | `make quality` | Les 18 règles du dernier traitement : lues / conservées / écartées / signalées |
-| `make test-e2e` | Les 65 invariants de l'entrepôt — un chiffre qui bouge fait échouer un test nommé |
+| `make test-e2e` | Les 66 invariants de l'entrepôt — un chiffre qui bouge fait échouer un test nommé |
 
 Le bas du tableau de bord de pilotage porte le rapport qualité et le journal d'ingestion :
 un utilisateur qui doute d'un chiffre voit sans quitter l'interface combien de lignes ont
@@ -131,7 +131,7 @@ message d'erreur, `ops.ingest_log` le checksum de chaque fichier déjà chargé.
 toujours sûr.
 
 **Intégration continue.** À chaque poussée, la CI rejoue exactement le parcours d'un
-correcteur sur une machine vierge — clone, `make demo`, les 181 tests, la preuve du
+correcteur sur une machine vierge — clone, `make demo`, les 183 tests, la preuve du
 cloisonnement — en plus du style, de la compilation dbt et de la validation Terraform.
 
 ---
@@ -162,10 +162,10 @@ une propriété de l'infrastructure. Détail dans [`terraform/README.md`](terraf
 ```
 source-filestorage/   Dépôt du CHU — 28 jours, 89 fichiers, jeu synthétique de l'épreuve
 src/eds/              Orchestrateur Python — pseudonymisation, collecte, chargement, pilotage dbt
-dbt/                  Transformation silver et gold — 27 modèles, 69 tests
+dbt/                  Transformation silver et gold — 28 modèles, 72 tests
 sql/                  Initialisation de l'entrepôt, schémas bronze, chargements par jour
 terraform/            Infrastructure Azure
-tests/                181 tests (116 unitaires, 65 d'intégration)
+tests/                183 tests (117 unitaires, 66 d'intégration)
 docs/                 RAPPORT.md (dossier de conception), modèle de données, captures, énoncé
 benchmarks/           Banc d'essai : 20 M de relevés par le chemin réel du pipeline
 ```

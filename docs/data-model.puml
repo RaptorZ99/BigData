@@ -297,7 +297,15 @@ package "eds_gold_recherche — user SQL : chu_recherche (SELECT only)" as gold_
     --
     nb_patients
     <i>marge diffusée seulement si TOUTE</i>
-    {field} <i>sa décomposition l'est (3/200 retirées)</i>
+    {field} <i>sa décomposition l'est (66/149 retirées)</i>
+  }
+
+  entity "**cohorte_demographie_sexe**" as g_demo_sexe {
+    grain : CIM-10 × sexe
+    --
+    nb_patients
+    <i>la part de femmes se calcule ICI :</i>
+    {field} <i>sommer g_demo la biaiserait de 9 points</i>
   }
 
   entity "**cohorte_demographie_region**" as g_demo_reg {
@@ -305,7 +313,7 @@ package "eds_gold_recherche — user SQL : chu_recherche (SELECT only)" as gold_
     ....... × département
     --
     nb_patients
-    <i>preuve k ≥ 5 : 4 cellules/1 600 supprimées</i>
+    <i>preuve k ≥ 5 : 178 cellules/1 083 supprimées</i>
   }
 
   entity "**k_anonymat_controle**\n<i>preuve du dispositif</i>" as g_kanon {

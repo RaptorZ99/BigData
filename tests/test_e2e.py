@@ -336,6 +336,57 @@ def test_le_k_anonymat_retire_des_pathologies_entieres(client):
         assert fuite == 0, f"{table} diffuse une pathologie sous le seuil"
 
 
+def test_la_part_de_femmes_est_calculee_a_son_grain(client):
+    """Un pourcentage ne se calcule pas sur les restes d'une table filtrée.
+
+    `cohorte_demographie` a subi le seuil et la suppression complémentaire : les
+    cellules qui en manquent sont les plus petites, jamais un échantillon au hasard.
+    En sommer les tranches d'âge donnait 71,5 % de femmes sur les infections urinaires
+    là où la vérité est 62,5 % — neuf points de biais, invisibles à la lecture.
+    La carte lit donc `cohorte_demographie_sexe`, bâtie à son propre grain.
+    """
+    ecarts = scalar(
+        client,
+        """
+        SELECT count() FROM (
+            SELECT s.code_cim10,
+                   round(100.0 * sumIf(s.nb_patients, s.sexe = 'F')
+                               / sum(s.nb_patients), 1) AS publie,
+                   any(v.reel) AS reel
+            FROM eds_gold_recherche.cohorte_demographie_sexe AS s
+            INNER JOIN (
+                SELECT d.code_cim10 AS code,
+                       round(100.0 * uniqExactIf(d.patient_pseudo, p.sex = 'F')
+                                   / uniqExact(d.patient_pseudo), 1) AS reel
+                FROM eds_silver.fact_diagnostic AS d
+                INNER JOIN eds_silver.dim_patient AS p USING (patient_pseudo)
+                GROUP BY code
+            ) AS v ON v.code = s.code_cim10
+            GROUP BY s.code_cim10
+            HAVING abs(publie - reel) > 0.05
+        )
+        """,
+    )
+    assert ecarts == 0, f"{ecarts} pathologie(s) publient une part de femmes biaisée"
+
+    # La valeur qui avait révélé le défaut, figée pour qu'une régression se voie.
+    urinaires = scalar(
+        client,
+        "SELECT round(100.0 * sumIf(nb_patients, sexe = 'F') / sum(nb_patients), 1) "
+        "FROM eds_gold_recherche.cohorte_demographie_sexe WHERE code_cim10 = 'N39'",
+    )
+    assert urinaires == 62.5
+
+    # La suppression complémentaire s'applique aussi ici : l'amyotrophie spinale
+    # (8 patients) est diffusée en cohorte, mais pas décomposée par sexe — publier
+    # une seule cellule livrerait l'autre par soustraction du total.
+    cohortes, avec_sexe = client.query(
+        "SELECT (SELECT uniqExact(code_cim10) FROM eds_gold_recherche.cohorte_pathologie), "
+        "       (SELECT uniqExact(code_cim10) FROM eds_gold_recherche.cohorte_demographie_sexe)"
+    ).result_rows[0]
+    assert (cohortes, avec_sexe) == (11, 10)
+
+
 def test_la_deduplication_garde_la_version_la_plus_recente(client):
     """Q1 : le CHU redépose ses patients chaque jour, et certains changent de département.
 

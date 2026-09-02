@@ -91,6 +91,7 @@ EXPECTED_TABLES: dict[str, tuple[str, ...]] = {
     "eds_gold_recherche": (
         "cohorte_pathologie",
         "prevalence_pathologie",
+        "cohorte_demographie_sexe",
         "cohorte_demographie_globale",
         "cohorte_demographie",
         "cohorte_demographie_region",

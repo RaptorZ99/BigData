@@ -38,7 +38,7 @@ tests/                     9 tests singuliers — les propriétés qui font le p
 macros/                    surcharge du nommage de schéma, tranches d'âge
 ```
 
-**27 modèles matérialisés, 2 éphémères, 69 tests.** Le graphe complet se visualise
+**28 modèles matérialisés, 2 éphémères, 72 tests.** Le graphe complet se visualise
 avec `make dbt-docs`.
 
 ## Lancer

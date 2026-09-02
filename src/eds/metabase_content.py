@@ -405,7 +405,10 @@ _RECHERCHE_CARDS = [
             "regroupant moins de 5 patients est retirée de la diffusion.\n\n"
             "⚠️ **Jeu de données synthétique.** Les prévalences ont des ordres de grandeur "
             "plausibles, mais elles sont générées : les cohortes servent à valider la chaîne "
-            "de traitement, **pas** à conclure quoi que ce soit d'épidémiologique."
+            "de traitement, **pas** à conclure quoi que ce soit d'épidémiologique.\n\n"
+            "**Le seuil retire des pathologies entières.** Le référentiel en compte treize ; "
+            "onze sont diffusées ici. La mucoviscidose et la trisomie 21, portées par moins "
+            "de cinq patients, n'apparaissent nulle part sur cet écran."
         ),
         "row": 0,
         "col": 0,
@@ -504,11 +507,16 @@ _RECHERCHE_CARDS = [
         # Le ratio est plus lisible que deux séries d'effectifs : les cohortes vont
         # de 8 à plus de 2 000 patients, et deux barres absolues côte à côte ne
         # laisseraient pas lire la composition des petites.
+        #
+        # Lue depuis `cohorte_demographie_sexe`, au grain pathologie × sexe, et NON
+        # depuis `cohorte_demographie` : sommer cette dernière à travers les tranches
+        # d'âge calculerait le ratio sur les seules cellules ayant passé le seuil, qui
+        # sont les plus grandes. Le biais mesuré atteignait neuf points.
         "sql": (
             "SELECT libelle AS pathologie,\n"
             "       round(100.0 * sumIf(nb_patients, sexe = 'F')\n"
             "             / sum(nb_patients), 1) AS `part de femmes (%)`\n"
-            "FROM cohorte_demographie\n"
+            "FROM cohorte_demographie_sexe\n"
             "GROUP BY pathologie\n"
             "ORDER BY `part de femmes (%)` DESC"
         ),

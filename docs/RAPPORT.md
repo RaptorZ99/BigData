@@ -99,7 +99,7 @@ source-filestorage/   ──▶   data/lake/   ──▶   bronze   ──▶   
 |---|---|---|
 | **ClickHouse** comme entrepôt | PostgreSQL | Colonne, compressé, conçu pour l'agrégation. Le monitoring seul justifie ce choix ; il lit le Parquet directement, sans passer par Python |
 | **Pseudonymiser au lake**, pas en bronze | Charger puis anonymiser | Un chargement intermédiaire laisserait l'identité dans le moteur, ne serait-ce qu'un instant. Ici elle ne l'atteint jamais |
-| **dbt** pour silver et gold | SQL ordonné à la main | dbt déduit l'ordre d'exécution du graphe des `ref()` — plus aucune convention de nommage à respecter — et exécute **69 tests pendant** le run, pas après |
+| **dbt** pour silver et gold | SQL ordonné à la main | dbt déduit l'ordre d'exécution du graphe des `ref()` — plus aucune convention de nommage à respecter — et exécute **72 tests pendant** le run, pas après |
 | **Python n'orchestre que** | pandas | Sortir les données du moteur pour les transformer ne passe pas à l'échelle. Seuls les deux CSV à pseudonymiser traversent Python, en flux ligne à ligne, à mémoire constante |
 | **Deux bases gold** | Une base + des vues | Le cloisonnement devient un `GRANT`, donc une propriété du moteur, et non une règle applicative |
 | **Partition bronze par jour** | Table unique | Rejouer un jour = `DROP PARTITION` + rechargement. L'idempotence est structurelle, pas défendue par du code |
@@ -277,7 +277,7 @@ dans la fenêtre observable.
 | Cellules supprimées (k<5) | 178 / 1 083 | `k_anonymat_controle` | cellules calculées − cellules diffusées |
 
 Trois commandes rejouent l'ensemble : `make quality` (les 18 règles), `make test-e2e` (les
-65 invariants, dont chacun de ces chiffres), `uv run eds check-cloisonnement`. **La suite
+66 invariants, dont chacun de ces chiffres), `uv run eds check-cloisonnement`. **La suite
 d'intégration ancre ces valeurs** : modifier une règle sans le vouloir fait échouer un test
 nommé, cela ne fait pas dériver un chiffre en silence.
 
@@ -386,6 +386,21 @@ compte moins d'une soixantaine de patients, l'un de ses départements passe pres
 sous le seuil. Une donnée dont la diffusion permettrait d'en déduire une autre ne se diffuse
 pas, même agrégée ; c'est le grain départemental lui-même qu'il faudrait revoir (§8).
 
+**Une table protégée ne se ré-agrège pas — et c'est le piège suivant.** Le graphique de part
+de femmes sommait les tranches d'âge de la table protégée. L'opération est pourtant licite au
+sens de l'additivité : un patient n'appartient qu'à une tranche. Mais les cellules qui
+manquent à cette table ne manquent pas au hasard, ce sont les plus petites — et le ratio
+calculé sur ce qui reste dérivait de **neuf points** : 71,5 % de femmes pour les infections
+urinaires, contre 62,5 % en réalité. Un chiffre faux, présenté sans le moindre signe
+extérieur d'erreur.
+
+La règle qui en découle est plus forte que « ne pas sommer une mesure non additive » : **un
+agrégat se calcule à son propre grain, jamais à partir d'une table filtrée.** La répartition
+par sexe a donc sa table, `cohorte_demographie_sexe`, bâtie depuis silver puis soumise au
+seuil — et à la suppression complémentaire, puisque `cohorte_pathologie` publie l'effectif
+total et livrerait la cellule manquante par soustraction. Un test compare chaque pourcentage
+publié à la vérité de silver et n'admet aucun écart.
+
 ![Protection des petits effectifs et son effet mesuré](img/recherche-k-anonymat.jpg)
 
 Deux précautions en découlent : la table de travail qui porte les effectifs sous le seuil vit
@@ -427,7 +442,7 @@ aucune population. Les cohortes valident la chaîne de traitement, **pas** une c
 | Limite | Portée | Recommandation |
 |---|---|---|
 | Aucune sortie n'a 30 jours d'observation (27 au plus) | Le taux de réadmission publié est une borne basse (§5.2) | Attendre **60 jours d'historique** avant de publier cet indicateur en production |
-| Suppression complémentaire coûteuse : 44 % des marges | Le grain départemental protège peu de patients et retire beaucoup de lignes | Publier le grain fin par **région** plutôt que par département, ou le réserver à un accès sur convention |
+| Suppression complémentaire coûteuse : 44 % des marges | Le grain départemental protège peu de patients, retire beaucoup de lignes, et rend la table inexploitable pour tout ré-agrégat (§7.2) | Publier le grain fin par **région** plutôt que par département, ou le réserver à un accès sur convention |
 | Âge dérivé de la seule année | Approximation d'un an au plus | Conséquence assumée de la minimisation — ne pas revenir sur `birth_year` pour la corriger |
 | Monitoring limité à REA et CARDIO | Les alertes ne couvrent pas tout l'hôpital | Étendre l'équipement, ou afficher la couverture à côté du taux |
 | Vingt-huit jours de dépôt | Volumétrie de démonstration | Le banc d'essai (`benchmarks/`) valide 20 M de relevés par le chemin réel du pipeline |

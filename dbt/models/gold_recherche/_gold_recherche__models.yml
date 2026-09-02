@@ -50,6 +50,23 @@ models:
       - name: nb_patients
         data_tests: [not_null]
 
+  - name: cohorte_demographie_sexe
+    description: >
+      Répartition par sexe de chaque cohorte, à son propre grain (pathologie × sexe).
+      Elle existe parce que sommer cohorte_demographie à travers les tranches d'âge
+      donnerait un ratio biaisé : les cellules qu'y retire le seuil sont les plus
+      petites, jamais un échantillon au hasard. Diffusée uniquement si toutes les
+      cellules de sexe de la pathologie atteignent le seuil — sinon l'effectif manquant
+      se retrouverait en soustrayant du total publié par cohorte_pathologie.
+    columns:
+      - name: sexe
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["M", "F"]
+      - name: nb_patients
+        data_tests: [not_null]
+
   - name: cohorte_demographie
     description: >
       Marge par pathologie, sexe et tranche d'âge. Diffusée uniquement si sa
