@@ -101,7 +101,7 @@ source-filestorage/   ──▶   data/lake/   ──▶   bronze   ──▶   
 |---|---|---|
 | **ClickHouse** comme entrepôt | PostgreSQL | Colonne, compressé, conçu pour l'agrégation. Le monitoring seul justifie ce choix ; il lit le Parquet directement, sans passer par Python |
 | **Pseudonymiser au lake**, pas en bronze | Charger puis anonymiser | Un chargement intermédiaire laisserait l'identité dans le moteur, ne serait-ce qu'un instant. Ici elle ne l'atteint jamais |
-| **dbt** pour silver et gold | SQL ordonné à la main | dbt déduit l'ordre d'exécution du graphe des `ref()` — plus aucune convention de nommage à respecter — et exécute **72 tests pendant** le run, pas après |
+| **dbt** pour silver et gold | SQL ordonné à la main | dbt déduit l'ordre d'exécution du graphe des `ref()` — plus aucune convention de nommage à respecter — et exécute **90 tests pendant** le run, pas après |
 | **Python n'orchestre que** | pandas | Sortir les données du moteur pour les transformer ne passe pas à l'échelle. Seuls les deux CSV à pseudonymiser traversent Python, en flux ligne à ligne, à mémoire constante |
 | **Deux bases gold** | Une base + des vues | Le cloisonnement devient un `GRANT`, donc une propriété du moteur, et non une règle applicative |
 | **Partition bronze par jour** | Table unique | Rejouer un jour = `DROP PARTITION` + rechargement. L'idempotence est structurelle, pas défendue par du code |
@@ -357,8 +357,8 @@ le vouloir fait échouer un test nommé, cela ne fait pas dériver un chiffre en
 
 ## 6. Restitution et cloisonnement
 
-**🏥 Pilotage** se lit par bandes : chiffres clés → activité → surveillance → réadmissions →
-flux → **fiabilité**. Cette dernière bande distingue ce tableau de bord d'un tableau de bord
+**🏥 Pilotage** se lit par bandes : chiffres clés → durées et urgences → surveillance →
+réadmissions et flux → charge des services → **fiabilité**. Cette dernière bande distingue ce tableau de bord d'un tableau de bord
 ordinaire : un utilisateur qui doute d'un chiffre voit, sans quitter l'interface et sans
 accès à la base d'exploitation, combien de lignes ont été écartées et par quelle règle.
 

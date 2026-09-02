@@ -263,6 +263,112 @@ KPI4_ALERTES_PAR_JOUR = [
     (30, 34, 8, 23.5),
 ]
 
+# (code CIM-10, tranche d'âge, sexe) → effectif publié ; None = masqué par le seuil.
+KPI6_COHORTE = {
+    ("C34", "50-59", "M"): 73,
+    ("C34", "60-69", "M"): 62,
+    ("C34", "70-79", "M"): 75,
+    ("C34", "80-89", "M"): 29,
+    ("E11", "40-49", "F"): 107,
+    ("E11", "40-49", "M"): 160,
+    ("E11", "50-59", "F"): 100,
+    ("E11", "50-59", "M"): 45,
+    ("E11", "60-69", "F"): 110,
+    ("E11", "60-69", "M"): 81,
+    ("E11", "70-79", "F"): 96,
+    ("E11", "70-79", "M"): 71,
+    ("E11", "80-89", "F"): 41,
+    ("E11", "80-89", "M"): 32,
+    ("E84", "0-9", "F"): None,
+    ("E84", "10-19", "M"): None,
+    ("E84", "20-29", "F"): None,
+    ("F32", "10-19", "F"): 18,
+    ("F32", "10-19", "M"): 21,
+    ("F32", "20-29", "F"): 62,
+    ("F32", "20-29", "M"): 102,
+    ("F32", "30-39", "F"): 60,
+    ("F32", "30-39", "M"): 97,
+    ("F32", "40-49", "F"): 77,
+    ("F32", "40-49", "M"): 114,
+    ("F32", "50-59", "F"): 79,
+    ("F32", "50-59", "M"): 56,
+    ("F32", "60-69", "F"): 67,
+    ("F32", "60-69", "M"): 62,
+    ("F32", "70-79", "F"): 7,
+    ("F32", "70-79", "M"): 5,
+    ("G12", "0-9", "F"): None,
+    ("G12", "0-9", "M"): None,
+    ("G12", "10-19", "F"): None,
+    ("G12", "10-19", "M"): None,
+    ("G12", "20-29", "F"): None,
+    ("G12", "20-29", "M"): None,
+    ("G12", "30-39", "F"): None,
+    ("I21", "40-49", "M"): 67,
+    ("I21", "50-59", "M"): 115,
+    ("I21", "60-69", "M"): 106,
+    ("I21", "70-79", "M"): 69,
+    ("I21", "80-89", "M"): 57,
+    ("I21", "90-99", "M"): 7,
+    ("I50", "60-69", "F"): 133,
+    ("I50", "60-69", "M"): 93,
+    ("I50", "70-79", "F"): 113,
+    ("I50", "70-79", "M"): 76,
+    ("I50", "80-89", "F"): 106,
+    ("I50", "80-89", "M"): 49,
+    ("I50", "90-99", "F"): 87,
+    ("I50", "90-99", "M"): 72,
+    ("I63", "50-59", "F"): 33,
+    ("I63", "50-59", "M"): 29,
+    ("I63", "60-69", "F"): 93,
+    ("I63", "60-69", "M"): 77,
+    ("I63", "70-79", "F"): 93,
+    ("I63", "70-79", "M"): 70,
+    ("I63", "80-89", "F"): 65,
+    ("I63", "80-89", "M"): 56,
+    ("I63", "90-99", "F"): 64,
+    ("I63", "90-99", "M"): 63,
+    ("J18", "0-9", "F"): 30,
+    ("J18", "0-9", "M"): 26,
+    ("J18", "50-59", "F"): 37,
+    ("J18", "50-59", "M"): 19,
+    ("J18", "60-69", "F"): 121,
+    ("J18", "60-69", "M"): 89,
+    ("J18", "70-79", "F"): 117,
+    ("J18", "70-79", "M"): 101,
+    ("J18", "80-89", "F"): 93,
+    ("J18", "80-89", "M"): 71,
+    ("J18", "90-99", "F"): 75,
+    ("J18", "90-99", "M"): 71,
+    ("J44", "50-59", "M"): 30,
+    ("J44", "60-69", "M"): 89,
+    ("J44", "70-79", "M"): 81,
+    ("J44", "80-89", "M"): 75,
+    ("J44", "90-99", "M"): 12,
+    ("K35", "0-9", "F"): 67,
+    ("K35", "0-9", "M"): 84,
+    ("K35", "10-19", "F"): 127,
+    ("K35", "10-19", "M"): 129,
+    ("K35", "20-29", "F"): 64,
+    ("K35", "20-29", "M"): 123,
+    ("K35", "30-39", "F"): 68,
+    ("K35", "30-39", "M"): 119,
+    ("K35", "40-49", "F"): 7,
+    ("K35", "40-49", "M"): 18,
+    ("N39", "0-9", "F"): 37,
+    ("N39", "0-9", "M"): 35,
+    ("N39", "20-29", "F"): 91,
+    ("N39", "30-39", "F"): 80,
+    ("N39", "40-49", "F"): 131,
+    ("N39", "50-59", "F"): 120,
+    ("N39", "60-69", "F"): 132,
+    ("N39", "70-79", "F"): 125,
+    ("N39", "80-89", "F"): 93,
+    ("N39", "90-99", "F"): 12,
+    ("Q90", "0-9", "M"): None,
+    ("Q90", "10-19", "M"): None,
+    ("Q90", "30-39", "F"): None,
+}
+
 KPI5_PREVALENCE = {
     "N39": 2_234,
     "E11": 2_177,
@@ -514,27 +620,17 @@ def test_kpi6_description_de_cohorte(client):
     Le rang du diagnostic n'est pas un détail : décrire une cohorte, c'est décrire
     les patients pris en charge POUR cette pathologie. Compter aussi les comorbidités
     gonflerait le diabète et l'insuffisance cardiaque de plus du double.
-    """
-    cellules, publiees = client.query(
-        "SELECT count(), countIf(diffusable) FROM eds_gold_recherche.cohorte_demographie"
-    ).result_rows[0]
-    assert (cellules, publiees) == (102, 89)
 
-    # Quatre cellules de la feuille de réponses, prises aux extrêmes de la table.
-    temoins = dict(
-        client.query(
-            "SELECT concat(code_cim10, '/', tranche_age, '/', sexe), nb_patients "
-            "FROM eds_gold_recherche.cohorte_demographie "
-            "WHERE concat(code_cim10, '/', tranche_age, '/', sexe) IN "
-            "  ('E11/40-49/M', 'K35/10-19/F', 'N39/90-99/F', 'G12/30-39/F')"
+    Les 102 cellules sont comparées une à une, masquages compris.
+    """
+    publie = {
+        (code, tranche, sexe): nb
+        for code, tranche, sexe, nb in client.query(
+            "SELECT code_cim10, tranche_age, sexe, nb_patients "
+            "FROM eds_gold_recherche.cohorte_demographie"
         ).result_rows
-    )
-    assert temoins == {
-        "E11/40-49/M": 160,
-        "K35/10-19/F": 127,
-        "N39/90-99/F": 12,
-        "G12/30-39/F": None,
     }
+    assert publie == KPI6_COHORTE
 
 
 def test_la_part_de_femmes_publiee_est_exacte(client):
