@@ -75,7 +75,7 @@ observations a une conséquence directe dans la chaîne.
 | 683 séjours sans date de sortie — et le mode de sortie n'est vide **que** dans ce cas | Patient encore hospitalisé → conservé, signalé, exclu de la seule DMS |
 | 68 séjours dont la sortie **précède** l'admission | Incohérence temporelle → le séjour quitte `fact_sejour`, mais **ni ses 127 diagnostics ni ses 520 relevés** : ce sont les horodatages qui sont faux, pas le reste (§4) |
 | 136 séjours admis **après un décès antérieur** du même patient | Anomalie de source → conservée et **marquée**, pour ne pas masquer un problème amont |
-| Aucun séjour ne chevauche le précédent du même patient ; 1,13 séjour par patient, 3 au plus | Le calcul de réadmission est néanmoins écrit pour résister aux chevauchements (§5.2) : la bonne définition ne dépend pas de la propreté du jeu |
+| Aucun séjour ne chevauche le précédent du même patient ; 1,13 séjour par patient, 3 au plus | Le calcul de réadmission est néanmoins écrit pour résister aux chevauchements (§5.3) : la bonne définition ne dépend pas de la propreté du jeu |
 | 13 codes CIM-10, dont trois maladies rares portées par 8, 4 et 3 patients | Le seuil de 5 patients **masque l'effectif de deux pathologies entières** dans la base de recherche (§7.2) |
 | Activité **inégale** entre services — 1 601 séjours en cardiologie, 211 en oncologie — et 49 % des admissions en mode urgence | Les indicateurs par service discriminent réellement : la DMS va de 2 à 9 jours (§5.1) |
 | Le monitoring ne couvre que **REA** et **CARDIO** | Les alertes de constantes ne concernent que ces deux services — ce n'est pas une lacune de la chaîne |
