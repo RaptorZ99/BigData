@@ -64,7 +64,7 @@ source-filestorage/   ──▶   data/lake/   ──▶   bronze   ──▶   
 | **Gold** | Indicateurs | Une base par usage — c'est le socle du cloisonnement |
 | **ops** | Exploitation | Journal d'ingestion, historique des runs, rapport qualité chiffré |
 
-**Les transformations s'exécutent en SQL dans ClickHouse**, orchestrées par dbt (27 modèles).
+**Les transformations s'exécutent en SQL dans ClickHouse**, orchestrées par dbt (28 modèles).
 Python copie des fichiers et lance `dbt build` : aucune donnée métier ne remonte côté client
 pour y être transformée. Seuls les deux CSV à pseudonymiser traversent Python, en flux ligne
 à ligne. Le monitoring — le plus volumineux — est lu directement par le moteur.

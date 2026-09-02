@@ -127,7 +127,7 @@ SELECT
     toInt64(0),
     -- On restreint aux séjours effectivement terminés : un séjour en cours n'a pas
     -- encore de mode de sortie, et il est déjà compté par la règle Q3. Sans ce filtre,
-    -- les 1 190 séjours ouverts seraient signalés deux fois.
+    -- les 683 séjours ouverts seraient signalés deux fois.
     toInt64((SELECT countIf(discharge_ts IS NOT NULL AND discharge_mode IS NULL)
              FROM {{ ref('fact_sejour') }})),
     'Information manquante à la source : conservée en NULL, jamais inventée',
