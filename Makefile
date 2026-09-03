@@ -7,7 +7,7 @@ SHELL := /bin/bash
 # Toutes les commandes lisent .env ; on le crée à partir de l'exemple si besoin.
 ENV_FILE := .env
 
-.PHONY: help env up down pipeline provision demo test test-e2e lint fmt reset logs status quality diagram \
+.PHONY: help env acces up down pipeline provision demo test test-e2e lint fmt reset logs status quality diagram \
         dbt-build dbt-test dbt-docs image image-push \
         cloud-bootstrap cloud-plan cloud-apply cloud-seed cloud-provision cloud-run \
         cloud-check cloud-status cloud-logs cloud-stop cloud-start cloud-destroy
@@ -91,9 +91,26 @@ demo: up pipeline provision ## Démo complète : démarrage + ingestion + dashbo
 	@echo "               (identifiants affichés ci-dessus, définis dans .env)"
 	@echo "  Console SQL  http://localhost:8123/play"
 	@echo ""
+	@echo "  Accès :      make acces   (URL et identifiants de votre installation)"
 	@echo "  Vérifier :   make status · make quality · make test-e2e"
 	@echo "               uv run eds check-cloisonnement"
 	@echo "═══════════════════════════════════════════════════════════════"
+
+acces: env ## Affiche les URL et identifiants de VOTRE installation
+	@# Volontairement une cible à part, et non la fin de `make demo` : la sortie du
+	@# provisionnement part dans logs/cron.log quand le pipeline est planifié, et un
+	@# mot de passe n'a rien à faire dans un journal. Ici, c'est un humain qui demande.
+	@#
+	@# Les libellés sont écrits en toutes lettres plutôt que passés à `%-14s` :
+	@# printf compte des octets, pas des colonnes, et un accent décalerait la ligne.
+	@set -a; . ./$(ENV_FILE); set +a; \
+	 printf '\n  \033[1mTableaux de bord\033[0m   http://localhost:3000\n\n'; \
+	 printf '    pilotage    %-22s %s\n' "$$MB_PILOTAGE_EMAIL"  "$$MB_PILOTAGE_PASSWORD"; \
+	 printf '    recherche   %-22s %s\n' "$$MB_RECHERCHE_EMAIL" "$$MB_RECHERCHE_PASSWORD"; \
+	 printf '    admin       %-22s %s\n' "$$MB_ADMIN_EMAIL"     "$$MB_ADMIN_PASSWORD"; \
+	 printf '\n  \033[1mConsole SQL\033[0m        http://localhost:8123/play\n\n'; \
+	 printf '    entrepôt    %-22s %s\n' "$$CLICKHOUSE_ETL_USER" "$$CLICKHOUSE_ETL_PASSWORD"; \
+	 printf '\n  Valeurs propres à votre .env, tirées au hasard au premier `make demo`.\n\n'
 
 status: ## État de l'ingestion et comptages par couche
 	uv run eds status

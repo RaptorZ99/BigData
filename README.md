@@ -42,7 +42,15 @@ Elle affiche à la fin les accès de **votre** installation :
 | Administration Metabase | http://localhost:3000 | `admin@chu.local` |
 | Console SQL ClickHouse | http://localhost:8123/play | `chu_etl` |
 
-Les mots de passe sont ceux de votre `.env` — ils ne sont écrits nulle part ailleurs.
+```bash
+make acces      # affiche les URL et les mots de passe de votre installation
+```
+
+Les mots de passe sont tirés au hasard à la création de `.env` et n'existent que là :
+ils ne sont ni dans le dépôt, ni les mêmes que chez quelqu'un d'autre. `make acces` est une
+cible à part, et non la fin de `make demo`, parce que la sortie du provisionnement part dans
+`logs/cron.log` quand le pipeline est planifié — un mot de passe n'a rien à faire dans un
+journal.
 
 ---
 
@@ -90,6 +98,7 @@ non décrit, « actes par service » sans jointure entre faits), est en
 
 ```
 make demo         Démonstration complète depuis zéro
+make acces        URL et identifiants de votre installation
 make pipeline     Ingestion incrémentale (jours non encore traités)
 make status       État de l'ingestion et volumétrie par couche
 make quality      Rapport qualité du dernier traitement (22 lignes, 20 règles)
@@ -131,6 +140,7 @@ un utilisateur qui doute d'un chiffre voit sans quitter l'interface combien de l
 
 | Symptôme | Cause probable | Remède |
 |---|---|---|
+| `port is already allocated` au démarrage | Les ports 3000, 8123 ou 9000 sont pris par une autre application | Libérer le port, ou arrêter ce qui l'occupe (`docker ps`). Ce sont les seuls ports utilisés |
 | Un jour manque dans `make status` | Dépôt incomplet, ou échec partiel | `uv run eds run --date AAAA-MM-JJ` — le jour est rechargé après `DROP PARTITION`, sans doublon |
 | `FILE_DOESNT_EXIST` au chargement | `data/lake` recréé conteneur allumé | `docker compose restart clickhouse` |
 | Un indicateur est faux après modification d'un modèle | Silver ou gold en retard sur bronze | `uv run eds run --rebuild` |
