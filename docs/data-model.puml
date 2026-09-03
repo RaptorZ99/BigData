@@ -317,7 +317,8 @@ package "eds_gold_pilotage — user SQL : chu_pilotage (SELECT only)" as gold_p 
     --
     chiffres clés des tuiles
     {field} (séjours, DMS, réadmissions,
-    alertes, séjours en cours)
+    alertes, séjours en cours,
+    actes, montant facturé)
     --
     <i>chaque valeur est reprise telle</i>
     <i>quelle d'une autre table gold</i>
@@ -437,7 +438,7 @@ package "ops — traçabilité & exploitation (chu_etl uniquement)" as ops #FFF3
 }
 
 ' ══════════════════ FLUX ENTRE COUCHES ══════════════════════
-bronze -[#37474F,bold]down-> silver : <b>SQL in-engine</b> : dédup argMax\nrègles qualité Q1→Q8 · rejets tracés
+bronze -[#37474F,bold]down-> silver : <b>SQL in-engine</b> : dédup argMax\nrègles qualité Q1→Q10 · C1→C3 · rejets tracés
 silver -[#1565C0,bold]down-> gold_p : agrégation KPI
 silver -[#6A1B9A,bold]down-> gold_r : agrégation cohortes\n<b>masquage des cellules < 5 patients</b>
 silver .[#EF6C00]down.> ops : comptages par règle

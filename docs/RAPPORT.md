@@ -48,7 +48,7 @@ conséquences structurantes, prises dès le premier jour :
 
 ### 2.1 Ce que le CHU dépose
 
-Vingt-neuf jours de dépôt (1er → 29 août), six domaines, quatre formats — en lecture
+Vingt-neuf jours de dépôt (1er → 29 août), six domaines, trois formats — en lecture
 seule. Tout n'arrive pas tous les jours : les nomenclatures seulement quand elles changent ;
 les patients trois fois, en fin de période, et à chaque fois en intégralité ; les actes
 médicaux en un seul dépôt, le 29 août, avec tout leur historique (§9).
@@ -104,7 +104,7 @@ source-filestorage/   ──▶   data/lake/   ──▶   bronze   ──▶   
 |---|---|---|
 | **ClickHouse** comme entrepôt | PostgreSQL | Colonne, compressé, conçu pour l'agrégation. Le monitoring seul justifie ce choix ; il lit le Parquet directement, sans passer par Python |
 | **Pseudonymiser au lake**, pas en bronze | Charger puis anonymiser | Un chargement intermédiaire laisserait l'identité dans le moteur, ne serait-ce qu'un instant. Ici elle ne l'atteint jamais |
-| **dbt** pour silver et gold | SQL ordonné à la main | dbt déduit l'ordre d'exécution du graphe des `ref()` — plus aucune convention de nommage à respecter — et exécute **90 tests pendant** le run, pas après |
+| **dbt** pour silver et gold | SQL ordonné à la main | dbt déduit l'ordre d'exécution du graphe des `ref()` — plus aucune convention de nommage à respecter — et exécute **117 tests pendant** le run, pas après |
 | **Python n'orchestre que** | pandas | Sortir les données du moteur pour les transformer ne passe pas à l'échelle. Seuls les deux CSV à pseudonymiser traversent Python, en flux ligne à ligne, à mémoire constante |
 | **Deux bases gold** | Une base + des vues | Le cloisonnement devient un `GRANT`, donc une propriété du moteur, et non une règle applicative |
 | **Partition bronze par jour** | Table unique | Rejouer un jour = `DROP PARTITION` + rechargement. L'idempotence est structurelle, pas défendue par du code |
@@ -258,7 +258,8 @@ demande la question.
 
 Chaque indicateur a donc exactement une table, à exactement un grain. Les vues
 complémentaires — `kpi_readmissions_service`, `kpi_alertes_service`, `kpi_activite_service`,
-`kpi_flux` — portent leur grain dans leur nom.
+`kpi_flux` — portent leur grain dans leur nom, et les trois vues de l'évolution du 29 août
+suivent la même règle (§9.4).
 
 Quelques définitions qui méritent d'être explicitées :
 
@@ -350,6 +351,8 @@ test le vérifie à chaque build.
 | Pyramide des âges | total 6 000 | `cohorte_demographie_globale` | grain sexe × tranche : un patient compté **une** fois |
 | Effectifs publiés | 11 / 13 pathologies | `prevalence_pathologie` | `nb_patients >= 5` — la ligne reste, l'effectif part |
 | Cellules masquées (k<5) | 13 / 102 | `k_anonymat_controle` | cellules calculées − cellules diffusées |
+| Actes réalisés | 8 112 | `kpi_synthese` | `count()` sur `fact_acte`, repris de `kpi_actes_service` |
+| Montant facturé | 2 199 450 € | `kpi_synthese` | `sum(montant_euros)` — tarif CCAM porté par le fait |
 
 **Deux dénominateurs coexistent, et ce n'est pas une incohérence.** Le pilotage compte
 5 949 patients — ceux qui ont au moins un séjour dont les horodatages sont exploitables. La
@@ -399,6 +402,11 @@ Ce que voit un utilisateur **pilotage** — une seule collection, une seule base
 **pas de contenu grisé** : l'autre usage n'existe pas de son point de vue.
 
 ![Ce que voit un utilisateur pilotage](img/cloisonnement-vue-pilotage.jpg)
+
+Et il n'a qu'une seule base à interroger : sa connexion Metabase ne pointe que vers
+`eds_gold_pilotage`, avec le compte SQL qui n'a de droit que sur elle.
+
+![Les bases visibles depuis le compte pilotage](img/cloisonnement-bases-pilotage.jpg)
 
 S'il devine l'adresse de l'espace de recherche, il est refusé. Metabase répond « page
 introuvable » et non « accès refusé » : un refus explicite confirmerait l'existence de la
