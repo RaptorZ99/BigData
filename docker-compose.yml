@@ -10,6 +10,14 @@ services:
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_ETL_PASSWORD:?CLICKHOUSE_ETL_PASSWORD manquant (cp .env.example .env)}
       # Autorise chu_etl à créer les users/GRANTs de cloisonnement en SQL.
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+      # Le point d'entrée de l'image fait un `chown -R` sur `user_files` dès que ce
+      # dossier n'appartient pas à `clickhouse`. Or il n'existe pas dans l'image :
+      # c'est Docker qui le crée, comme parent du point de montage du lake, avec un
+      # propriétaire qui dépend de sa version (root sur certains runners). Le chown
+      # descend alors dans le lake, monté en lecture seule, et le conteneur meurt sur
+      # « Read-only file system » avant même de démarrer — vu deux fois en CI.
+      # L'image possède déjà tous ses répertoires : ce chown n'a rien à corriger.
+      CLICKHOUSE_DO_NOT_CHOWN: "1"
     ports:
       - "8123:8123"   # HTTP : clients, UI /play
       - "9000:9000"   # protocole natif
