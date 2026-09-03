@@ -68,9 +68,25 @@ Vérification, exploitation et reprise sur incident : [README](../README.md) §E
   conteneur privé, versionné, authentifié par identité. Il ne doit jamais approcher
   Git — `.gitignore` couvre `*.tfstate`, `terraform.tfvars` et `backend.hcl`.
 - **`custom_data` de la VM est ignoré après création.** Le modifier recréerait la
-  machine à chaque `apply` sans que la modification prenne effet autrement. Les
-  évolutions de configuration passent par `systemctl restart eds-stack`, qui relit
-  les secrets et redéploie la pile.
+  machine à chaque `apply` sans que la modification prenne effet autrement.
+  Conséquence à ne pas manquer : changer un gabarit de `cloud-init/` met à jour ce
+  qu'obtiendra une **future** VM, jamais celle qui tourne. `systemctl restart
+  eds-stack` relit les secrets et redéploie la pile, mais depuis le
+  `/opt/eds/docker-compose.yml` déjà présent — il ne le régénère pas. Pour appliquer
+  un changement de compose à chaud, il faut le porter sur la VM puis redémarrer :
+
+  ```bash
+  az vm run-command invoke -g rg-eds-chu-prod -n vm-warehouse-eds-chu-prod \
+    --command-id RunShellScript --scripts '
+      cd /opt/eds && cp docker-compose.yml docker-compose.yml.avant
+      sed -i "…" docker-compose.yml
+      docker compose --env-file /opt/eds/.env config >/dev/null   # valider AVANT
+      systemctl restart eds-stack'
+  ```
+
+  Le gabarit Terraform reste la source de vérité : c'est lui qui décide de ce que
+  produira le prochain `terraform apply` sur une machine neuve, et la modification à
+  chaud doit toujours lui être identique.
 - **La propagation RBAC n'est pas instantanée** : une attente explicite de 30 s
   précède l'écriture des secrets. Sans elle, le premier `apply` échoue et le second
   passe — un déploiement qui ne marche qu'à la deuxième tentative n'est pas

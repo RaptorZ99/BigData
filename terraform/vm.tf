@@ -56,10 +56,11 @@ resource "azurerm_linux_virtual_machine" "warehouse" {
     swap_size_gb   = var.swap_size_gb
     key_vault_name = local.nom_coffre
     compose = base64encode(templatefile("${path.module}/cloud-init/docker-compose.cloud.yml.tftpl", {
-      site_host        = local.hote_site
-      memoire_ch       = local.memoire_clickhouse
-      memoire_metabase = local.memoire_metabase
-      xmx_metabase     = local.xmx_metabase
+      site_host          = local.hote_site
+      memoire_ch         = local.memoire_clickhouse
+      memoire_metabase   = local.memoire_metabase
+      xmx_metabase       = local.xmx_metabase
+      metaspace_metabase = local.metaspace_metabase
     }))
     caddyfile = base64encode(templatefile("${path.module}/cloud-init/Caddyfile.tftpl", {
       site_host     = local.hote_site

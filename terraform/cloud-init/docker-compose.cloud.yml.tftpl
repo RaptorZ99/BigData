@@ -50,7 +50,10 @@ services:
       # Sans borne explicite, la JVM se dimensionne sur la mémoire visible et se
       # fait tuer par le noyau. `SerialGC` : sur deux vCPU partagés, le ramasse-
       # miettes parallèle réserve de la mémoire sans rien gagner.
-      JAVA_OPTS: "-Xmx${xmx_metabase}m -XX:MaxMetaspaceSize=256m -XX:+UseSerialGC"
+      #
+      # Le métaspace est calculé, plus figé à 256 Mo : Metabase est du Clojure, il
+      # en charge beaucoup, et cette borne l'a réellement arrêté (cf. locals.tf).
+      JAVA_OPTS: "-Xmx${xmx_metabase}m -XX:MaxMetaspaceSize=${metaspace_metabase}m -XX:+UseSerialGC"
     volumes:
       - metabase-data:/metabase-data
     ports:

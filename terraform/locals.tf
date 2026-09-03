@@ -67,9 +67,26 @@ locals {
   budget_conteneurs  = local.ram_disponible - 350
   memoire_clickhouse = floor(local.budget_conteneurs * 0.45)
   memoire_metabase   = floor(local.budget_conteneurs * 0.35)
-  # Le tas de la JVM, sous la limite du conteneur : il faut de la place pour le
-  # métaspace et les piles, sinon le conteneur est tué avant que la JVM ne le voie.
-  xmx_metabase = floor(local.memoire_metabase * 0.7)
+  # Répartition du budget mémoire de la JVM Metabase, à l'intérieur de la limite du
+  # conteneur. Trois postes, et le troisième est celui qu'on oublie :
+  #
+  #   * le tas (`-Xmx`) — les données en vol, modeste ici : les résultats sont
+  #     diffusés en flux, pas accumulés ;
+  #   * le métaspace — les classes chargées. Metabase est écrit en **Clojure**, où
+  #     chaque fonction devient une classe et où la compilation continue d'en
+  #     produire à l'exécution : ce poste y pèse bien plus que dans une application
+  #     Java ordinaire ;
+  #   * le reste — piles de threads, cache de code, tampons directs. Invisible dans
+  #     les options, mais bien réel : il faut lui laisser de la place.
+  #
+  # La première version donnait 70 % au tas et bornait le métaspace à 256 Mo. Le
+  # 2 septembre 2026, en production, la JVM s'est arrêtée sur
+  # `OutOfMemoryError: Metaspace` pendant le provisionnement des tableaux de bord —
+  # alors que le tas gardait 0,51 Go libres sur 0,75. Le budget n'était pas
+  # insuffisant, il était mal réparti. Ces trois parts corrigent cela sans toucher
+  # à la taille de la VM.
+  xmx_metabase       = floor(local.memoire_metabase * 0.40)
+  metaspace_metabase = floor(local.memoire_metabase * 0.38)
 
   # ClickHouse se borne lui-même en plus de la limite Docker : arrêter une requête
   # avec un message clair vaut mieux que se faire tuer par le noyau sans trace.
