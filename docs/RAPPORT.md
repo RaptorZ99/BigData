@@ -706,4 +706,4 @@ et le tuple de non-régression y sont littéraux.
 
 *Énoncé de l'épreuve : [`FICHE-SUJET.md`](FICHE-SUJET.md) · Consigne d'évolution :
 [`SUJET-EVOLUTION-nouvelles-kpi.md`](SUJET-EVOLUTION-nouvelles-kpi.md) · Mise en service et exploitation :
-[`README`](../README.md) · Infrastructure Azure : [`terraform/README.md`](../terraform/README.md)*
+[`README`](../README.md) · Déploiement Azure : [`RAPPORT-CLOUD.md`](RAPPORT-CLOUD.md) et [`terraform/README.md`](../terraform/README.md)*
