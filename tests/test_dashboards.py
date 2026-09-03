@@ -84,24 +84,31 @@ def test_aucune_carte_ne_deborde_de_la_grille(cle: str):
         )
 
 
-def test_les_tuiles_de_synthese_couvrent_toute_la_largeur():
-    """Cinq tuiles alignées : la bande doit faire exactement 24 colonnes.
+def test_les_bandes_de_tuiles_couvrent_toute_la_largeur():
+    """Chaque bande de tuiles doit faire exactement 24 colonnes, sans trou.
 
     Une bande incomplète laisse un vide à droite ; une bande trop large repousse
-    la dernière tuile à la ligne suivante.
+    la dernière tuile à la ligne suivante. Il y a deux bandes : les chiffres clés
+    en tête, et les deux totaux de l'évolution (actes, montant facturé).
     """
-    tuiles = [c for c in _cartes("pilotage") if c.get("display") == "scalar"]
-    assert len(tuiles) == 5
-    assert {c["row"] for c in tuiles} == {2}, "les tuiles doivent être sur une seule ligne"
-    assert sum(c["size_x"] for c in tuiles) == GRILLE
-    assert len({c["size_y"] for c in tuiles}) == 1, "hauteurs inégales : la bande serait crantée"
+    bandes: dict[int, list[dict]] = {}
+    for carte in _cartes("pilotage"):
+        if carte.get("display") == "scalar":
+            bandes.setdefault(carte["row"], []).append(carte)
 
-    # Elles doivent aussi être jointives, sans trou entre deux colonnes.
-    debuts = sorted((c["col"], c["size_x"]) for c in tuiles)
-    attendu = 0
-    for col, largeur in debuts:
-        assert col == attendu, f"trou ou recouvrement à la colonne {attendu}"
-        attendu += largeur
+    assert len(bandes) == 2, "deux bandes de tuiles attendues"
+    tete = bandes[min(bandes)]
+    assert len(tete) == 5, "la bande de tête porte les cinq chiffres clés"
+
+    for ligne, bande in sorted(bandes.items()):
+        assert sum(c["size_x"] for c in bande) == GRILLE, f"bande {ligne} : largeur incomplète"
+        assert len({c["size_y"] for c in bande}) == 1, (
+            f"bande {ligne} : hauteurs inégales, elle serait crantée"
+        )
+        attendu = 0
+        for col, largeur in sorted((c["col"], c["size_x"]) for c in bande):
+            assert col == attendu, f"bande {ligne} : trou ou recouvrement à la colonne {attendu}"
+            attendu += largeur
 
 
 @pytest.mark.parametrize("cle", sorted(DASHBOARDS))

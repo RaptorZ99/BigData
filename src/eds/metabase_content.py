@@ -358,6 +358,32 @@ _PILOTAGE_CARDS = [
         "size_y": 2,
     },
     {
+        "name": "Actes réalisés",
+        "description": (
+            "Actes médicaux réalisés sur la période, tous services confondus. "
+            "Repris de kpi_synthese, comme les tuiles de tête."
+        ),
+        "display": "scalar",
+        "sql": "SELECT nb_actes FROM kpi_synthese",
+        "row": 41,
+        "col": 0,
+        "size_x": 12,
+        "size_y": 3,
+    },
+    {
+        "name": "Montant facturé (€)",
+        "description": (
+            "Somme des tarifs T2A des actes réalisés, en euros. Un acte dont le code est "
+            "absent du référentiel ne porte aucun montant — il n'est pas compté pour zéro."
+        ),
+        "display": "scalar",
+        "sql": "SELECT montant_facture_euros FROM kpi_synthese",
+        "row": 41,
+        "col": 12,
+        "size_x": 12,
+        "size_y": 3,
+    },
+    {
         "name": "Activité et DMS par catégorie de service",
         "description": (
             "Séjours et durée moyenne de séjour (séjours terminés) par catégorie — le "
@@ -371,7 +397,7 @@ _PILOTAGE_CARDS = [
             "FROM kpi_activite_categorie\n"
             "ORDER BY nb_sejours DESC"
         ),
-        "row": 41,
+        "row": 44,
         "col": 0,
         "size_x": 12,
         "size_y": 8,
@@ -395,7 +421,7 @@ _PILOTAGE_CARDS = [
             "graph.x_axis.title_text": "Service",
             "graph.y_axis.title_text": "Actes",
         },
-        "row": 41,
+        "row": 44,
         "col": 12,
         "size_x": 12,
         "size_y": 8,
@@ -412,7 +438,7 @@ _PILOTAGE_CARDS = [
             "graph.x_axis.title_text": "Acte (CCAM)",
             "graph.y_axis.title_text": "Actes",
         },
-        "row": 49,
+        "row": 52,
         "col": 0,
         "size_x": 12,
         "size_y": 8,
@@ -432,7 +458,7 @@ _PILOTAGE_CARDS = [
             "FROM kpi_actes_service\n"
             "ORDER BY montant_facture_euros DESC"
         ),
-        "row": 49,
+        "row": 52,
         "col": 12,
         "size_x": 12,
         "size_y": 8,
@@ -446,7 +472,7 @@ _PILOTAGE_CARDS = [
             "consultable dans l'entrepôt : aucun chiffre du dashboard n'est le "
             "résultat d'une suppression silencieuse."
         ),
-        "row": 57,
+        "row": 60,
         "col": 0,
         "size_x": 24,
         "size_y": 2,
@@ -467,7 +493,7 @@ _PILOTAGE_CARDS = [
             "FROM kpi_qualite_pipeline\n"
             "ORDER BY `écartées` DESC, `signalées` DESC, controle"
         ),
-        "row": 59,
+        "row": 62,
         "col": 0,
         "size_x": 24,
         "size_y": 14,
@@ -482,7 +508,7 @@ _PILOTAGE_CARDS = [
             "FROM kpi_ingestion\n"
             "ORDER BY `jour de dépôt` DESC, domaine"
         ),
-        "row": 73,
+        "row": 76,
         "col": 0,
         "size_x": 24,
         "size_y": 10,
@@ -602,7 +628,9 @@ _RECHERCHE_CARDS = [
             "Composition des cohortes par sexe, exprimée en part de femmes. Le ratio est "
             "plus lisible que deux séries d'effectifs : les cohortes vont de 8 à plus de "
             "2 000 patients, et deux barres absolues côte à côte ne laisseraient pas lire "
-            "la composition des petites."
+            "la composition des petites. Trois pathologies n'ont aucune femme en diagnostic "
+            "principal (infarctus du myocarde, BPCO, tumeur bronchique) : leur barre est "
+            "vide parce que la part vaut zéro, pas parce que la donnée manque."
         ),
         "display": "row",
         # La somme des tranches d'âge n'est légitime que si aucune cellule de la

@@ -664,6 +664,10 @@ publier séparément recopierait trois fois la même agrégation, qui finirait p
 | Chirurgie | chirurgie | 40 | 476 | 564 | 1,18 | 14,1 | 147 145 € |
 | Oncologie | medecine | 35 | 211 | 241 | 1,14 | 6,9 | 64 265 € |
 
+La bande s'ouvre sur les deux totaux — 8 112 actes, 2 199 450 € — repris de
+`kpi_synthese` comme les tuiles de tête, puis les détaille par catégorie, par service
+et par type.
+
 ![Actes médicaux et facturation sur le tableau de bord de pilotage](img/pilotage-actes.jpg)
 
 Chaque chiffre a été recalculé par un chemin indépendant — une jointure directe entre
