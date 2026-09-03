@@ -204,7 +204,7 @@ cloud-logs: ## Journaux de la dernière exécution du pipeline
 	@az containerapp job logs show -n job-eds-pipeline -g $(RG) --container eds --tail 200 2>/dev/null \
 	 || echo "Aucune exécution récente. Voir Log Analytics (requête dans les sorties Terraform)."
 
-cloud-stop: ## Désalloue la VM — la facture tombe à ~5 €/mois
+cloud-stop: ## Désalloue la VM — la facture tombe à ~8 €/mois
 	az vm deallocate -g $(RG) -n $$($(TF) output -raw nom_vm) -o none
 	@echo '→ VM désallouée. `make cloud-start` la remonte, pile comprise.'
 
@@ -215,9 +215,9 @@ cloud-start: ## Rallume la VM ; la pile remonte seule
 cloud-destroy: ## ⚠ Détruit toute l'infrastructure Azure
 	$(TF) destroy
 
-diagram: ## Regénère le modèle de données (nécessite plantuml)
-	plantuml -tpng -o img docs/data-model.puml
-	plantuml -tsvg -o img docs/data-model.puml
+diagram: ## Regénère le modèle de données et l'architecture cloud (nécessite plantuml)
+	plantuml -tpng -o img docs/data-model.puml docs/cloud-architecture.puml
+	plantuml -tsvg -o img docs/data-model.puml docs/cloud-architecture.puml
 
 logs: ## Suit les logs des conteneurs
 	docker compose logs -f

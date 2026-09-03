@@ -128,11 +128,19 @@ resource "azurerm_role_assignment" "job_lake_contributeur" {
 }
 
 # La documentation dbt est publiée par le job dans le conteneur du site statique.
+#
+# Portée : le conteneur `$web`, et lui seul. Ce conteneur n'est pas une ressource
+# Terraform — c'est l'activation du site statique qui le crée — mais son identifiant
+# de gestion suit la même forme que celui des deux autres, et une attribution de rôle
+# peut le viser directement. Une première version donnait ce droit au compte entier :
+# le job aurait alors pu écrire dans `filestorage`, ce que rien ne justifie.
 resource "azurerm_role_assignment" "job_web_contributeur" {
   count                = var.publish_dbt_docs ? 1 : 0
-  scope                = azurerm_storage_account.eds.id
+  scope                = "${azurerm_storage_account.eds.id}/blobServices/default/containers/$web"
   role_definition_name = "Storage Blob Data Contributor"
   principal_id         = azurerm_user_assigned_identity.pipeline.principal_id
+
+  depends_on = [azurerm_storage_account_static_website.docs]
 }
 
 # La VM, elle, n'a AUCUNE attribution de rôle sur ce compte. Elle ne peut lire

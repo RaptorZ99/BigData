@@ -212,7 +212,7 @@ class LocalStorage:
             return handle.read().decode("utf-8")
 
 
-# ── Zone Azure : deux conteneurs d'un compte ADLS Gen2 ───────────────────────
+# ── Zone Azure : deux conteneurs d'un compte de blobs (sans espace de noms hiérarchique) ──
 class AzureBlobStorage:
     """Un conteneur de stockage objet, joint par identité gérée.
 

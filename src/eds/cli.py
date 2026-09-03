@@ -251,7 +251,7 @@ def provision_metabase_command() -> None:
 def publish_dbt_docs_command() -> None:
     """Génère la documentation dbt et la publie sur le site statique du stockage.
 
-    Le fichier produit est autonome : graphe des 28 modèles, descriptions de
+    Le fichier produit est autonome : graphe des 34 modèles, descriptions de
     colonnes et tests attachés. Il ne contient aucune donnée patient — des
     métadonnées et des comptages de lignes.
     """

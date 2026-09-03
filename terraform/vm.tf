@@ -89,7 +89,7 @@ resource "azurerm_linux_virtual_machine" "warehouse" {
 }
 
 # Extinction planifiée. Gratuite, et c'est le levier de coût le plus simple :
-# 22 h → 8 h ramène la facture de 35 à 23 €/mois.
+# 22 h → 8 h ramène la facture de 32,7 à 22,6 €/mois (tarifs relevés, cf. variables.tf).
 resource "azurerm_dev_test_global_vm_shutdown_schedule" "warehouse" {
   count = var.auto_shutdown_time != "" ? 1 : 0
 

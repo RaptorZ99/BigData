@@ -111,9 +111,9 @@ variable "auto_shutdown_time" {
     échouerait chaque nuit, faute d'entrepôt à joindre. Un contrôle Terraform le signale
     au `plan`.
 
-    Économie réelle, mesurée : 29,6 → 19,4 €/mois pour une extinction 22 h → 8 h, soit
-    2,6 mois d'autonomie portés à 4,0. À comparer aux 5,20 €/mois de `make cloud-stop`,
-    qui reste le levier le plus efficace entre deux démonstrations.
+    Économie, aux tarifs relevés : 32,7 → 22,6 €/mois pour une extinction 22 h → 8 h.
+    À comparer aux 8,3 €/mois de `make cloud-stop` (disque et deux IP publiques
+    conservés), qui reste le levier le plus efficace entre deux démonstrations.
   TXT
   type        = string
   default     = ""

@@ -66,8 +66,8 @@ output "cout_mensuel_estime_eur" {
   description = "Estimation, tarifs Linux relevés à l'API Azure pour la région choisie."
   value = {
     vm             = var.vm_size
-    note           = "VM ${var.vm_size} + disque ${var.os_disk_size_gb} Gio + IP statique. Jobs, stockage et journaux : sous les offres gratuites."
-    allumee_24h_24 = var.auto_shutdown_time == "" ? "~35 EUR/mois" : "~23 EUR/mois (extinction ${var.auto_shutdown_time})"
-    eteinte        = "~5 EUR/mois (disque + IP conserves)"
+    note           = "VM ${var.vm_size} + disque ${var.os_disk_size_gb} Gio + deux IP publiques (la VM, et celle que l environnement Container Apps cree dans son groupe gere). Jobs, stockage et journaux : sous les offres gratuites."
+    allumee_24h_24 = var.auto_shutdown_time == "" ? "~33 EUR/mois" : "~23 EUR/mois (extinction ${var.auto_shutdown_time})"
+    eteinte        = "~8 EUR/mois (disque + deux IP conserves)"
   }
 }

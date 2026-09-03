@@ -1,7 +1,7 @@
 # Le crédit étudiant est fini. Trois filets, du plus souple au plus dur :
 #
 #   1. ces alertes préviennent ;
-#   2. `make cloud-stop` ramène la facture à ~5 €/mois en une commande ;
+#   2. `make cloud-stop` ramène la facture à ~8 €/mois en une commande ;
 #   3. la limite de dépense de l'offre étudiante désactive les ressources à crédit
 #      épuisé — la facturation ne peut pas devenir négative.
 #

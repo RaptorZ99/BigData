@@ -214,8 +214,8 @@ def build(run_id: str, target: str = "local", *, select: str | None = None) -> N
     ⚠ On ne passe **jamais** `--full-refresh` à dbt. `eds run --full-refresh`
     signifie « ré-ingérer tous les jours depuis la source » ; côté dbt, la même
     option détruirait l'historique de `ops.quality_report`, seul modèle
-    incrémental du projet. Les 26 autres sont matérialisés en `table` et donc
-    reconstruits de toute façon.
+    incrémental du projet. Les 29 modèles en `table` sont reconstruits de toute
+    façon.
     """
     # Import local : dbt est un extra (`uv sync --extra dbt`). Le socle de
     # `make demo` n'a pas à le tirer tant qu'aucune transformation n'est lancée.

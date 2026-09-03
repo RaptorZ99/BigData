@@ -21,8 +21,8 @@ eds:
       secure: false
       connect_timeout: 10
       send_receive_timeout: 300
-      # Un seul thread : la VM cible n'a qu'un vCPU et 2 Gio. Paralléliser dbt n'y
-      # gagnerait rien et multiplierait la pression mémoire. À passer à 4 si l'on
-      # bascule sur un profil de VM plus large.
+      # Un seul thread : la VM cible a 2 vCPU et 4 Gio, dont 1,65 Gio pour ClickHouse.
+      # Paralléliser dbt n'y gagnerait rien et multiplierait la pression mémoire. À
+      # passer à 4 si l'on bascule sur un profil de VM plus large.
       threads: 1
     azure: *clickhouse

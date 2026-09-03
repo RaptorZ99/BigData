@@ -15,7 +15,7 @@ budget_contact_emails = ["prenom.nom@efrei.net"]
 # Plus de mémoire si un conteneur redémarre en boucle (divise l'autonomie par deux).
 # vm_size = "Standard_B2s_v2"
 
-# Extinction nocturne : 35 €/mois -> 23 €/mois.
+# Extinction nocturne : 32,7 €/mois -> 22,6 €/mois.
 # auto_shutdown_time = "2200"
 
 # Restreindre l'accès aux tableaux de bord (defaut : ouvert, pour la demonstration).

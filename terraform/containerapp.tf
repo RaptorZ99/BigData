@@ -2,9 +2,11 @@
 #
 # Pourquoi des jobs Container Apps plutôt qu'un `cron` sur la VM :
 #
-#   * ils sont **serverless** — zéro réplique entre deux exécutions, donc zéro coût.
-#     Soixante secondes par jour à 0,5 vCPU consomment 0,5 % de l'offre mensuelle
-#     gratuite (180 000 vCPU-s) : le pipeline planifié ne coûte rien ;
+#   * ils sont **serverless** — zéro réplique entre deux exécutions, donc zéro coût
+#     d'exécution. Soixante secondes par jour à 0,5 vCPU consomment 0,5 % de l'offre
+#     mensuelle gratuite (180 000 vCPU-s). Seul coût réel : l'environnement crée dans
+#     son groupe géré (`ME_cae-…`) un équilibreur et une IP publique Standard,
+#     facturée ~3,1 €/mois — relevé sur la facture, pas dans la documentation ;
 #   * ils sont **dans le réseau** — le job joint l'entrepôt par son adresse privée,
 #     ce qui permet de ne jamais exposer ClickHouse sur Internet ;
 #   * ils sont **journalisés** — la sortie part dans Log Analytics, interrogeable

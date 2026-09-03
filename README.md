@@ -103,7 +103,7 @@ make pipeline     Ingestion incrémentale (jours non encore traités)
 make status       État de l'ingestion et volumétrie par couche
 make quality      Rapport qualité du dernier traitement (22 lignes, 20 règles)
 make provision    (Re)crée connexions, permissions et tableaux de bord Metabase
-make test         128 tests unitaires        ·  make test-e2e   86 tests d'intégration
+make test         155 tests unitaires        ·  make test-e2e   86 tests d'intégration
 make dbt-test     117 tests dbt              ·  make dbt-docs   graphe des 34 modèles
 make lint         Style (ruff)               ·  make logs       Logs des conteneurs
 make down         Arrête (données gardées)   ·  make reset      ⚠ Détruit tout
@@ -152,7 +152,7 @@ message d'erreur, `ops.ingest_log` le checksum de chaque fichier déjà chargé.
 toujours sûr.
 
 **Intégration continue.** À chaque poussée, la CI rejoue exactement le parcours d'un
-correcteur sur une machine vierge — clone, `make demo`, les 214 tests, la preuve du
+correcteur sur une machine vierge — clone, `make demo`, les 241 tests, la preuve du
 cloisonnement — en plus du style, de la compilation dbt et de la validation Terraform.
 
 ---
@@ -169,12 +169,19 @@ make cloud-apply        # ~10 min : réseau, stockage, coffre, VM, jobs, budget
 make cloud-seed         # dépose source-filestorage/ dans le conteneur du CHU
 make cloud-provision    # entrepôt, comptes cloisonnés, tableaux de bord
 make cloud-run          # premier traitement ; ensuite, chaque nuit tout seul
-make cloud-stop         # met en pause : 30 €/mois → 5 €/mois
+make cloud-stop         # met en pause : 33 €/mois → 8 €/mois
 ```
 
 **Ce que le cloud ajoute au RGPD** : la machine qui héberge l'entrepôt n'a **aucun droit
 IAM** sur le conteneur contenant les noms et les NIR. Ce n'est plus une règle de code, c'est
-une propriété de l'infrastructure. Détail dans [`terraform/README.md`](terraform/README.md).
+une propriété de l'infrastructure.
+
+📄 **[Le rapport cloud est dans `docs/RAPPORT-CLOUD.md`](docs/RAPPORT-CLOUD.md)** — le
+diagramme d'architecture, les choix et leurs alternatives, le fonctionnement au quotidien,
+la sécurité, le coût, les limites. Le détail opérationnel de l'infrastructure est dans
+[`terraform/README.md`](terraform/README.md).
+
+[![Architecture du déploiement Azure](docs/img/eds-cloud-architecture.png)](docs/img/eds-cloud-architecture.svg)
 
 ---
 
@@ -186,8 +193,8 @@ src/eds/              Orchestrateur Python — pseudonymisation, collecte, charg
 dbt/                  Transformation silver et gold — 34 modèles, 117 tests
 sql/                  Initialisation de l'entrepôt, schémas bronze, chargements par jour
 terraform/            Infrastructure Azure
-tests/                214 tests (128 unitaires, 86 d'intégration)
-docs/                 RAPPORT.md (dossier de conception), modèle de données, captures, énoncé
+tests/                241 tests (155 unitaires, 86 d'intégration)
+docs/                 RAPPORT.md (dossier de conception), RAPPORT-CLOUD.md (déploiement Azure), modèles PlantUML, captures, énoncé
 benchmarks/           Banc d'essai : 20 M de relevés par le chemin réel du pipeline
 ```
 

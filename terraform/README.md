@@ -3,8 +3,8 @@
 Toute l'infrastructure du déploiement Azure. Rien ne se crée à la main ;
 `terraform destroy` ne laisse rien derrière.
 
-Les choix d'architecture et leur justification sont résumés dans le
-[rapport](../docs/RAPPORT.md) §3.3 ; le détail opérationnel est ci-dessous.
+Les choix d'architecture, leur justification et le diagramme de déploiement sont dans le
+[rapport cloud](../docs/RAPPORT-CLOUD.md) ; le détail opérationnel est ci-dessous.
 
 ## Démarrage
 
@@ -24,10 +24,10 @@ Vérification, exploitation et reprise sur incident : [README](../README.md) §E
 | `main.tf` | Groupe de ressources, et deux `check` qui avertissent d'une planification incohérente |
 | `providers.tf` | AzureRM 5.x : `subscription_id` obligatoire, aucun fournisseur auto-enregistré |
 | `backend.tf` | État distant, authentifié par identité Entra ID |
-| `variables.tf` | 28 variables, toutes documentées, toutes avec un défaut sûr |
+| `variables.tf` | 29 variables, toutes documentées, toutes avec un défaut sûr |
 | `locals.tf` | Nommage, adresses, **budget mémoire de la VM** déduit de sa taille |
 | `network.tf` | Réseau, deux sous-réseaux, groupe de sécurité, IP publique |
-| `storage.tf` | Compte de blobs versionné, conteneurs, jeton SAS, **droits par conteneur** |
+| `storage.tf` | Compte de blobs versionné, conteneurs, jeton SAS, **droits par conteneur** (`filestorage`, `lake`, `$web`) |
 | `keyvault.tf` | Coffre en RBAC, huit secrets générés |
 | `identity.tf` | Identité gérée des jobs |
 | `vm.tf` | VM, cloud-init, extinction planifiée, job de réveil et son rôle sur mesure |

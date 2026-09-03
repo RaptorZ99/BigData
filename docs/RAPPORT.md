@@ -154,9 +154,14 @@ Le cloud ajoute un **quatrième niveau de cloisonnement** que le local ne peut p
 les droits IAM sont attribués **par conteneur de stockage**. La machine qui héberge
 l'entrepôt n'a aucun droit sur le conteneur contenant les noms et les NIR. Ce n'est plus une
 règle de code — c'est une propriété de l'infrastructure, et `terraform plan` doit rester
-vide pour qu'elle le demeure. Détail : [`terraform/README.md`](../terraform/README.md).
+vide pour qu'elle le demeure.
 
-Coût mesuré : ~30 €/mois allumé, ~5 € en pause.
+Coût relevé sur la facture : ~33 €/mois allumé, ~8 € en pause.
+
+Le déploiement a son propre dossier, avec le diagramme d'architecture, les choix et leurs
+alternatives, le fonctionnement au quotidien et les limites :
+[`RAPPORT-CLOUD.md`](RAPPORT-CLOUD.md). Le détail opérationnel est dans
+[`terraform/README.md`](../terraform/README.md).
 
 ---
 
