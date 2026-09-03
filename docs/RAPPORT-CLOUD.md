@@ -42,7 +42,7 @@ contraintes ont été relevées, pas supposées :
 |---|---|
 | Une policy n'autorise que 5 régions (`uaenorth`, `spaincentral`, `italynorth`, `swedencentral`, `germanywestcentral`) — la France est exclue | Parmi elles, seules la Suède et l'Espagne proposent des petites VM. **`swedencentral`** : dans l'Union européenne, donc dans le champ du RGPD, et la moins chère |
 | Quota de **6 vCPU** par région | Une seule VM de 2 vCPU. Ni cluster, ni haute disponibilité |
-| Crédit de 100 $, limite de dépense activée | Cible ≈ 30 €/mois ; budget avec alertes ; `make cloud-stop` entre deux démonstrations |
+| Crédit de 100 $, limite de dépense activée | ≈ 33 €/mois allumée, 8 en pause (§6) ; budget avec alertes ; `make cloud-stop` entre deux démonstrations |
 | Marketplace interdit au crédit | Uniquement Ubuntu et des images de conteneurs publiques |
 
 **Ce qui ne change pas — les invariants.** Un seul code, deux cibles (`local`, `azure`) :
@@ -207,7 +207,7 @@ c'est une démonstration) mais sur l'authentification Metabase et les `GRANT` Cl
 | **Jobs** (`id-pipeline-eds-chu-prod`) | Lecture | Lecture, écriture | Écriture (documentation) | Lecture des secrets |
 | **VM** (ClickHouse, Metabase) | **aucun droit** | Lecture seule, par jeton SAS daté | — | Lecture des secrets |
 | Comptes SQL `chu_pilotage`, `chu_recherche` | aucun | aucun | — | aucun |
-| Exploitant (`terraform apply`) | Écriture (dépôt) | Écriture | Écriture | Écriture des secrets |
+| Exploitant (compte Entra ID du poste) | Écriture (dépôt) | Écriture | Écriture | Écriture des secrets |
 
 > **La machine qui héberge l'entrepôt ne peut pas lire les noms et les NIR.** Pas « ne le fait
 > pas » : *ne le peut pas*. Aucun rôle ne lui est attribué sur le compte de stockage
@@ -216,10 +216,13 @@ c'est une démonstration) mais sur l'authentification Metabase et les `GRANT` Cl
 > cloisonnement décrit au [rapport, §6](RAPPORT.md#6-restitution-et-cloisonnement) — le seul
 > que le code ne peut pas contourner.
 
-Tous les droits sont attribués **au conteneur**, jamais au compte. Le droit sur `$web` faisait
-exception jusqu'à ce jour : il portait sur le compte entier, donc aussi sur `filestorage` en
-écriture. Ramené au conteneur, appliqué, et vérifié par une exécution de `job-eds-provision`
-qui a republié la documentation.
+Les droits des identités de la plateforme sont attribués **au conteneur**, jamais au compte.
+Celui du job sur `$web` faisait exception jusqu'à ce jour : il portait sur le compte entier,
+donc aussi sur `filestorage` en écriture. Ramené au conteneur, appliqué, et vérifié par une
+exécution de `job-eds-provision` qui a republié la documentation. Seul l'exploitant garde un
+droit d'écriture sur le compte entier, pour `make cloud-seed` — attribué à la main, hors
+Terraform, comme le droit sur le stockage de l'état : c'est le geste d'amorçage, pas la
+plateforme.
 
 ### 5.3 Secrets : où ils vivent, qui les lit
 
