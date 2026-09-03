@@ -62,21 +62,30 @@ gold, 27 cartes Metabase sans erreur, **26 résultats de carte sur 27 identiques
 ## 2. L'architecture en un diagramme
 
 Vue de **déploiement** au sens du modèle C4 (niveau 4 : *où* tourne chaque brique), avec les
-icônes officielles Azure. Chaque boîte porte le nom réel de la ressource et ses paramètres.
-Les flèches numérotées **1 → 7** se lisent dans l'ordre d'une nuit ordinaire (§4).
+icônes officielles Azure. Elle se lit **de gauche à droite** — la livraison (GitHub, Docker Hub),
+puis le traitement (les jobs), puis le stockage — et l'entrepôt en bas, entre les utilisateurs
+et le stockage. Chaque boîte porte le nom réel de la ressource ; les paramètres détaillés sont
+dans le tableau qui suit. Les flèches numérotées **1 → 7** se lisent dans l'ordre d'une nuit
+ordinaire (§4). dbt y figure comme brique à part entière du job nocturne : `eds run` (Python)
+collecte, pseudonymise et charge bronze ; `dbt build` construit silver et gold dans ClickHouse.
 
 [![Architecture du déploiement Azure](img/eds-cloud-architecture.png)](img/eds-cloud-architecture.svg)
 
 *Cliquer pour la version vectorielle. Source : [`cloud-architecture.puml`](cloud-architecture.puml), régénérée par `make diagram`.*
 
-| Couleur | Signification |
+| Ce qu'on voit | Signification |
 |---|---|
-| **Rouge** | Identité en clair. Un seul composant peut le lire : le job de collecte |
-| **Vert** | Données pseudonymisées ou agrégées |
-| **Gris foncé** | Joignable depuis Internet : l'IP publique, Caddy, le site de documentation |
+| Cadre **bleu** | Le réseau virtuel et ses deux sous-réseaux : ce qui est dedans se parle par adresse privée |
+| Cadre **vert** | L'environnement Container Apps : des jobs sans serveur, zéro réplique entre deux exécutions |
+| Cadre **jaune** | La machine virtuelle : trois conteneurs Docker Compose |
+| Cadre **violet** | Le compte de stockage et ses trois conteneurs |
+| Cadre **gris** | Secrets, identités, journaux — un regroupement de lecture, pas une ressource |
+| Boîte **rouge** | Identité en clair. Un seul composant peut la lire : le job de collecte |
+| Boîte **verte** | Données pseudonymisées ou agrégées |
+| Boîte **gris foncé** | Joignable depuis Internet : l'IP publique, Caddy, le site de documentation |
 | Flèches **bleues** | Flux de données du traitement nocturne (1 → 6) |
 | Flèches **vertes** | Restitution aux utilisateurs (7) |
-| Flèches **violettes**, tiretées | Identités et secrets |
+| Flèches **violettes**, tiretées | Lecture des secrets par identité gérée |
 | Flèches **grises**, pointillées | Exploitation, livraison, provisionnement |
 
 Les 14 ressources du groupe, plus deux hors du groupe :
@@ -133,7 +142,7 @@ Chaque ligne est un choix **contraint par un fait vérifié**, pas une préfére
 | **2** | Azure, à 01 h 05 UTC | Démarre `job-eds-pipeline` | Tire l'image publique, injecte les 7 secrets depuis le coffre par l'identité gérée. Zéro réplique le reste du temps |
 | **3** | Le job | Lit le dépôt | `Storage Blob Data Reader`, sur ce seul conteneur. Empreinte SHA-256 par fichier : un fichier déjà chargé est ignoré |
 | **4** | Le job | Écrit le lake pseudonymisé | `Storage Blob Data Contributor`, sur ce seul conteneur. La pseudonymisation (HMAC-SHA256, sel du coffre) se fait **en flux**, ligne à ligne : l'identité en clair n'est jamais un fichier intermédiaire |
-| **5** | Le job | Pilote ClickHouse | HTTP 8123 sur l'IP privée `10.20.1.10`, via le réseau virtuel — le port n'est pas ouvert sur Internet. Chargement bronze par jour (`DROP PARTITION` + `INSERT`), puis `dbt build` : silver, gold, 117 tests |
+| **5** | Le job, en deux temps | Pilote ClickHouse | HTTP 8123 sur l'IP privée `10.20.1.10`, via le réseau virtuel — le port n'est pas ouvert sur Internet. `eds run` charge bronze par jour (`DROP PARTITION` + `INSERT`) ; `dbt build` construit silver, gold et le rapport qualité, et exécute 117 tests. Aucune donnée ne remonte dans le job : tout est SQL exécuté par le moteur |
 | **6** | ClickHouse | Lit lui-même le lake | `azureBlobStorage(lake, …)` : une collection nommée porte l'URL SAS côté serveur. Le jeton n'apparaît ni dans le SQL, ni dans `system.query_log` (règle de masquage), ni dans les journaux du pipeline |
 | **7** | Direction, chercheurs | Consultent | HTTPS 443 → Caddy → Metabase → ClickHouse avec `chu_pilotage` ou `chu_recherche`, chacun `SELECT` sur sa seule base gold |
 

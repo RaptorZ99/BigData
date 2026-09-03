@@ -1,10 +1,11 @@
 @startuml eds-cloud-architecture
-' Vue de déploiement au sens du modèle C4 (niveau 4 : où tourne chaque conteneur
-' logiciel), dessinée avec les icônes officielles Azure. Chaque élément porte le
-' nom réel de la ressource et ses paramètres tels que Terraform les déclare
-' (terraform/*.tf) et tels qu'ils ont été relevés sur l'abonnement le 3 septembre
-' 2026. Un test (tests/test_cloud_diagram.py) échoue si une ressource Terraform
-' disparaît du diagramme.
+' Lecture de gauche à droite : livraison, traitement, stockage ; l'entrepôt en bas.
+' Vue de déploiement au sens du modèle C4 (niveau 4 : où tourne chaque brique
+' logicielle), dessinée avec les icônes officielles Azure. Chaque boîte porte le
+' nom réel de la ressource ; les paramètres détaillés sont dans le rapport cloud
+' (docs/RAPPORT-CLOUD.md §2), pas ici — un diagramme se lit, il ne se déchiffre pas.
+' Ressources et paramètres relevés sur l'abonnement le 3 septembre 2026. Un test
+' (tests/test_cloud_diagram.py) échoue si une ressource Terraform disparaît d'ici.
 
 !include <C4/C4_Deployment>
 !include <azure/AzureCommon>
@@ -24,112 +25,123 @@
 !include <azure/Management/AzureSubscription>
 !include <logos/docker-icon>
 !include <logos/github-icon>
-!include <logos/terraform-icon>
 !include <logos/metabase>
+!include <logos/python>
+!include <logos/dbt-icon>
 
-title <b>EDS CHU — architecture du déploiement Azure</b>\n<size:12>Vue de déploiement (modèle C4, niveau 4) · icônes officielles Azure · ressources et paramètres relevés le 3 septembre 2026 · tout est décrit dans terraform/</size>
+title <b>EDS CHU — architecture du déploiement Azure</b>\n<size:12>Vue de déploiement C4 · icônes officielles Azure · les flèches 1 → 7 suivent une nuit ordinaire · relevé du 3 septembre 2026</size>
 
 skinparam defaultFontName Helvetica
 skinparam shadowing false
-skinparam nodesep 30
-skinparam ranksep 40
-skinparam wrapWidth 220
-skinparam maxMessageSize 220
+skinparam wrapWidth 190
+skinparam nodesep 40
+skinparam ranksep 50
 
-LAYOUT_TOP_DOWN()
+LAYOUT_LEFT_RIGHT()
 
-' ── Légende sémantique ──────────────────────────────────────────────────────
-AddElementTag("clair",  $bgColor="#B71C1C", $fontColor="#FFFFFF", $borderColor="#7F0000", $legendText="identité en clair — seul le job de collecte peut le lire")
+' ── Frontières : une teinte par nature de ressource ────────────────────────
+AddNodeTag("abonnement", $bgColor="#FFFFFF", $borderColor="#9E9E9E", $borderStyle=DashedLine(), $legendText="abonnement Azure")
+AddNodeTag("groupe",     $bgColor="#FAFAFA", $borderColor="#616161", $legendText="groupe de ressources, décrit dans terraform/")
+AddNodeTag("reseau",     $bgColor="#E8F1FB", $borderColor="#1E5AA8", $borderStyle=DashedLine(), $legendText="réseau virtuel")
+AddNodeTag("sousreseau", $bgColor="#F6FAFE", $borderColor="#1E5AA8", $borderStyle=DottedLine(), $legendText="sous-réseau")
+AddNodeTag("vm",         $bgColor="#FFF8E1", $borderColor="#F9A825", $legendText="machine virtuelle — Docker Compose, service eds-stack")
+AddNodeTag("jobs",       $bgColor="#E8F5E9", $borderColor="#2E7D32", $legendText="Container Apps — jobs sans serveur, zéro réplique au repos")
+AddNodeTag("job",        $bgColor="#FFFFFF", $borderColor="#2E7D32", $legendText="un job : une exécution = un conteneur, même image pour les trois")
+AddNodeTag("stockage",   $bgColor="#F3E5F5", $borderColor="#6A1B9A", $legendText="compte de stockage — versionné, suppression réversible 7 j")
+AddNodeTag("transverse", $bgColor="#ECEFF1", $borderColor="#546E7A", $legendText="secrets, identités, journaux")
+AddNodeTag("hors",       $bgColor="#FFFFFF", $borderColor="#9E9E9E", $borderStyle=DottedLine(), $legendText="hors du groupe de ressources")
+
+' ── Éléments : ce qu'ils contiennent ────────────────────────────────────────
+AddElementTag("clair",  $bgColor="#B71C1C", $fontColor="#FFFFFF", $borderColor="#7F0000", $legendText="identité en clair — lisible par le seul job de collecte")
 AddElementTag("pseudo", $bgColor="#1B5E20", $fontColor="#FFFFFF", $borderColor="#0D3D12", $legendText="données pseudonymisées ou agrégées")
-AddElementTag("public", $bgColor="#455A64", $fontColor="#FFFFFF", $borderColor="#263238", $legendText="joignable depuis Internet")
+AddElementTag("public", $bgColor="#37474F", $fontColor="#FFFFFF", $borderColor="#263238", $legendText="joignable depuis Internet")
 
-AddRelTag("donnees", $lineColor="#1565C0", $textColor="#0D47A1", $legendText="flux de données du traitement nocturne (1 → 6)")
-AddRelTag("usage",   $lineColor="#2E7D32", $textColor="#1B5E20", $legendText="restitution aux utilisateurs (7)")
-AddRelTag("secret",  $lineColor="#6A1B9A", $textColor="#4A148C", $lineStyle=DashedLine(), $legendText="identités et secrets — aucun mot de passe sur disque ni dans Git")
+' ── Flèches : quatre familles ───────────────────────────────────────────────
+AddRelTag("donnees", $lineColor="#1565C0", $textColor="#0D47A1", $lineThickness=2, $legendText="flux de données du traitement nocturne (1 → 6)")
+AddRelTag("usage",   $lineColor="#2E7D32", $textColor="#1B5E20", $lineThickness=2, $legendText="restitution aux utilisateurs (7)")
+AddRelTag("secret",  $lineColor="#6A1B9A", $textColor="#4A148C", $lineStyle=DashedLine(), $legendText="lecture des secrets par identité gérée")
 AddRelTag("ops",     $lineColor="#78909C", $textColor="#546E7A", $lineStyle=DottedLine(), $legendText="exploitation, livraison, provisionnement")
 
 ' ── Acteurs et systèmes externes ────────────────────────────────────────────
-Person(utilisateur, "Direction · Chercheurs", "navigateur — un compte Metabase par usage, chacun ne voit que son tableau de bord")
-Person(exploitant, "Exploitant", "poste avec az, terraform et make cloud-* — aujourd'hui, c'est lui qui dépose les fichiers du CHU")
-System_Ext(github, "GitHub", "dépôt public RaptorZ99/BigData · Actions : CI à chaque poussée, image reconstruite à chaque commit sur main", $sprite="github-icon")
-System_Ext(dockerhub, "Docker Hub", "louis336/eds-chu · image publique linux/amd64 · un tag par commit", $sprite="docker-icon")
+Person(utilisateur, "Direction · Chercheurs", "navigateur — un compte Metabase par usage")
+Person(exploitant, "Exploitant", "make cloud-* · terraform · az")
+System_Ext(github, "GitHub", "dépôt public · CI et image à chaque poussée", $sprite="github-icon")
+System_Ext(dockerhub, "Docker Hub", "louis336/eds-chu · public · linux/amd64", $sprite="docker-icon")
 
 ' ── Azure ───────────────────────────────────────────────────────────────────
-Deployment_Node(azure, "Abonnement Azure for Students", "swedencentral (UE) · policy de régions · quota 6 vCPU", $sprite="AzureSubscription") {
+Deployment_Node(azure, "Azure for Students", "swedencentral · policy de régions · quota 6 vCPU", $tags="abonnement", $sprite="AzureSubscription") {
 
-  Deployment_Node(tfstate, "rg-eds-tfstate", "état Terraform eds-chu.tfstate, écrit par terraform apply depuis le poste — mots de passe générés et URL SAS — conteneur privé, versionné, authentification Entra ID, jamais dans Git", $sprite="AzureResourceGroups")
+  Deployment_Node(rg, "rg-eds-chu-prod", "14 ressources · terraform destroy ne laisse rien", $tags="groupe", $sprite="AzureResourceGroups") {
 
-  Deployment_Node(budget, "budget-eds-chu-prod", "60 €/mois · alertes à 50, 80 et 100 % par courriel", $sprite="AzureCostBudget")
+    Deployment_Node(vnet, "vnet-eds-chu-prod", "10.20.0.0/16", $tags="reseau", $sprite="AzureVirtualNetwork") {
 
-  Deployment_Node(rg, "rg-eds-chu-prod", "groupe de ressources · 14 ressources · terraform destroy ne laisse rien", $sprite="AzureResourceGroups") {
-
-    Deployment_Node(vnet, "vnet-eds-chu-prod", "10.20.0.0/16", $sprite="AzureVirtualNetwork") {
-
-      Deployment_Node(snet_w, "snet-warehouse · 10.20.1.0/24", "nsg-warehouse-eds-chu-prod : 443 et 80 ← Internet · 8123 et 3000 ← snet-jobs · 22 ← poste admin · tout le reste refusé", $sprite="AzureNSG") {
-
-        Deployment_Node(pip, "pip-eds-chu-prod", "IP publique statique 4.223.135.71 · eds-chu-4152c908.swedencentral.cloudapp.azure.com", $sprite="AzurePublicIPAddress", $tags="public")
-
-        Deployment_Node(vm, "vm-warehouse-eds-chu-prod", "Standard_B2als_v2 · 2 vCPU · 4 Gio · Ubuntu 24.04 · disque OS 32 Gio · IP privée statique 10.20.1.10 · identité système · clé SSH seulement", $sprite="AzureVirtualMachine") {
-          Deployment_Node(docker, "Docker Compose", "service systemd eds-stack · relit les secrets à chaque démarrage", $sprite="docker-icon") {
-            Container(caddy, "Caddy 2", ":80 → :443 · TLS interne · 64 Mo", "seul service publié : redirige HTTP, termine TLS, relaie vers Metabase", $tags="public")
-            Container(metabase, "Metabase v0.58.31", ":3000 · JVM 524 Mo tas / 498 Mo métaspace · 1 311 Mo", "deux tableaux de bord, deux connexions, deux groupes — provisionnés par code", $sprite="metabase")
-            ContainerDb(clickhouse, "ClickHouse 26.3", ":8123 · 1 685 Mo · max_server_memory 1 348 Mo", "eds_bronze · eds_silver · eds_gold_pilotage · eds_gold_recherche · ops", $tags="pseudo")
+      Deployment_Node(snet_j, "snet-jobs", "10.20.2.0/27 · délégué à Container Apps", $tags="sousreseau", $sprite="AzureSubnet") {
+        Deployment_Node(cae, "cae-eds-chu-prod", "environnement Container Apps · profil Consommation · journaux vers Log Analytics", $tags="jobs", $sprite="AzureContainerApp") {
+          Deployment_Node(job_pipeline, "job-eds-pipeline", "cron 5 1 * * * (01 h 05 UTC) · 0,5 vCPU · 1 Gio", $tags="job") {
+            Container(eds, "eds run", "Python 3.13", "collecte · pseudonymisation HMAC · chargement bronze", $sprite="python")
+            Container(dbt, "dbt build", "dbt-core 1.11 · dbt-clickhouse 1.10", "34 modèles : silver, gold, ops · 117 tests", $sprite="dbt-icon")
           }
+          Container(job_provision, "job-eds-provision", "manuel", "entrepôt · comptes · Metabase · documentation dbt")
+          Container(job_controle, "job-eds-controle", "manuel", "check-cloisonnement : 9 scénarios")
         }
       }
 
-      Deployment_Node(snet_j, "snet-jobs · 10.20.2.0/27", "délégué à Microsoft.App/environments", $sprite="AzureSubnet") {
-        Deployment_Node(cae, "cae-eds-chu-prod", "Container Apps Environment · profil Consommation · 0 réplique entre deux exécutions · journaux vers Log Analytics", $sprite="AzureContainerApp") {
-          Container(job_pipeline, "job-eds-pipeline", "cron 5 1 * * * (01 h 05 UTC) · 0,5 vCPU · 1 Gio · 1 réessai · 30 min max", "eds run — collecte, pseudonymisation, bronze, dbt build")
-          Container(job_provision, "job-eds-provision", "déclenchement manuel · 0,5 vCPU · 1 Gio", "eds provision-warehouse · provision-metabase · publish-dbt-docs")
-          Container(job_controle, "job-eds-controle", "déclenchement manuel · 0,25 vCPU · 0,5 Gio", "eds check-cloisonnement — 9 scénarios")
+      Deployment_Node(snet_w, "snet-warehouse", "10.20.1.0/24 · nsg-warehouse-eds-chu-prod : 443 et 80 ← Internet · 8123 et 3000 ← snet-jobs · 22 ← poste admin · reste refusé", $tags="sousreseau", $sprite="AzureNSG") {
+        Container(pip, "pip-eds-chu-prod", "IP publique statique", "4.223.135.71 · eds-chu-4152c908.swedencentral.cloudapp.azure.com", $sprite="AzurePublicIPAddress", $tags="public")
+        Deployment_Node(vm, "vm-warehouse-eds-chu-prod", "Standard_B2als_v2 · 2 vCPU · 4 Gio · Ubuntu 24.04 · IP privée 10.20.1.10 · identité système", $tags="vm", $sprite="AzureVirtualMachine") {
+          Container(caddy, "Caddy 2", ":443 · TLS", "seul service publié", $tags="public")
+          Container(metabase, "Metabase 0.58", ":3000 · JVM 524 / 498 Mo", "deux tableaux de bord cloisonnés", $sprite="metabase")
+          ContainerDb(clickhouse, "ClickHouse 26.3", ":8123 · 1 685 Mo", "eds_bronze · eds_silver · eds_gold ×2 · ops", $tags="pseudo")
         }
       }
     }
 
-    Deployment_Node(identite, "id-pipeline-eds-chu-prod", "identité gérée assignée par l'utilisateur, portée par les trois jobs", $sprite="AzureManagedIdentity")
-
-    Deployment_Node(kv, "kv-eds-4152c908", "Key Vault · RBAC · suppression réversible 7 j · 8 secrets : sel HMAC, 6 mots de passe, URL SAS du lake", $sprite="AzureKeyVault")
-
-    Deployment_Node(stockage, "steds4152c908", "compte de stockage StorageV2 LRS · TLS 1.2 · HTTPS seul · versioning · suppression réversible 7 j · sans espace de noms hiérarchique", $sprite="AzureBlobStorage") {
-      ContainerDb(filestorage, "filestorage", "92 blobs · 29 jours · 6 domaines", "dépôt du CHU — identité en clair, seule source de vérité du système", $sprite="AzureStorageContainer", $tags="clair")
-      ContainerDb(lake, "lake", "92 blobs", "copie pseudonymisée — HMAC-SHA256 salé, NIR/nom/prénom absents", $sprite="AzureStorageContainer", $tags="pseudo")
-      Container(web, "$web", "site statique · 1 fichier HTML", "documentation dbt : graphe des 34 modèles, aucune donnée patient", $sprite="AzureStorageContainer", $tags="public")
+    Deployment_Node(stockage, "steds4152c908", "StorageV2 LRS · TLS 1.2 · versioning", $tags="stockage", $sprite="AzureBlobStorage") {
+      ContainerDb(filestorage, "filestorage", "92 blobs · 29 jours", "dépôt du CHU — identité en clair", $sprite="AzureStorageContainer", $tags="clair")
+      ContainerDb(lake, "lake", "92 blobs", "copie pseudonymisée", $sprite="AzureStorageContainer", $tags="pseudo")
+      Container(web, "$web", "site statique", "documentation dbt", $sprite="AzureStorageContainer", $tags="public")
     }
 
-    Deployment_Node(law, "log-eds-chu-prod", "Log Analytics · rétention 30 j · plafond 0,5 Go/j", $sprite="AzureLogAnalyticsWorkspace")
+    Deployment_Node(transverse, "Secrets, identités, journaux", "regroupement du diagramme, pas une ressource", $tags="transverse") {
+      Deployment_Node(identite, "id-pipeline-eds-chu-prod", "identité gérée portée par les trois jobs", $sprite="AzureManagedIdentity")
+      Deployment_Node(kv, "kv-eds-4152c908", "Key Vault · 8 secrets : sel, 6 mots de passe, URL SAS", $sprite="AzureKeyVault")
+      Deployment_Node(law, "log-eds-chu-prod", "Log Analytics · 30 j · 0,5 Go/j", $sprite="AzureLogAnalyticsWorkspace")
+    }
+  }
+
+  Deployment_Node(hors, "Hors du groupe de ressources", $tags="hors") {
+    Deployment_Node(budget, "budget-eds-chu-prod", "60 €/mois · alertes 50, 80, 100 %", $sprite="AzureCostBudget")
+    Deployment_Node(tfstate, "rg-eds-tfstate", "état Terraform · privé, versionné, Entra ID", $sprite="AzureResourceGroups")
   }
 }
 
 ' ── 1 → 6 : le traitement nocturne ─────────────────────────────────────────
-Rel_U(exploitant, filestorage, "1. dépôt du CHU", "make cloud-seed : az storage blob upload-batch · Entra ID", $tags="ops")
-Rel_U(dockerhub, job_pipeline, "2. image tirée à chaque exécution", "registre public, sans identifiant", $tags="ops")
-Rel(job_pipeline, filestorage, "3. lit", "Storage Blob Data Reader, sur ce conteneur", $tags="donnees")
-Rel(job_pipeline, lake, "4. écrit pseudonymisé", "Storage Blob Data Contributor, sur ce conteneur", $tags="donnees")
-Rel(job_pipeline, clickhouse, "5. SQL bronze puis dbt build", "HTTP 8123 · réseau privé", $tags="donnees")
-Rel(clickhouse, lake, "6. azureBlobStorage()", "jeton SAS lecture seule, 180 j, collection nommée", $tags="donnees")
+Rel(exploitant, filestorage, "1. dépôt du CHU", "make cloud-seed", $tags="donnees")
+Rel(dockerhub, job_pipeline, "2. image tirée à chaque exécution", $tags="ops")
+Rel(eds, filestorage, "3. lit", "Storage Blob Data Reader", $tags="donnees")
+Rel(eds, lake, "4. écrit", "Storage Blob Data Contributor", $tags="donnees")
+Rel(eds, clickhouse, "5. bronze", "SQL 8123 · réseau privé", $tags="donnees")
+Rel(dbt, clickhouse, "5. silver, gold, tests", "SQL 8123 · réseau privé", $tags="donnees")
+Rel(clickhouse, lake, "6. azureBlobStorage()", "jeton SAS lecture seule", $tags="donnees")
 
 ' ── 7 : la restitution ──────────────────────────────────────────────────────
-Rel(utilisateur, pip, "7. HTTPS 443", "certificat interne Caddy", $tags="usage")
-Rel_D(pip, caddy, " ", $tags="usage")
-Rel_R(caddy, metabase, "reverse proxy 3000", $tags="usage")
-Rel_R(metabase, clickhouse, "SQL 8123", "chu_pilotage / chu_recherche — SELECT sur leur seule base gold", $tags="usage")
+Rel(utilisateur, pip, "7. HTTPS 443", $tags="usage")
+Rel(pip, caddy, " ", $tags="usage")
+Rel_R(caddy, metabase, "3000", $tags="usage")
+Rel_R(metabase, clickhouse, "SQL", "chu_pilotage · chu_recherche", $tags="usage")
 
-' ── Identités et secrets ────────────────────────────────────────────────────
-Rel(cae, identite, "porte", $tags="secret")
-Rel(identite, kv, "Key Vault Secrets User", "7 secrets injectés en variables d'environnement", $tags="secret")
-Rel(vm, kv, "identité système · Key Vault Secrets User", "au démarrage, via IMDS : mot de passe ETL et URL SAS → .env, lake.xml", $tags="secret")
+' ── Secrets ─────────────────────────────────────────────────────────────────
+Rel(identite, kv, "7 secrets → variables d'environnement", $tags="secret")
+Rel(vm, kv, "au démarrage, via IMDS : mot de passe ETL, URL SAS", $tags="secret")
 
 ' ── Exploitation, livraison, provisionnement ────────────────────────────────
-Rel(job_provision, docker, "provisionne", "ClickHouse : bases, tables, comptes, GRANT · Metabase (API 3000) : connexions, groupes, tableaux de bord", $tags="ops")
-Rel(job_provision, web, "publie la documentation dbt", "Storage Blob Data Contributor, sur ce conteneur", $tags="ops")
-Rel(job_controle, docker, "prouve le cloisonnement", "9 scénarios : refus SQL et contenu invisible", $tags="ops")
-Rel(cae, law, "journaux des jobs", "KQL, run_id", $tags="ops")
+Rel(job_provision, clickhouse, "DDL, GRANT", $tags="ops")
+Rel(job_provision, metabase, "API 3000", $tags="ops")
+Rel(job_provision, web, "publie la documentation dbt", $tags="ops")
+Rel(job_controle, vm, "prouve le cloisonnement", $tags="ops")
+Rel(cae, law, "journaux, run_id", $tags="ops")
 Rel_R(exploitant, github, "git push", $tags="ops")
-Rel_R(github, dockerhub, "Actions : build linux/amd64, push", $tags="ops")
-Rel_U(exploitant, rg, "terraform apply · az containerapp job start · az vm start / deallocate", $tags="ops")
-
-Lay_R(tfstate, budget)
+Rel_R(github, dockerhub, "build amd64", $tags="ops")
 
 SHOW_LEGEND()
 @enduml
