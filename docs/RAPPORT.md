@@ -174,17 +174,12 @@ La même chaîne tourne sur Azure, décrite en Terraform, et **les invariants ne
 d'une unité** — c'était le critère d'acceptation. Le stockage objet remplace le dossier
 local, un job planifié remplace cron, ClickHouse lit le lake par `azureBlobStorage()`.
 
-Le cloud ajoute un **quatrième niveau de cloisonnement** que le local ne peut pas offrir :
-les droits IAM sont attribués **par conteneur de stockage**. La machine qui héberge
-l'entrepôt n'a aucun droit sur le conteneur contenant les noms et les NIR. Ce n'est plus une
-règle de code — c'est une propriété de l'infrastructure, et `terraform plan` doit rester
-vide pour qu'elle le demeure.
+Le cloud ajoute un **quatrième niveau de cloisonnement** que le poste ne peut pas offrir :
+les droits sont attribués par conteneur de stockage, si bien que la machine qui héberge
+l'entrepôt n'a aucun droit sur celui qui contient les noms et les NIR (§6, §14.2).
 
-Coût relevé sur la facture : ~33 €/mois allumé, ~8 € en pause.
-
-Le déploiement est décrit dans la [partie 2](#partie-2--le-déploiement-azure) de ce rapport
-(§10 à §16) : diagramme d'architecture, choix et alternatives, fonctionnement au quotidien,
-sécurité, coût, limites. Le détail opérationnel est dans
+Tout le déploiement — diagramme, choix et alternatives, exploitation, sécurité, coût,
+limites — est en [partie 2](#partie-2--le-déploiement-azure) ; le détail opérationnel dans
 [`terraform/README.md`](../terraform/README.md).
 
 ### 3.4 Automatisation : planification, erreurs, traçabilité
@@ -255,8 +250,8 @@ est **refusée au démarrage du conteneur, avec un message qui la cite** — `jo
 interprétée de travers ni ignorée en silence. Et il n'y a **pas de délai maximal d'exécution**
 en local, là où le job Azure est interrompu à 1 800 s : un `eds run` qui se figerait
 bloquerait les passages suivants sans rien signaler. Rien n'interdit non plus de lancer un
-`make pipeline` à la main pendant le passage nocturne. Ces deux limites sont assumées et
-inscrites au tableau du §8 plutôt que corrigées à la hâte.
+`make pipeline` à la main pendant le passage nocturne. Ces deux limites sont inscrites au
+tableau du §8.
 
 Le contrôle du cloisonnement est à la demande sur les deux cibles :
 `uv run eds check-cloisonnement` en local, `make cloud-check` sur Azure. Lancement,
@@ -354,18 +349,16 @@ c'est un modèle qui manque.
 | 6 | **Description de cohorte** | pathologie × tranche d'âge × sexe | `cohorte_demographie` | 102 cellules, 89 chiffrées |
 
 **Le grain n'est pas un détail de mise en forme, c'est la question posée.** « Quels services
-immobilisent le plus longtemps un lit ? » est une question sur les services : la DMS se
-publie par service, pas par service et par jour de sortie — cette dernière vue existait, et
-elle se lisait comme du bruit. Même chose pour la réadmission, qui est un chiffre unique de
-qualité des soins : sa ventilation par service est utile, mais elle est une vue de plus,
-pas la définition de l'indicateur. À l'inverse, l'activité des urgences et la surveillance
-des constantes **sont** des séries temporelles : les publier au grain du jour est ce que
-demande la question.
+immobilisent le plus longtemps un lit ? » porte sur les services : la DMS se publie donc par
+service, et non par service et par jour de sortie — cette vue-là a existé, elle se lisait
+comme du bruit. Même chose pour la réadmission, chiffre unique de qualité des soins. À
+l'inverse, l'activité des urgences et la surveillance des constantes **sont** des séries
+temporelles : le grain du jour est ce que demande la question.
 
 Chaque indicateur a donc exactement une table, à exactement un grain. Les vues
 complémentaires — `kpi_readmissions_service`, `kpi_alertes_service`, `kpi_activite_service`,
-`kpi_flux` — portent leur grain dans leur nom, et les cinq tables de l'évolution du 29 août
-suivent la même règle : une par indicateur de la consigne, dans son ordre (§9.4).
+`kpi_flux` — portent leur grain dans leur nom, et les cinq tables de l'évolution suivent la
+même règle (§9.4).
 
 Quelques définitions qui méritent d'être explicitées :
 
@@ -403,14 +396,10 @@ La suite d'intégration les ancre **valeur par valeur** :
 Soit 473 valeurs, pour un seul écart : un arrondi de densité, 86,6 contre 86,5, expliqué en
 §9.4.
 
-Ces vérifications ont trouvé trois défauts réels, tous corrigés :
-
-1. la **cascade de rejets** minorait la prévalence de quinze patients et perdait 520 relevés
-   (§4) ;
-2. les **seuils d'alerte** retenus au départ (FC 40-130, SpO2 < 90) étaient plus larges que
-   ceux du sujet et sous-comptaient les alertes de 40 % ;
-3. le **grain de publication** de la DMS et de la réadmission répondait à une autre question
-   que celle posée (§5.1).
+Ces vérifications ont trouvé trois défauts réels, tous corrigés : la **cascade de rejets**,
+qui minorait la prévalence de quinze patients et perdait 520 relevés (§4) ; des **seuils
+d'alerte** trop larges (FC 40-130, SpO2 < 90), qui sous-comptaient les alertes de 40 % ; et
+un **grain de publication** qui répondait à une autre question que celle posée (§5.1).
 
 ### 5.3 Le taux de réadmission : l'indicateur qui demandait le plus de soin
 
@@ -482,9 +471,9 @@ le vouloir fait échouer un test nommé, cela ne fait pas dériver un chiffre en
 ## 6. Restitution et cloisonnement
 
 **🏥 Pilotage** se lit par bandes : chiffres clés → durées et urgences → surveillance →
-réadmissions et flux → charge des services → **fiabilité**. Cette dernière bande distingue ce tableau de bord d'un tableau de bord
-ordinaire : un utilisateur qui doute d'un chiffre voit, sans quitter l'interface et sans
-accès à la base d'exploitation, combien de lignes ont été écartées et par quelle règle.
+réadmissions et flux → charge des services → **fiabilité**. Grâce à cette dernière bande, un
+utilisateur qui doute d'un chiffre voit, sans quitter l'interface et sans accès à la base
+d'exploitation, combien de lignes ont été écartées et par quelle règle.
 
 ![Rapport qualité et journal d'ingestion](img/rapport-qualite-dashboard.jpg)
 
@@ -556,17 +545,13 @@ Le seuil est de **cinq patients**, et les âges sont publiés en tranches de dix
 questions se posent alors : à quel grain l'appliquer, que faire de la cellule protégée, et
 que reste-t-il de déductible une fois la protection en place.
 
-**À quel grain.** Une première version publiait le grain pathologie × sexe × tranche d'âge ×
-**département**, avec la marge correspondante. Deux problèmes en sortaient. D'abord le coût :
-178 cellules sur 1 083 tombaient sous le seuil, et la parade contre la reconstruction par
-différence en retirait 66 marges sur 149 — 44 % de la table. Ensuite l'inutilité : huit
-départements sur des cohortes de quelques centaines de patients ne protègent pas grand-monde
-et ne renseignent personne.
-
-Le grain départemental a donc été **retiré**. Le sujet demande une distribution « par âge et
-sexe » : c'est le grain publié. Résultat mesuré : **89 cellules chiffrées au lieu de 83**,
-sur une table plus lisible, et sans la chaîne de tables intermédiaires qu'il fallait protéger
-les unes des autres.
+**À quel grain.** Une première version ajoutait le **département**. Elle coûtait cher — 178
+cellules sur 1 083 sous le seuil, plus 66 marges sur 149 retirées pour empêcher la
+reconstruction par différence, soit 44 % de la table — et n'apprenait rien : huit
+départements sur des cohortes de quelques centaines de patients ne protègent ni ne
+renseignent personne. Le grain départemental a donc été **retiré** au profit de celui que le
+sujet demande, « par âge et sexe ». Résultat mesuré : **89 cellules chiffrées au lieu de
+83**, sans la chaîne de tables intermédiaires qu'il fallait protéger les unes des autres.
 
 **Que faire de la cellule protégée.** Elle garde sa ligne, et perd son effectif :
 
@@ -599,8 +584,7 @@ Deux propriétés la neutralisent dans la version actuelle :
 1. **Aucune pathologie n'est publiée à moitié.** Les trois pathologies sous le seuil le sont
    sur *toutes* leurs cellules ; les dix autres sur *aucune*. Il n'existe donc, pour aucune
    pathologie, un reste à soustraire. Un test (`assert_pas_de_suppression_partielle`) échoue
-   si cette condition cesse de tenir — c'est un signal, pas une garantie structurelle, et le
-   rapport le dit plutôt que de l'affirmer plus fort qu'il ne peut.
+   si cette condition cesse de tenir : c'est un signal, pas une garantie structurelle.
 2. **Les deux tables ne décrivent pas la même population.** `prevalence_pathologie` compte
    tous les rangs de diagnostic, `cohorte_demographie` le seul diagnostic principal : la
    soustraction n'aurait pas de sens.
@@ -687,10 +671,9 @@ aucune population. Les cohortes valident la chaîne de traitement, **pas** une c
 
 ## 9. Évolution du 29 août : actes médicaux et description des services
 
-Le CHU ajoute des données sans rien retirer : une description plus fine de ses services
-et un flux d'actes médicaux, déposés le 29 août. La consigne tient en une phrase — faire
-évoluer l'entrepôt **sans tout refaire, sans rien casser** — et c'est exactement ce que
-mesure cette section.
+Le CHU ajoute des données sans rien retirer : une description plus fine de ses services et un
+flux d'actes médicaux, déposés le 29 août. La consigne tient en une phrase — faire évoluer
+l'entrepôt **sans tout refaire, sans rien casser**.
 
 ### 9.1 Ce que le dépôt contient
 
@@ -1207,21 +1190,18 @@ devenir négative.
 
 Les deux premières parties disent comment les chiffres sont produits, et où. Celle-ci les lit
 comme le feraient une direction d'hôpital, un cadre de santé, le département d'information
-médicale (DIM) ou un chercheur : que disent ces indicateurs de l'établissement, quelles
-décisions éclairent-ils, et — le jeu étant synthétique — lesquels de ces signaux décrivent un
-hôpital plutôt que le générateur qui a produit les fichiers. Tout chiffre ci-dessous est calculé
-dans l'entrepôt, sur silver et gold, à la date du dernier traitement ; les tables d'origine sont
-nommées sous chaque tableau.
+médicale (DIM) ou un chercheur. Tout chiffre y est calculé dans l'entrepôt, sur silver et
+gold, à la date du dernier traitement ; les tables d'origine sont nommées sous chaque tableau.
 
 ---
 
 ## 17. Comment lire ces chiffres
 
-**Le jeu est synthétique : la méthode compte plus que les conclusions.** Cette partie montre
-comment on exploite un EDS — quels croisements, quels dénominateurs, quelles précautions — et
-elle tire des conclusions *comme si* les chiffres étaient ceux du CHU. Quand un chiffre est
-cliniquement invraisemblable, il est dit tel, et c'est un résultat utile : sur des données
-réelles, ce serait le signal qu'une source est cassée. Chaque constat porte donc une étiquette :
+**Le jeu est synthétique : la méthode compte plus que les conclusions.** Cette partie tire
+des conclusions *comme si* les chiffres étaient ceux du CHU, et dit lesquels décrivent un
+hôpital plutôt que le générateur qui a produit les fichiers. Un chiffre cliniquement
+invraisemblable est un résultat utile : sur des données réelles, ce serait le signal qu'une
+source est cassée. Chaque constat porte donc une étiquette :
 
 | Étiquette | Sens |
 |---|---|
@@ -1308,7 +1288,7 @@ Les dix chiffres à garder en tête :
   contre 300 la veille ; 9, 11 et 16 passages aux urgences contre une soixantaine. Rien n'a
   baissé : le dépôt s'arrête. Toute lecture de tendance s'arrête donc au 25 août, et la courbe
   de charge après le 28 (sorties seules) ne décrit rien. Un contrôle « jour déposé à moins de
-  la moitié de la médiane » l'aurait signalé (§22.2). *Défaut de source.*
+  la moitié de la médiane » l'aurait signalé (§22.1). *Défaut de source.*
 
 ### 18.3 Les lits : combien il en faudrait, et ce que dit le référentiel
 
@@ -1349,24 +1329,18 @@ vérifier la formule contre la charge observée jour par jour, et les deux coïn
 
 ### 18.4 Les flux : d'où viennent les patients, où vont-ils
 
-| | Global | Écart entre services |
-|---|---|---|
-| Admission en urgence | 49 % | de 45 % (oncologie) à 52 % (urgences) |
-| Admission par mutation | 26 % | de 24 % à 28 % |
-| Admission programmée | 24 % | de 23 % à 31 % |
-| Sortie à domicile | 50 % | de 44 % à 55 % |
-| Sortie par transfert · mutation | 17 % · 17 % | de 13 % à 20 % |
-| Décès | 16,5 % | de 15 % à 20 % |
+Les patients entrent à 49 % en urgence, 26 % par mutation, 24 % en programmé, et sortent à
+50 % vers le domicile, 17 % par transfert, 17 % par mutation, **16,5 % par décès** (§19.1).
+
+Un hôpital réel a des profils très différents d'un service à l'autre : la chirurgie et
+l'oncologie sont très majoritairement programmées, les urgences ne le sont jamais, la
+réanimation sort par mutation. Ici, **chaque service reçoit et libère ses patients dans les
+mêmes proportions que les autres** — au plus quatre points d'écart sur chaque mode : ils sont
+tirés indépendamment du service. *Artefact probable.* La méthode reste : sur des données
+réelles, la part de programmé par service pilote les blocs et la destination des sorties
+décrit l'aval, deux vues que `kpi_flux` publie déjà au grain du jour.
 
 *Sources : `fact_sejour`, `kpi_flux`.*
-
-Un hôpital réel a des profils de flux très différents d'un service à l'autre : la chirurgie
-et l'oncologie sont très majoritairement programmées, les urgences ne le sont jamais, la
-réanimation sort par mutation. Ici, **chaque service reçoit et libère ses patients dans les
-mêmes proportions que les autres** : les modes sont tirés indépendamment du service.
-*Artefact probable.* La méthode reste : sur des données réelles, la part de programmé par
-service pilote les blocs, et la destination des sorties décrit l'aval (soins de suite,
-transferts) — deux vues que `kpi_flux` publie déjà au grain du jour.
 
 ---
 
@@ -1502,7 +1476,7 @@ seuls séjours dont le patient est sorti vivant.
   diabète, insuffisance cardiaque, BPCO — touchent chacune 30 à 37 % des patients. C'est le
   profil d'un CHU de recours, et c'est la cohorte que la recherche devrait regarder en
   premier : les patients qui portent à la fois insuffisance cardiaque, diabète et BPCO
-  (§22.2). *Exploitable.*
+  (§22.1). *Exploitable.*
 - **Le recrutement territorial est plat** : huit départements à un huitième chacun. Un
   établissement réel recrute selon la distance ; le grain départemental a été retiré des vues
   de recherche (§7.2), et ces chiffres montrent qu'il n'aurait rien appris. *Artefact
@@ -1551,32 +1525,23 @@ seuls séjours dont le patient est sorti vivant.
 
 ### 21.1 Ce que produit le plateau technique
 
-| Service | Actes | Séjours avec acte | Part des séjours | Actes par séjour traité | Délai admission → acte |
-|---|---:|---:|---:|---:|---|
-| Cardiologie | 1 935 | 1 213 | 76 % | 1,60 | |
-| Urgences | 1 731 | 1 090 | 77 % | 1,59 | |
-| Neurologie | 1 471 | 918 | 76 % | 1,60 | |
-| Pneumologie | 1 009 | 642 | 76 % | 1,57 | médiane 1,9 j |
-| Pédiatrie | 598 | 379 | 75 % | 1,58 | 13 % le jour de l'admission |
-| Chirurgie | 564 | 344 | 72 % | 1,64 | |
-| Réanimation | 563 | 355 | 76 % | 1,59 | |
-| Oncologie | 241 | 155 | 73 % | 1,55 | |
-
-*Sources : `kpi_actes_service`, `fact_acte` ⋈ `fact_sejour`.*
-
-- **Le volume d'actes est une fonction du nombre de séjours, et de rien d'autre** : trois
-  séjours sur quatre ont un acte, 1,6 acte par séjour traité, dans chaque service, quel que
-  soit le mode d'admission (74 à 76 %). Un plateau technique réel est trois à cinq fois plus
-  sollicité en réanimation ou en chirurgie qu'aux urgences. *Artefact probable.*
+- **Le volume d'actes est une fonction du nombre de séjours, et de rien d'autre.** Les
+  huit services se tiennent en trois points : de 72 % (chirurgie) à 77 % (urgences) de
+  séjours ayant au moins un acte, et de 1,55 à 1,64 acte par séjour traité — le détail par
+  service est au KPI 2 (§9.4). Même uniformité selon le mode d'admission (74 à 76 %). Un
+  plateau technique réel est trois à cinq fois plus sollicité en réanimation ou en chirurgie
+  qu'aux urgences. *Artefact probable.*
 - **Les types d'actes sont distribués au hasard entre les services** : la cardiologie compte
   231 appendicectomies pour 237 coronarographies, la chirurgie 81 coronarographies, la
   pédiatrie 71 ventilations mécaniques. C'est cliniquement impossible, et c'est précieux :
   la **matrice service × type d'acte** est le premier contrôle de cohérence à écrire sur des
   données réelles — un signalement « acte incompatible avec le service », sur une table de
-  compatibilité tenue par le DIM (§22.2). Le générateur a une structure clinique pour les
+  compatibilité tenue par le DIM (§22.1). Le générateur a une structure clinique pour les
   diagnostics (§18.1), pas pour les actes. *Artefact probable → futur contrôle.*
 - Le rythme suit les admissions : 239 actes par jour la première semaine complète, 306 la
   troisième. Un acte survient en médiane 1,9 jour après l'admission ; 13 % le jour même.
+
+*Sources : `kpi_actes_service`, `fact_acte` ⋈ `fact_sejour`.*
 
 ### 21.2 Ce que ça rapporte
 
@@ -1625,27 +1590,15 @@ seuls séjours dont le patient est sorti vivant.
 
 ## 22. Synthèse et préconisations
 
-### 22.1 Ce que les chiffres disent du CHU, si on prend le jeu au mot
+### 22.1 Préconisations
 
-- Un établissement d'environ **1 240 patients présents**, 240 admissions par jour dont la
-  moitié en urgence, en **croissance de 22 % en deux semaines**.
-- **Trois services font 63 % de l'activité** ; cardiologie et neurologie, à elles deux, la
-  moitié du besoin en lits. Les durées de séjour sont dictées par les pathologies, pas par les
-  services.
-- **Les lits ne sont pas là où sont les patients** : chirurgie, oncologie et pédiatrie sont
-  dotées trois à quatre fois au-delà de leur besoin relatif, cardiologie et réanimation en
-  dessous — sous réserve d'un référentiel de capacité à faire valider, qui ne peut pas
-  décrire ces volumes.
-- **La réadmission est un problème de parcours** : deux sur trois reviennent dans un autre
-  service, une semaine après, le plus souvent des urgences vers la cardiologie et la
-  neurologie.
-- **La surveillance fonctionne** — 8 % d'alertes, stables, seuils bien placés — mais ne couvre
-  que 42 % des séjours des deux services équipés, et 2 % des capteurs sont en panne.
-- **Les patients sont âgés et polypathologiques** : deux sur trois cumulent au moins deux
-  affections chroniques parmi infection urinaire, diabète, insuffisance cardiaque et BPCO.
-- **Les recettes d'actes suivent le volume**, et trois actes en font 70 %.
-
-### 22.2 Préconisations
+En sept lignes : un établissement d'environ **1 240 patients présents** en croissance de 22 %
+en deux semaines, dont trois services portent 63 % de l'activité ; des durées de séjour
+dictées par les pathologies et non par les services ; des **lits qui ne sont pas là où sont
+les patients** ; une réadmission qui est un problème de **parcours** plutôt que de service ;
+une surveillance qui fonctionne mais ne couvre que 42 % des séjours des services équipés ;
+une population âgée et polypathologique ; des recettes d'actes qui suivent le volume, trois
+actes en faisant 70 %. Ce qu'on en fait :
 
 | # | Préconisation | Pour qui | Fondée sur |
 |---|---|---|---|
@@ -1661,7 +1614,7 @@ seuls séjours dont le patient est sorti vivant.
 | 10 | **Recherche** : constituer la cohorte polypathologique (insuffisance cardiaque × diabète × BPCO) ; ne pas exploiter les sex-ratios de l'infarctus, de la BPCO et du cancer bronchique ; accès sur convention pour les maladies rares | Chercheurs, DPO | §20 |
 | 11 | **Facturation** : suivre mensuellement la structure des recettes (trois actes = 70 %) et historiser les tarifs avant tout changement de T2A | Direction financière | §21.2, §9.5 |
 
-### 22.3 Ce qu'il faudrait vérifier en premier sur des données réelles
+### 22.2 Ce qu'il faudrait vérifier en premier sur des données réelles
 
 Six signaux de ce jeu ont la signature d'un tirage aléatoire ; sur des données réelles, chacun
 est une question à poser à la source avant de publier — et plusieurs sont devenus, ou peuvent
