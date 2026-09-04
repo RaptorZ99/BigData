@@ -50,10 +50,10 @@ make acces      # affiche les URL et les mots de passe de votre installation
 ```
 
 **Une seule pile à la fois par machine.** Les ports 8123 et 3000 sont fixes : si une autre
-copie du projet tourne déjà (un clone à côté d'une archive dézippée, par exemple), le
-second `make demo` s'arrête sur « port is already allocated ». Faire `make down` dans
-l'autre copie, puis relancer. Chaque copie a ses propres conteneurs et volumes : rien n'est
-partagé, rien n'est écrasé.
+copie du projet tourne déjà (un clone à côté d'une archive dézippée, par exemple), `make
+demo` s'arrête avant de démarrer quoi que ce soit, en nommant la pile et le dossier qui
+occupent le port. Faire `make down` dans ce dossier-là, puis relancer. Chaque copie a ses
+propres conteneurs et volumes : rien n'est partagé, rien n'est écrasé.
 
 Les mots de passe sont tirés au hasard à la création de `.env` et n'existent que là :
 ils ne sont ni dans le dépôt, ni les mêmes que chez quelqu'un d'autre. `make acces` est une

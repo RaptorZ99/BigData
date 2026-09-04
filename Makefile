@@ -68,14 +68,36 @@ up: env ## Démarre ClickHouse + Metabase, puis provisionne l'entrepôt
 	@# `logs/` avant Docker : monté dans le planificateur, il serait sinon créé
 	@# par le démon, propriété de root, et le CLI du poste ne pourrait plus y écrire.
 	@mkdir -p data/lake data/clickhouse data/metabase logs
+	@# Une seule pile à la fois : les ports sont fixes. Si un conteneur d'une AUTRE
+	@# copie du projet occupe l'un d'eux, on s'arrête AVANT de créer quoi que ce soit.
+	@# Un conteneur créé pendant qu'un autre tient le port démarre ensuite sans ses
+	@# ports publiés, et ClickHouse est alors injoignable depuis le poste.
+	@for port in 8123 9000 3000; do \
+	   autre=$$(docker ps --filter "publish=$$port" \
+	              --format '{{.Names}} ({{.Label "com.docker.compose.project.working_dir"}})' \
+	            | grep -vF "($(CURDIR))" | head -1); \
+	   [ -z "$$autre" ] || { \
+	     echo "⚠ Le port $$port est déjà pris par $$autre : une autre pile EDS tourne."; \
+	     echo "  Faire « make down » dans ce dossier-là, puis relancer."; exit 1; }; \
+	 done
 	@# En cas d'échec au démarrage, Docker se contente de « dependency failed to
 	@# start » : le journal du conteneur, lui, dit pourquoi. Sans cette ligne, un
-	@# échec en intégration continue n'est pas diagnosticable a posteriori.
+	@# échec en intégration continue n'est pas diagnosticable a posteriori. Puis
+	@# `down` : un conteneur créé mais jamais démarré ne doit pas être réutilisé par
+	@# le prochain `make up` — il repartirait sans ses ports.
 	@# `--build` : le planificateur exécute le code du clone, pas une image d'hier.
 	@# Coûteux la première fois (dépendances), quelques secondes ensuite.
-	@docker compose up -d --build || { echo "── journal de ClickHouse ──"; docker compose logs --tail 60 clickhouse; exit 1; }
+	@docker compose up -d --build || { \
+	   echo "── journal de ClickHouse ──"; docker compose logs --tail 60 clickhouse; \
+	   docker compose down >/dev/null 2>&1; exit 1; }
+	@# L'attente se fait DEPUIS LE POSTE, comme le CLI qui suit : un conteneur sain
+	@# mais sans port publié serait déclaré prêt par un contrôle interne.
 	@echo "→ Attente de ClickHouse…"
-	@until docker compose exec -T clickhouse wget -q --spider http://localhost:8123/ping 2>/dev/null; do sleep 2; done
+	@n=0; until curl -fsS -m 2 http://localhost:8123/ping >/dev/null 2>&1; do \
+	   n=$$((n+1)); [ $$n -lt 60 ] || { \
+	     echo "⚠ ClickHouse ne répond pas sur localhost:8123 après deux minutes."; \
+	     docker compose ps; docker compose logs --tail 40 clickhouse; exit 1; }; \
+	   sleep 2; done
 	@echo "→ ClickHouse prêt."
 	uv run eds provision-warehouse
 
