@@ -163,6 +163,26 @@ alternatives, le fonctionnement au quotidien et les limites :
 [`RAPPORT-CLOUD.md`](RAPPORT-CLOUD.md). Le détail opérationnel est dans
 [`terraform/README.md`](../terraform/README.md).
 
+### 3.4 Automatisation : planification, erreurs, traçabilité
+
+Le sujet demande une collecte et une transformation **planifiées**, avec gestion des erreurs
+et journalisation. Le pipeline est un seul geste, `eds run`, incrémental et rejouable ; ce
+qui change entre les deux cibles, c'est **qui le déclenche**.
+
+| | Sur le poste | Sur Azure |
+|---|---|---|
+| Déclencheur | `cron`, à installer depuis [`scheduling/crontab.example`](../scheduling/crontab.example) — pas actif par défaut | `job-eds-pipeline`, planifié par Azure : cron `5 1 * * *`, 01 h 05 UTC, après le dépôt nocturne |
+| Ce qu'une nuit fait | Ne charge que les jours absents de `ops.ingest_log` ; sans nouveau fichier, ne reconstruit rien | Identique — même image, même code |
+| Erreurs | Code de retour non nul et courriel (`MAILTO`) ; le run est marqué `failed` avec son message | Un réessai, journaux dans Log Analytics, `make cloud-status` montre les trois derniers passages |
+| Reprise | `uv run eds run --date AAAA-MM-JJ` : `DROP PARTITION` puis rechargement, jamais de doublon | `az containerapp job start … --args 'run,--date,…'` — le même job, à la main |
+| Traçabilité | `ops.pipeline_runs` (un enregistrement par run, statut, message) · `ops.ingest_log` (fichier, empreinte, run) · rapport qualité chiffré par run | Idem, plus le `run_id` sur chaque ligne de journal |
+| Preuve | `make status` : derniers runs et jours ingérés | Trois exécutions planifiées consécutives, `Succeeded`, les 2, 3 et 4 septembre à 01:05:00 |
+
+Le contrôle du cloisonnement suit la même logique : hebdomadaire dans l'exemple `cron`,
+à la demande sur Azure (`make cloud-check`). Lancement, supervision et reprise sur incident
+sont dans le [README](../README.md#exploitation) ; le déroulé d'une nuit sur Azure, flèche par
+flèche, dans le [rapport cloud, §4](RAPPORT-CLOUD.md#4-comment-ça-fonctionne).
+
 ---
 
 ## 4. Qualité des données

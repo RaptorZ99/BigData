@@ -149,6 +149,14 @@ Chaque ligne est un choix **contraint par un fait vérifié**, pas une préfére
 La sortie du job part dans Log Analytics avec le `run_id` — le même que dans
 `ops.pipeline_runs` et le rapport qualité du tableau de bord.
 
+**La planification tourne, et le prouve.** Trois exécutions planifiées consécutives — les
+2, 3 et 4 septembre, à 01:05:00 UTC précises — toutes `Succeeded` en une trentaine de
+secondes. Sans nouveau dépôt, une nuit se résume à : « 92 fichier(s) déjà ingéré(s),
+ignoré(s) · Aucun nouveau fichier : les couches silver et gold sont à jour », et une ligne
+`success` de plus dans `ops.pipeline_runs`. Le jour où un fichier arrive dans `filestorage`,
+la même exécution le charge. `make cloud-status` affiche ces passages ; la requête KQL des
+sorties Terraform en donne le détail.
+
 ### 4.2 Ce qui se passe quand la VM démarre
 
 La pile est un service systemd (`eds-stack`). À chaque démarrage, avant Docker Compose, un
@@ -307,6 +315,7 @@ devenir négative.
 | **Metabase à ~78 % de sa limite mémoire** | 4 Gio partagés par trois conteneurs ; budget JVM redécoupé et vérifié sous charge | VM à 8 Gio (`Standard_B2s_v2`, 65,82 €/mois) |
 | **Metabase sur H2** | Deux comptes, reconstructible par code | PostgreSQL managé |
 | **Règle SSH liée à une adresse** | Elle suit l'adresse du poste au dernier `apply` ; `terraform plan` la signale dès que l'adresse change | Bastion, ou suppression de la règle — SSH n'est pas utilisé |
+| **Contrôle du cloisonnement à la demande seulement** | `job-eds-controle` est en déclenchement manuel ; l'exemple `cron` local, lui, le rejoue chaque lundi | Le passer en déclencheur planifié (hebdomadaire) — il resterait lançable à la main |
 | **Mode nuit non activé** | Deux variables suffisent ; laissé éteint pour que la plateforme réponde à toute heure pendant l'évaluation | L'activer : 22,6 €/mois |
 | **Une seule région, réplication locale (LRS)** | Coût | Réplication géo-redondante du dépôt, plan de reprise |
 | **Supervision limitée aux alertes de budget** | Aucun test de disponibilité | Alerte Azure Monitor sur `job-eds-pipeline` en échec et sur la VM arrêtée |
