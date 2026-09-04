@@ -196,12 +196,65 @@ depuis le même `Dockerfile`, sur le même cron UTC, avec le même réessai.
 
 | | Sur le poste | Sur Azure |
 |---|---|---|
-| Déclencheur | Le conteneur `scheduler` de la pile Docker Compose, démarré par `make demo` — rien à installer. Cron `5 1 * * *`, 01 h 05 UTC | `job-eds-pipeline`, planifié par Azure : cron `5 1 * * *`, 01 h 05 UTC, après le dépôt nocturne |
+| Déclencheur | Le conteneur `scheduler` de la pile Docker Compose, démarré par `make demo` — rien à installer. Il exécute `eds schedule`, qui appelle `eds run` sur le cron `5 1 * * *`, 01 h 05 UTC | `job-eds-pipeline`, planifié par Azure : cron `5 1 * * *`, 01 h 05 UTC, après le dépôt nocturne |
 | Ce qu'une nuit fait | Ne charge que les jours absents de `ops.ingest_log` ; sans nouveau fichier, ne reconstruit rien | Identique — même image, même code |
 | Erreurs | Un réessai après 60 s ; le run est marqué `failed` avec son message ; le planificateur survit à une nuit ratée | Un réessai, journaux dans Log Analytics, `make cloud-status` montre les trois derniers passages |
 | Reprise | `uv run eds run --date AAAA-MM-JJ` : `DROP PARTITION` puis rechargement, jamais de doublon. Ou `docker compose run --rm scheduler run`, dans l'image du cloud | `az containerapp job start … --args 'run,--date,…'` — le même job, à la main |
 | Traçabilité | `ops.pipeline_runs` (un enregistrement par run, statut, message) · `ops.ingest_log` (fichier, empreinte, run) · rapport qualité chiffré par run | Idem, plus le `run_id` sur chaque ligne de journal |
 | Preuve | `make schedule` : le prochain passage annoncé ; `make status` : derniers runs et jours ingérés. La CI vérifie sur un clone nu que le conteneur tourne et que son image exécute le pipeline | Trois exécutions planifiées consécutives, `Succeeded`, les 2, 3 et 4 septembre à 01:05:00 |
+
+#### Ce que lance le conteneur, exactement
+
+Le service `scheduler` **n'exécute pas `eds run`** : sa commande est `eds schedule`
+(`command: ["schedule"]` dans `docker-compose.yml`), et c'est elle qui appelle `eds run` à
+l'heure dite. Le détour mérite d'être explicité, parce que la planification locale est
+**écrite dans le projet, sans bibliothèque** — ni `croniter`, ni `APScheduler`, ni cron du
+système, ni service de l'hôte :
+
+| Où regarder | Ce qui s'y trouve |
+|---|---|
+| `docker-compose.yml`, service `scheduler` | Image (la même que les jobs Azure), commande, montages, identité de l'utilisateur |
+| `src/eds/cli.py`, commande `schedule` | Point d'entrée, options `--cron` (ou `EDS_SCHEDULE`) et `--once`, arrêt sur `SIGTERM` |
+| `src/eds/schedule.py` | Lecture du cron, calcul du prochain passage, boucle, réessai |
+| `tests/test_schedule.py` | 30 tests : 29 sans Docker, 1 sur la pile démarrée |
+| `terraform/containerapp.tf`, `job-eds-pipeline` | Le jumeau Azure, sur la même expression cron |
+
+`schedule.py` tient en un peu plus de deux cents lignes, commentaires compris, et fait trois
+choses. Il **lit** l'expression à cinq champs — `*`, listes, plages, pas (`*/n`, `a-b/n`,
+`n/p`), dimanche noté 0 ou 7, et la règle Vixie du OU entre jour du mois et jour de la semaine
+quand les deux sont restreints — puis la fige en ensembles de valeurs. Il **calcule** le prochain passage en avançant jour par jour
+depuis l'instant courant, borné à 366 jours : immédiat pour un cron quotidien, fini pour un
+cron annuel. Il **boucle** : dormir par tranches d'une minute au plus, pour que `docker stop`
+n'attende jamais ; exécuter la fonction qu'appelle aussi `eds run` — un seul chemin de code,
+c'est ce qui rend la parité vraie plutôt que déclarée ; réessayer une fois après 60 s en cas
+d'échec ; recommencer. Une exception qui échapperait au run est journalisée et comptée comme
+un échec, jamais fatale : le service ne meurt pas sur une nuit ratée, exactement comme un job
+Azure avec `replica_retry_limit = 1`.
+
+Rien n'est mémorisé d'un passage à l'autre : l'heure suivante est recalculée depuis l'horloge
+à chaque tour. Le planificateur survit donc à une mise en veille du poste, et un passage
+manqué — machine éteinte — est rattrapé au suivant sans logique de rattrapage à écrire, parce
+que le pipeline est incrémental (`ops.ingest_log`).
+
+**Pourquoi aucune dépendance**, et les deux raisons sont vérifiables :
+
+- **le cron est interprété en UTC**, comme sur Azure. Un seul fuseau : aucun décalage
+  silencieux au changement d'heure, et « 01 h 05 UTC » se lit pareil sur le poste et dans le
+  portail. Un test compare le défaut de `schedule.py` à la valeur de `pipeline_cron` dans
+  `terraform/variables.tf` — les deux cibles ne peuvent pas diverger sans casser le build ;
+- **l'horloge et la temporisation sont injectables**, donc la boucle se teste sans jamais
+  attendre. Les 30 tests couvrent la lecture des cinq champs, les expressions invalides, le
+  passage de fin de mois, la règle Vixie, le réessai unique et la survie à une exception, en
+  quelques millisecondes. Porter un ordonnanceur généraliste pour une seule ligne de cron
+  aurait ajouté une dépendance sans rendre ces garanties plus fortes.
+
+**Ce qu'il ne fait pas, et qu'il faut savoir.** Le parser ignore les raccourcis (`@daily`),
+les noms de mois et de jours (`JAN`, `MON`) et les extensions (`L`, `#`). Une telle expression
+est **refusée au démarrage du conteneur, avec un message qui la cite** — `jour de la semaine :
+« MON » n'est pas un nombre`, ou `« @daily » : cinq champs attendus …, 1 trouvé(s)` — jamais
+interprétée de travers ni ignorée en silence. Et il n'y a **pas de délai maximal d'exécution**
+en local, là où le job Azure est interrompu à 1 800 s : un `eds run` qui se figerait
+bloquerait les passages suivants sans rien signaler (§8).
 
 Le contrôle du cloisonnement est à la demande sur les deux cibles :
 `uv run eds check-cloisonnement` en local, `make cloud-check` sur Azure. Lancement,
@@ -616,6 +669,7 @@ aucune population. Les cohortes valident la chaîne de traitement, **pas** une c
 | Seuils d'alerte non validés cliniquement | Le nombre d'alertes en dépend directement | Faire arbitrer par les équipes soignantes avant tout usage |
 | Metabase tourne à ~78 % de sa limite mémoire sur la VM cloud | Marge étroite : un métaspace borné trop bas a déjà arrêté la JVM en cours de provisionnement | Budget JVM redécoupé (tas 524 Mo, métaspace 498 Mo, marge native 289 Mo) et vérifié sous charge ; une VM à 8 Gio le rendrait confortable |
 | La neurologie n'est pas décrite par le CHU | Sa densité d'actes par lit reste vide, sa catégorie est « (non decrit) » (§9) | Obtenir la ligne manquante du référentiel — le pipeline la prendra au prochain dépôt sans autre changement |
+| Le planificateur local n'a pas de délai maximal d'exécution | Un `eds run` figé bloquerait les passages suivants sans alerte ; le job Azure, lui, est interrompu à 1 800 s (§3.4) | Borner l'exécution dans `schedule.py` et aligner la valeur sur `replica_timeout_in_seconds` |
 | Le tarif d'un acte est celui du référentiel courant | Un changement de tarif recalculerait tout l'historique facturé (§9.5) | Historiser `dim_ccam` (dimension à évolution lente) le jour où la T2A change |
 
 **Trois recommandations de gouvernance**, qui relèvent de l'organisation et non du code :

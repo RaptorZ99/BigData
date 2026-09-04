@@ -111,7 +111,7 @@ make demo         Démonstration complète depuis zéro
 make acces        URL et identifiants de votre installation
 make pipeline     Ingestion incrémentale (jours non encore traités)
 make status       État de l'ingestion et volumétrie par couche
-make schedule     Planificateur local : prochain passage, derniers journaux
+make schedule     Planificateur local (eds schedule) : prochain passage, journaux
 make quality      Rapport qualité du dernier traitement (22 lignes, 20 règles)
 make provision    (Re)crée connexions, permissions et tableaux de bord Metabase
 make test         186 tests unitaires        ·  make test-e2e   89 tests d'intégration
@@ -135,9 +135,11 @@ docker compose run --rm scheduler run   # le même pipeline, dans l'image du clo
 **Automatisation.** Le pipeline est incrémental : il ne traite que les jours absents de
 `ops.ingest_log` et ne duplique jamais une ligne. Il est **planifié de la même façon sur les
 deux cibles** : en local, le conteneur `scheduler` de la pile — construit depuis le même
-`Dockerfile` que l'image des jobs Azure — exécute `eds run` chaque nuit à 01 h 05 UTC, sur le
-cron du job Azure, avec un réessai ; `make schedule` montre son prochain passage et ses
-derniers journaux. Rien à installer : il démarre avec `make demo`. Sur Azure,
+`Dockerfile` que l'image des jobs Azure — exécute `eds schedule`, qui lance `eds run` chaque
+nuit à 01 h 05 UTC, sur le cron du job Azure, avec un réessai ; `make schedule` montre son
+prochain passage et ses derniers journaux. La planification est écrite dans le projet, sans
+bibliothèque : le mécanisme et les fichiers où le lire sont en
+[§3.4 du rapport](docs/RAPPORT.md#34-automatisation--planification-erreurs-traçabilité). Rien à installer : il démarre avec `make demo`. Sur Azure,
 `job-eds-pipeline` fait exactement la même chose.
 
 **Supervision.** Trois points de contrôle, du plus rapide au plus complet :
@@ -205,7 +207,7 @@ l'infrastructure est dans [`terraform/README.md`](terraform/README.md).
 
 ```
 source-filestorage/   Dépôt du CHU — 29 jours, 92 fichiers, jeu synthétique de l'épreuve (évolution du 29 août comprise)
-src/eds/              Orchestrateur Python — pseudonymisation, collecte, chargement, pilotage dbt
+src/eds/              Orchestrateur Python — pseudonymisation, collecte, chargement, pilotage dbt, planification (schedule.py)
 dbt/                  Transformation silver et gold — 37 modèles, 135 tests
 sql/                  Initialisation de l'entrepôt, schémas bronze, chargements par jour
 terraform/            Infrastructure Azure
