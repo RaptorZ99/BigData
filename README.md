@@ -76,7 +76,7 @@ source-filestorage/   ──▶   data/lake/   ──▶   bronze   ──▶   
 | **Gold** | Indicateurs | Une base par usage — c'est le socle du cloisonnement |
 | **ops** | Exploitation | Journal d'ingestion, historique des runs, rapport qualité chiffré |
 
-**Les transformations s'exécutent en SQL dans ClickHouse**, orchestrées par dbt (34 modèles).
+**Les transformations s'exécutent en SQL dans ClickHouse**, orchestrées par dbt (37 modèles).
 Python copie des fichiers et lance `dbt build` : aucune donnée métier ne remonte côté client
 pour y être transformée. Seuls les deux CSV à pseudonymiser traversent Python, en flux ligne
 à ligne. Le monitoring — le plus volumineux — est lu directement par le moteur.
@@ -88,8 +88,9 @@ Le [**modèle de données**](docs/img/eds-data-model.png) est commenté en
 **Évolution du 29 août.** Le CHU a ajouté un flux d'actes médicaux et la description de ses
 services. Le pipeline incrémental a chargé les trois nouveaux fichiers sans retraiter les
 89 autres ; `dim_service` est complétée, `dim_ccam` et `fact_acte` ajoutées, cinq
-indicateurs de plus au tableau de bord de pilotage — et les six KPI historiques valent
-toujours exactement pareil. Le détail, dont la réponse aux deux pièges du sujet (un service
+indicateurs de plus — une table gold chacun, dans l'ordre de la consigne, affichée telle
+quelle au tableau de bord de pilotage — et les six KPI historiques valent toujours
+exactement pareil. Le détail, dont la réponse aux deux pièges du sujet (un service
 non décrit, « actes par service » sans jointure entre faits), est en
 [§9 du rapport](docs/RAPPORT.md#9-évolution-du-29-août--actes-médicaux-et-description-des-services).
 
@@ -105,8 +106,8 @@ make status       État de l'ingestion et volumétrie par couche
 make schedule     Planificateur local : prochain passage, derniers journaux
 make quality      Rapport qualité du dernier traitement (22 lignes, 20 règles)
 make provision    (Re)crée connexions, permissions et tableaux de bord Metabase
-make test         184 tests unitaires        ·  make test-e2e   87 tests d'intégration
-make dbt-test     117 tests dbt              ·  make dbt-docs   graphe des 34 modèles
+make test         186 tests unitaires        ·  make test-e2e   89 tests d'intégration
+make dbt-test     135 tests dbt              ·  make dbt-docs   graphe des 37 modèles
 make lint         Style (ruff)               ·  make logs       Logs des conteneurs
 make down         Arrête (données gardées)   ·  make reset      ⚠ Détruit tout
 ```
@@ -137,7 +138,7 @@ derniers journaux. Rien à installer : il démarre avec `make demo`. Sur Azure,
 |---|---|
 | `make status` | Jours ingérés, volumétrie par couche, dernier run et son statut |
 | `make quality` | Les 22 lignes du dernier traitement : lues / conservées / écartées / signalées |
-| `make test-e2e` | Les 86 invariants de l'entrepôt, dont les six KPI ancrés sur la feuille de réponses et les cinq de l'évolution, et le planificateur |
+| `make test-e2e` | Les 88 invariants de l'entrepôt, dont les six KPI ancrés sur la feuille de réponses et les cinq de l'évolution, et le planificateur |
 
 Le bas du tableau de bord de pilotage porte le rapport qualité et le journal d'ingestion :
 un utilisateur qui doute d'un chiffre voit sans quitter l'interface combien de lignes ont
@@ -159,7 +160,7 @@ message d'erreur, `ops.ingest_log` le checksum de chaque fichier déjà chargé.
 toujours sûr.
 
 **Intégration continue.** À chaque poussée, la CI rejoue exactement le parcours d'un
-correcteur sur une machine vierge — clone, `make demo`, les 271 tests, la preuve du
+correcteur sur une machine vierge — clone, `make demo`, les 275 tests, la preuve du
 cloisonnement — en plus du style, de la compilation dbt et de la validation Terraform.
 
 ---
@@ -197,10 +198,10 @@ la sécurité, le coût, les limites. Le détail opérationnel de l'infrastructu
 ```
 source-filestorage/   Dépôt du CHU — 29 jours, 92 fichiers, jeu synthétique de l'épreuve (évolution du 29 août comprise)
 src/eds/              Orchestrateur Python — pseudonymisation, collecte, chargement, pilotage dbt
-dbt/                  Transformation silver et gold — 34 modèles, 117 tests
+dbt/                  Transformation silver et gold — 37 modèles, 135 tests
 sql/                  Initialisation de l'entrepôt, schémas bronze, chargements par jour
 terraform/            Infrastructure Azure
-tests/                271 tests (184 unitaires, 87 d'intégration)
+tests/                275 tests (186 unitaires, 89 d'intégration)
 docs/                 RAPPORT.md (dossier de conception), RAPPORT-CLOUD.md (déploiement Azure), modèles PlantUML, captures, énoncé
 benchmarks/           Banc d'essai : 20 M de relevés par le chemin réel du pipeline
 ```

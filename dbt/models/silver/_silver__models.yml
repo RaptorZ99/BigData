@@ -34,7 +34,7 @@ models:
     description: >
       Dimension conformée service hospitalier (référentiel du CHU), complétée depuis le
       29 août 2026 par sa description : catégorie, capacité en lits, pôle. Un service
-      absent de la description est conservé — catégorie et pôle « non renseigne »,
+      absent de la description est conservé — catégorie et pôle « (non decrit) »,
       capacité NULL, jamais inventée.
     columns:
       - name: service_code
@@ -44,10 +44,10 @@ models:
         description: "Libellé du service"
         data_tests: [not_null]
       - name: categorie
-        description: "Type de service — regroupe plusieurs services ; « non renseigne » si non décrit"
+        description: "Type de service — regroupe plusieurs services ; « (non decrit) » si non décrit"
         data_tests: [not_null]
       - name: pole
-        description: "Pôle hospitalier ; « non renseigne » si non décrit"
+        description: "Pôle hospitalier ; « (non decrit) » si non décrit"
         data_tests: [not_null]
       - name: capacite_lits
         description: "Nombre de lits — NULL si le service n'est pas décrit"

@@ -9,9 +9,10 @@
 --  et le retirer casserait tous les indicateurs historiques — c'est la non-régression
 --  exigée. La jointure est donc EXTERNE, et l'absence est traitée en trois temps :
 --
---    * `categorie` et `pole` reçoivent le libellé explicite « non renseigne », qui se
+--    * `categorie` et `pole` reçoivent le libellé explicite « (non decrit) », qui se
 --      regroupe et s'affiche comme n'importe quelle valeur — un NULL disparaîtrait des
---      graphiques sans laisser de trace ;
+--      graphiques sans laisser de trace. Les parenthèses disent que ce n'est pas une
+--      catégorie du CHU mais l'absence de description ;
 --    * `capacite_lits` reste NULL : on ne fabrique pas un nombre de lits. La densité
 --      d'actes par lit sera NULL pour ce service, ni 0 ni infinie ;
 --    * `est_decrit` porte le fait, et la règle Q9 le compte au rapport qualité.
@@ -34,8 +35,8 @@ WITH description AS
 SELECT
     s.service_code                                              AS service_code,
     s.service_label                                             AS service_label,
-    if(d.service_code = '', 'non renseigne', d.categorie)       AS categorie,
-    if(d.service_code = '', 'non renseigne', d.pole)            AS pole,
+    if(d.service_code = '', '(non decrit)', d.categorie)        AS categorie,
+    if(d.service_code = '', '(non decrit)', d.pole)             AS pole,
     -- Zéro lit n'est pas une capacité : ramené à NULL comme une valeur absente.
     nullIf(d.capacite_lits, 0)                                  AS capacite_lits,
     CAST(d.service_code != '' AS Bool)                          AS est_decrit,

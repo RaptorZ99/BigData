@@ -124,7 +124,7 @@ jobs:
       - name: Le même pipeline, depuis l'image du cloud, sur un entrepôt vide
         # Ce que fait le planificateur chaque nuit, joué tout de suite : l'image
         # construite depuis le Dockerfile ingère les 92 fichiers, écrit le lake et les
-        # journaux sur le poste sous l'identité de l'utilisateur, et les 86 invariants
+        # journaux sur le poste sous l'identité de l'utilisateur, et les 88 invariants
         # doivent valoir exactement pareil que par le CLI. Le `make reset` final prouve
         # que ces fichiers restent effaçables sans droits root.
         run: |

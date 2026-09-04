@@ -24,8 +24,8 @@ SELECT
      FROM {{ ref('kpi_alertes_jour') }})                                    AS pct_releves_alerte,
 
     -- Évolution du 29 août 2026 : actes médicaux et facturation T2A.
-    (SELECT sum(nb_actes) FROM {{ ref('kpi_actes_service') }})              AS nb_actes,
-    (SELECT sum(montant_facture_euros) FROM {{ ref('kpi_actes_service') }}) AS montant_facture_euros,
+    (SELECT sum(nb_actes) FROM {{ ref('kpi_actes_service') }})                    AS nb_actes,
+    (SELECT sum(montant_facture_euros) FROM {{ ref('kpi_facturation_service') }}) AS montant_facture_euros,
 
     -- Horodatage de construction de la couche gold. Comparé à celui de silver, il rend
     -- détectable un échec survenu APRÈS la construction de silver : sans lui, le run

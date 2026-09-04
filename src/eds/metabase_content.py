@@ -341,16 +341,21 @@ _PILOTAGE_CARDS = [
         "size_x": 12,
         "size_y": 8,
     },
-    # ── Bande 6 · actes médicaux et facturation (dépôt du 29 août) ─────────
+    # ── Bande 6 · évolution du 29 août : les cinq KPI, dans l'ordre de la consigne ──
+    # Chaque table gold est affichée telle quelle — mêmes colonnes, même classement
+    # (`rang`) — pour que le chiffre lu ici soit exactement celui de l'entrepôt, sans
+    # renommage ni recalcul. Les largeurs suivent le nombre de colonnes de chaque
+    # table : 7 + 10 + 7, puis 12 + 12.
     {
         "kind": "text",
         "text": (
-            "### 🩺 Actes médicaux et facturation T2A\n"
-            "Depuis le dépôt du 29 août, le CHU transmet les actes réalisés pendant les "
-            "séjours et décrit ses services (catégorie, lits, pôle). Le service d'un acte "
-            "est celui de son séjour, résolu dans l'entrepôt — jamais par jointure entre "
-            "deux tables de faits. **La neurologie n'est pas décrite** : elle apparaît sous "
-            "« non renseigne », et sa densité par lit reste vide plutôt qu'inventée."
+            "### 🩺 Évolution du 29 août : actes médicaux et description des services\n"
+            "Les cinq indicateurs demandés, dans l'ordre de la consigne et tels que "
+            "l'entrepôt les publie : mêmes colonnes, mêmes lignes, même classement. Le "
+            "service d'un acte est celui de son séjour, résolu dans l'entrepôt — jamais "
+            "par jointure entre deux tables de faits. **La neurologie n'est pas décrite** : "
+            "elle apparaît sous « (non decrit) », sa densité par lit reste vide plutôt "
+            "qu'inventée."
         ),
         "row": 39,
         "col": 0,
@@ -373,8 +378,9 @@ _PILOTAGE_CARDS = [
     {
         "name": "Montant facturé (€)",
         "description": (
-            "Somme des tarifs T2A des actes réalisés, en euros. Un acte dont le code est "
-            "absent du référentiel ne porte aucun montant — il n'est pas compté pour zéro."
+            "Somme des tarifs T2A des actes réalisés, en euros — le total du KPI 5. Un "
+            "acte dont le code est absent du référentiel ne porte aucun montant : il "
+            "n'est pas compté pour zéro."
         ),
         "display": "scalar",
         "sql": "SELECT montant_facture_euros FROM kpi_synthese",
@@ -384,79 +390,81 @@ _PILOTAGE_CARDS = [
         "size_y": 3,
     },
     {
-        "name": "Activité et DMS par catégorie de service",
+        "name": "KPI 1 — Activité et DMS par catégorie de service",
         "description": (
-            "Séjours et durée moyenne de séjour (séjours terminés) par catégorie — le "
-            "niveau intermédiaire de la hiérarchie service → catégorie → pôle."
+            "Séjours clos et durée moyenne de séjour par catégorie — le niveau "
+            "intermédiaire de la hiérarchie service → catégorie → pôle. Même définition "
+            "que la DMS par service : seuls les séjours terminés comptent."
         ),
         "display": "table",
         "sql": (
-            "SELECT categorie AS `catégorie`, nb_services AS `services`,\n"
-            "       nb_sejours AS `séjours`, nb_sejours_termines AS `terminés`,\n"
-            "       dms_jours AS `DMS (jours)`\n"
-            "FROM kpi_activite_categorie\n"
-            "ORDER BY nb_sejours DESC"
+            "SELECT categorie, nb_sejours, dms_jours\nFROM kpi_activite_categorie\nORDER BY rang"
         ),
         "row": 44,
         "col": 0,
-        "size_x": 12,
+        "size_x": 7,
         "size_y": 8,
     },
     {
-        "name": "Actes par service",
+        "name": "KPI 2 — Nombre d'actes par service",
         "description": (
-            "Nombre d'actes réalisés par service. Le service est celui du séjour, propagé "
-            "sur le fait au moment de la construction de l'entrepôt."
+            "Actes réalisés par service, séjours ayant au moins un acte, et nombre moyen "
+            "d'actes par séjour traité. Le service est celui du séjour, propagé sur le "
+            "fait au moment de la construction de l'entrepôt."
         ),
-        "display": "bar",
+        "display": "table",
         "sql": (
-            "SELECT service_label AS service, nb_actes\n"
+            "SELECT service_code, service_label, nb_actes, nb_sejours_avec_acte,\n"
+            "       actes_par_sejour\n"
             "FROM kpi_actes_service\n"
-            "ORDER BY nb_actes DESC"
+            "ORDER BY rang"
         ),
-        "visualization_settings": {
-            "graph.dimensions": ["service"],
-            "graph.metrics": ["nb_actes"],
-            "graph.show_values": True,
-            "graph.x_axis.title_text": "Service",
-            "graph.y_axis.title_text": "Actes",
-        },
         "row": 44,
-        "col": 12,
-        "size_x": 12,
+        "col": 7,
+        "size_x": 10,
         "size_y": 8,
     },
     {
-        "name": "Actes par type",
-        "description": "Répartition des actes par libellé CCAM, du plus fréquent au plus rare.",
-        "display": "row",
-        "sql": ("SELECT libelle AS acte, nb_actes\nFROM kpi_actes_type\nORDER BY nb_actes DESC"),
-        "visualization_settings": {
-            "graph.dimensions": ["acte"],
-            "graph.metrics": ["nb_actes"],
-            "graph.show_values": True,
-            "graph.x_axis.title_text": "Acte (CCAM)",
-            "graph.y_axis.title_text": "Actes",
-        },
+        "name": "KPI 3 — Nombre d'actes par type d'acte",
+        "description": (
+            "Répartition des actes par code et libellé CCAM, du plus fréquent au plus rare."
+        ),
+        "display": "table",
+        "sql": ("SELECT code_ccam, libelle_ccam, nb_actes\nFROM kpi_actes_type\nORDER BY rang"),
+        "row": 44,
+        "col": 17,
+        "size_x": 7,
+        "size_y": 8,
+    },
+    {
+        "name": "KPI 4 — Densité d'actes par lit",
+        "description": (
+            "Actes rapportés au nombre de lits du service : l'intensité du plateau "
+            "technique. Une densité vide signale une capacité non renseignée — la "
+            "neurologie n'est pas décrite par le CHU, elle se classe en dernier."
+        ),
+        "display": "table",
+        "sql": (
+            "SELECT service_code, service_label, capacite_lits, nb_actes, actes_par_lit\n"
+            "FROM kpi_densite_lits\n"
+            "ORDER BY rang"
+        ),
         "row": 52,
         "col": 0,
         "size_x": 12,
         "size_y": 8,
     },
     {
-        "name": "Densité d'actes par lit et montant facturé",
+        "name": "KPI 5 — Montant facturé par service (T2A)",
         "description": (
-            "Actes par séjour, actes par lit (intensité du plateau technique) et somme des "
-            "tarifs T2A, par service. Une densité vide signale une capacité non renseignée."
+            "Somme des tarifs T2A des actes réalisés, par service, du plus au moins "
+            "facturé. Le total de l'établissement est la tuile « Montant facturé »."
         ),
         "display": "table",
         "sql": (
-            "SELECT service_label AS service, categorie AS `catégorie`,\n"
-            "       capacite_lits AS lits, nb_actes AS actes,\n"
-            "       actes_par_sejour AS `actes / séjour`, actes_par_lit AS `actes / lit`,\n"
-            "       montant_facture_euros AS `facturé (€)`\n"
-            "FROM kpi_actes_service\n"
-            "ORDER BY montant_facture_euros DESC"
+            "SELECT service_code, service_label, nb_actes, montant_facture_euros\n"
+            "FROM kpi_facturation_service\n"
+            "ORDER BY rang"
         ),
         "row": 52,
         "col": 12,

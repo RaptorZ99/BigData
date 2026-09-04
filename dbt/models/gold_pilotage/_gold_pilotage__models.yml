@@ -133,7 +133,7 @@ models:
       - name: nb_actes
         description: "Repris de kpi_actes_service"
       - name: montant_facture_euros
-        description: "Repris de kpi_actes_service"
+        description: "Repris de kpi_facturation_service"
       - name: _built_at
         description: "Horodatage de construction de gold — comparé à celui de silver pour détecter un retard"
 
@@ -163,45 +163,92 @@ models:
               arguments:
                 values: ["success", "failed"]
 
-  # ── Évolution du 29 août 2026 ─────────────────────────────────────────────
+  # ── Évolution du 29 août 2026 : les cinq KPI, dans l'ordre de la consigne ──
+  # Une table par indicateur, aux colonnes de la question posée. `rang` est la clé
+  # de tri physique : chaque table se lit dans l'ordre du classement sans ORDER BY.
   - name: kpi_activite_categorie
     description: >
-      Activité et DMS par catégorie de service — niveau intermédiaire de la hiérarchie
-      service → catégorie → pôle. Le service non décrit apparaît sous « non renseigne ».
+      KPI 1 (évolution) — Activité et DMS par catégorie de service, séjours clos. Grain :
+      la catégorie, niveau intermédiaire de la hiérarchie service → catégorie → pôle. Le
+      service non décrit apparaît sous « (non decrit) ».
     columns:
       - name: categorie
         data_tests: [unique, not_null]
       - name: nb_sejours
+        description: "Séjours terminés de la catégorie"
         data_tests: [not_null]
       - name: dms_jours
-        description: "DMS des séjours terminés de la catégorie"
+        description: "Durée moyenne des séjours terminés, en jours"
+        data_tests: [not_null]
+      - name: rang
+        description: "Classement par activité décroissante — clé de tri de la table"
+        data_tests: [unique, not_null]
 
   - name: kpi_actes_service
     description: >
-      Actes par service, actes par séjour, densité par lit et montant facturé (T2A).
-      Un grain, une table, trois indicateurs. Bâtie par drill-across : chaque fait agrégé
-      seul au grain du service, puis rejoints sur dim_service — jamais fait à fait.
+      KPI 2 (évolution) — Nombre d'actes par service et nombre moyen d'actes par séjour.
+      Le service est celui du séjour, résolu sur le fait : aucune jointure fait à fait.
     columns:
       - name: service_code
         data_tests: [unique, not_null]
       - name: nb_actes
         data_tests: [not_null]
-      - name: actes_par_sejour
-        description: "nb_actes / nb_sejours valides du service"
-      - name: actes_par_lit
-        description: "nb_actes / capacite_lits — NULL quand la capacité est inconnue"
-      - name: montant_facture_euros
-        description: "Somme des tarifs T2A des actes du service"
+      - name: nb_sejours_avec_acte
+        description: "Séjours distincts ayant au moins un acte"
         data_tests: [not_null]
+      - name: actes_par_sejour
+        description: "nb_actes / nb_sejours_avec_acte — NULL pour un service sans acte"
+      - name: rang
+        description: "Classement par nombre d'actes décroissant — clé de tri de la table"
+        data_tests: [unique, not_null]
 
   - name: kpi_actes_type
     description: >
-      Répartition des actes par code et libellé CCAM, avec la part de chaque type et le
-      montant facturé. Les parts se somment à 100 %.
+      KPI 3 (évolution) — Nombre d'actes par type d'acte, code et libellé CCAM, du plus
+      fréquent au plus rare. Un code absent de la nomenclature resterait visible sous
+      « code inconnu ».
     columns:
       - name: code_ccam
         data_tests: [unique, not_null]
+      - name: libelle_ccam
+        data_tests: [not_null]
       - name: nb_actes
         data_tests: [not_null]
-      - name: part_pct
+      - name: rang
+        description: "Classement par fréquence décroissante — clé de tri de la table"
+        data_tests: [unique, not_null]
+
+  - name: kpi_densite_lits
+    description: >
+      KPI 4 (évolution) — Densité d'actes par lit : nb_actes / capacite_lits, intensité
+      du plateau technique. NULL quand la capacité est inconnue — on ne divise pas par
+      un nombre de lits inventé ; le service non décrit se classe en dernier.
+    columns:
+      - name: service_code
+        data_tests: [unique, not_null]
+      - name: capacite_lits
+        description: "Lits du service — NULL si le service n'est pas décrit"
+      - name: nb_actes
         data_tests: [not_null]
+      - name: actes_par_lit
+        description: "nb_actes / capacite_lits, à une décimale — NULL sans capacité"
+      - name: rang
+        description: "Classement par densité décroissante, sans capacité en dernier — clé de tri"
+        data_tests: [unique, not_null]
+
+  - name: kpi_facturation_service
+    description: >
+      KPI 5 (évolution) — Montant facturé par service : somme des tarifs T2A des actes,
+      mesure additive portée par fact_acte. Le total de l'établissement est repris dans
+      kpi_synthese.
+    columns:
+      - name: service_code
+        data_tests: [unique, not_null]
+      - name: nb_actes
+        data_tests: [not_null]
+      - name: montant_facture_euros
+        description: "Somme des tarifs T2A des actes du service, en euros"
+        data_tests: [not_null]
+      - name: rang
+        description: "Classement par montant décroissant — clé de tri de la table"
+        data_tests: [unique, not_null]

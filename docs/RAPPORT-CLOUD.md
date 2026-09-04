@@ -46,8 +46,8 @@ contraintes ont été relevées, pas supposées :
 | Marketplace interdit au crédit | Uniquement Ubuntu et des images de conteneurs publiques |
 
 **Ce qui ne change pas — les invariants.** Un seul code, deux cibles (`local`, `azure`) :
-même orchestrateur Python, même SQL bronze, mêmes 34 modèles dbt, mêmes tableaux de bord
-provisionnés par code. Vérifié sur les deux déploiements : 92 fichiers sur 29 jours, 18 tables
+même orchestrateur Python, même SQL bronze, mêmes 37 modèles dbt, mêmes tableaux de bord
+provisionnés par code. Vérifié sur les deux déploiements : 92 fichiers sur 29 jours, 20 tables
 gold, 27 cartes Metabase sans erreur, **26 résultats de carte sur 27 identiques au bit près**
 (la 27ᵉ, le journal d'ingestion, diffère par son horodatage de traitement).
 
@@ -142,7 +142,7 @@ Chaque ligne est un choix **contraint par un fait vérifié**, pas une préfére
 | **2** | Azure, à 01 h 05 UTC | Démarre `job-eds-pipeline` | Tire l'image publique, injecte les 7 secrets depuis le coffre par l'identité gérée. Zéro réplique le reste du temps |
 | **3** | Le job | Lit le dépôt | `Storage Blob Data Reader`, sur ce seul conteneur. Empreinte SHA-256 par fichier : un fichier déjà chargé est ignoré |
 | **4** | Le job | Écrit le lake pseudonymisé | `Storage Blob Data Contributor`, sur ce seul conteneur. La pseudonymisation (HMAC-SHA256, sel du coffre) se fait **en flux**, ligne à ligne : l'identité en clair n'est jamais un fichier intermédiaire |
-| **5** | Le job, en deux temps | Pilote ClickHouse | HTTP 8123 sur l'IP privée `10.20.1.10`, via le réseau virtuel — le port n'est pas ouvert sur Internet. `eds run` charge bronze par jour (`DROP PARTITION` + `INSERT`) ; `dbt build` construit silver, gold et le rapport qualité, et exécute 117 tests. Aucune donnée ne remonte dans le job : tout est SQL exécuté par le moteur |
+| **5** | Le job, en deux temps | Pilote ClickHouse | HTTP 8123 sur l'IP privée `10.20.1.10`, via le réseau virtuel — le port n'est pas ouvert sur Internet. `eds run` charge bronze par jour (`DROP PARTITION` + `INSERT`) ; `dbt build` construit silver, gold et le rapport qualité, et exécute 135 tests. Aucune donnée ne remonte dans le job : tout est SQL exécuté par le moteur |
 | **6** | ClickHouse | Lit lui-même le lake | `azureBlobStorage(lake, …)` : une collection nommée porte l'URL SAS côté serveur. Le jeton n'apparaît ni dans le SQL, ni dans `system.query_log` (règle de masquage), ni dans les journaux du pipeline |
 | **7** | Direction, chercheurs | Consultent | HTTPS 443 → Caddy → Metabase → ClickHouse avec `chu_pilotage` ou `chu_recherche`, chacun `SELECT` sur sa seule base gold |
 

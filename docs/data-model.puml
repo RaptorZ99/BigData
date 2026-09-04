@@ -104,7 +104,7 @@ package "eds_silver — constellation : 4 étoiles (1 par fait) sur dimensions c
     categorie · pole
     {field} capacite_lits : Nullable
     est_decrit : Bool
-    <i>non décrit → « non renseigne »,</i>
+    <i>non décrit → « (non decrit) »,</i>
     <i>capacité NULL, jamais inventée</i>
     ..lignage..
   }
@@ -334,31 +334,44 @@ package "eds_gold_pilotage — user SQL : chu_pilotage (SELECT only)" as gold_p 
   entity "**kpi_activite_categorie**\n<i>évolution · KPI 1</i>" as g_cat #E0F2F1 {
     grain : <b>catégorie de service</b>
     --
-    nb_services · nb_sejours
-    nb_sejours_termines · dms_jours
-    <i>« non renseigne » = service</i>
+    nb_sejours (clos) · dms_jours
+    rang
+    <i>« (non decrit) » = service</i>
     <i>absent de la description</i>
   }
 
-  entity "**kpi_actes_service**\n<i>évolution · KPI 2, 4, 5</i>" as g_actes_svc #E0F2F1 {
+  entity "**kpi_actes_service**\n<i>évolution · KPI 2</i>" as g_actes_svc #E0F2F1 {
     grain : <b>service</b>
     --
-    nb_actes · actes_par_sejour
-    capacite_lits · actes_par_lit
-    montant_facture_euros
-    --
-    <i>drill-across : deux faits agrégés</i>
-    <i>séparément, joints sur dim_service</i>
+    nb_actes · nb_sejours_avec_acte
+    actes_par_sejour · rang
+    <i>service résolu sur le fait,</i>
+    <i>jamais fait à fait</i>
   }
 
   entity "**kpi_actes_type**\n<i>évolution · KPI 3</i>" as g_actes_type #E0F2F1 {
     grain : <b>code CCAM</b>
     --
-    libelle · tarif_euros
-    nb_actes · part_pct
-    montant_facture_euros
+    libelle_ccam · nb_actes
+    rang
   }
-}
+
+  entity "**kpi_densite_lits**\n<i>évolution · KPI 4</i>" as g_densite #E0F2F1 {
+    grain : <b>service</b>
+    --
+    capacite_lits · nb_actes
+    actes_par_lit · rang
+    <i>NULL sans capacité connue</i>
+  }
+
+  entity "**kpi_facturation_service**\n<i>évolution · KPI 5</i>" as g_factu #E0F2F1 {
+    grain : <b>service</b>
+    --
+    nb_actes · montant_facture_euros
+    rang
+    <i>2, 4, 5 : une agrégation</i>
+    <i>(int_actes_service), trois tables</i>
+  }
 
 ' ══════════════════════ GOLD RECHERCHE ══════════════════════
 package "eds_gold_recherche — user SQL : chu_recherche (SELECT only)" as gold_r #F3E5F5 {
@@ -493,6 +506,8 @@ g_synth -[hidden]right- g_ing
 g_qual -[hidden]down- g_cat
 g_cat -[hidden]right- g_actes_svc
 g_actes_svc -[hidden]right- g_actes_type
+g_cat -[hidden]down- g_densite
+g_densite -[hidden]right- g_factu
 
 ' ops : colonne
 o_ingest -[hidden]down- o_runs
@@ -506,8 +521,8 @@ legend bottom
   <b>Modélisation</b> — silver en constellation (Kimball) : 4 étoiles, une par fait, sur dimensions conformées — chaque besoin métier = 1 fait × ses dimensions,
   sans jointure fact-to-fact : DMS, urgences, réadmissions → fact_sejour ⋆ (dim_patient, dim_service) · alertes constantes → fact_monitoring ⋆ (dim_service) ·
   prévalence, cohortes & démographie → fact_diagnostic ⋆ (dim_patient, dim_cim10) · actes, densité, T2A → fact_acte ⋆ (dim_service, dim_ccam).
-  <b>Évolution du 29 août</b> (entités teintées) — trois tables bronze, une dimension complétée, une dimension et un fait ajoutés, trois vues gold :
-  un incrément, aucune table historique modifiée. « Actes par séjour » se calcule par drill-across (deux agrégats joints sur dim_service), jamais fait à fait.
+  <b>Évolution du 29 août</b> (entités teintées) — trois tables bronze, une dimension complétée, une dimension et un fait ajoutés, cinq tables gold, une par KPI
+  de la consigne, triées par rang : un incrément, aucune table historique modifiée. Le service d'un acte est résolu sur le fait, jamais par jointure fait à fait.
   Pas de dim_date physique : les fonctions temporelles ClickHouse (toDate, tranches) jouent ce rôle — choix documenté au rapport.
   <b>Lignage</b> — les 20 tables de bronze et silver, dimensions comprises, portent : _source_file · _ingest_date · horodatage de traitement.
   <b>Idempotence</b> — bronze : MergeTree partitionné par _ingest_date → rejeu d'un jour = DROP PARTITION + INSERT.

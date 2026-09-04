@@ -104,7 +104,7 @@ source-filestorage/   ──▶   data/lake/   ──▶   bronze   ──▶   
 |---|---|---|
 | **ClickHouse** comme entrepôt | PostgreSQL | Colonne, compressé, conçu pour l'agrégation. Le monitoring seul justifie ce choix ; il lit le Parquet directement, sans passer par Python |
 | **Pseudonymiser au lake**, pas en bronze | Charger puis anonymiser | Un chargement intermédiaire laisserait l'identité dans le moteur, ne serait-ce qu'un instant. Ici elle ne l'atteint jamais |
-| **dbt** pour silver et gold | SQL ordonné à la main | dbt déduit l'ordre d'exécution du graphe des `ref()` — plus aucune convention de nommage à respecter — et exécute **117 tests pendant** le run, pas après |
+| **dbt** pour silver et gold | SQL ordonné à la main | dbt déduit l'ordre d'exécution du graphe des `ref()` — plus aucune convention de nommage à respecter — et exécute **135 tests pendant** le run, pas après |
 | **Python n'orchestre que** | pandas | Sortir les données du moteur pour les transformer ne passe pas à l'échelle. Seuls les deux CSV à pseudonymiser traversent Python, en flux ligne à ligne, à mémoire constante |
 | **Deux bases gold** | Une base + des vues | Le cloisonnement devient un `GRANT`, donc une propriété du moteur, et non une règle applicative |
 | **Partition bronze par jour** | Table unique | Rejouer un jour = `DROP PARTITION` + rechargement. L'idempotence est structurelle, pas défendue par du code |
@@ -285,8 +285,8 @@ demande la question.
 
 Chaque indicateur a donc exactement une table, à exactement un grain. Les vues
 complémentaires — `kpi_readmissions_service`, `kpi_alertes_service`, `kpi_activite_service`,
-`kpi_flux` — portent leur grain dans leur nom, et les trois vues de l'évolution du 29 août
-suivent la même règle (§9.4).
+`kpi_flux` — portent leur grain dans leur nom, et les cinq tables de l'évolution du 29 août
+suivent la même règle : une par indicateur de la consigne, dans son ordre (§9.4).
 
 Quelques définitions qui méritent d'être explicitées :
 
@@ -389,7 +389,7 @@ comptés (§4), et les exclure de la population de référence fausserait la pr�
 table porte son dénominateur en colonne pour que la lecture ne dépende pas de cette note.
 
 Trois commandes rejouent l'ensemble : `make quality` (les 22 lignes du rapport qualité),
-`make test-e2e` (les 86 invariants, dont chacun de ces chiffres), `uv run eds
+`make test-e2e` (les 88 invariants, dont chacun de ces chiffres), `uv run eds
 check-cloisonnement`. **La suite d'intégration ancre ces valeurs** : modifier une règle sans
 le vouloir fait échouer un test nommé, cela ne fait pas dériver un chiffre en silence.
 
@@ -586,7 +586,7 @@ aucune population. Les cohortes valident la chaîne de traitement, **pas** une c
 | Vingt-huit jours de dépôt | Volumétrie de démonstration | Le banc d'essai (`benchmarks/`) valide 20 M de relevés par le chemin réel du pipeline |
 | Seuils d'alerte non validés cliniquement | Le nombre d'alertes en dépend directement | Faire arbitrer par les équipes soignantes avant tout usage |
 | Metabase tourne à ~78 % de sa limite mémoire sur la VM cloud | Marge étroite : un métaspace borné trop bas a déjà arrêté la JVM en cours de provisionnement | Budget JVM redécoupé (tas 524 Mo, métaspace 498 Mo, marge native 289 Mo) et vérifié sous charge ; une VM à 8 Gio le rendrait confortable |
-| La neurologie n'est pas décrite par le CHU | Sa densité d'actes par lit reste vide, sa catégorie est « non renseigne » (§9) | Obtenir la ligne manquante du référentiel — le pipeline la prendra au prochain dépôt sans autre changement |
+| La neurologie n'est pas décrite par le CHU | Sa densité d'actes par lit reste vide, sa catégorie est « (non decrit) » (§9) | Obtenir la ligne manquante du référentiel — le pipeline la prendra au prochain dépôt sans autre changement |
 | Le tarif d'un acte est celui du référentiel courant | Un changement de tarif recalculerait tout l'historique facturé (§9.5) | Historiser `dim_ccam` (dimension à évolution lente) le jour où la T2A change |
 
 **Trois recommandations de gouvernance**, qui relèvent de l'organisation et non du code :
@@ -649,7 +649,7 @@ d'une ligne. Même partition par jour de dépôt, même lignage — un rejeu du 
 | Non-régression | les six KPI du corrigé | **Identiques** : 6 729 · 9,05 j · 11,59 % · 1 423 · 3 314 · 2 234 · 89 — vérifiés par un test nommé |
 
 **Piège n° 1 — le service non décrit.** NEURO reste dans la dimension avec ses 1 208
-séjours. Sa catégorie et son pôle prennent le libellé explicite « non renseigne », qui se
+séjours. Sa catégorie et son pôle prennent le libellé explicite « (non decrit) », qui se
 regroupe et s'affiche comme n'importe quelle valeur ; sa capacité reste **NULL** — on ne
 fabrique pas un nombre de lits, et sa densité d'actes par lit sera vide plutôt que fausse ;
 le fait est porté par `est_decrit` et compté par la règle Q9. Retirer le service aurait
@@ -665,11 +665,11 @@ référentiel de tous les séjours déposés. « Actes par service » devient un
 incohérents gardent ainsi leur service et restent comptés — un acte est un fait clinique,
 une date de sortie fausse ne l'annule pas (§4).
 
-« Actes par séjour » demande, lui, deux faits : les actes viennent de `fact_acte`, les
-séjours de `fact_sejour`. Ils ne se rencontrent jamais ligne à ligne. Chaque fait est agrégé
-**seul** au grain du service, puis les deux agrégats — huit lignes chacun — se rejoignent
-sur `dim_service` : c'est le *drill-across* de Kimball. Le test `assert_actes_reconcilies`
-en est le garde-fou : la somme des actes de la vue doit valoir exactement le nombre de
+« Actes par séjour » ne demande pas non plus deux faits : son dénominateur est le nombre
+de séjours distincts ayant au moins un acte, lu dans `fact_acte` lui-même. L'agrégation au
+grain du service est écrite **une** fois — le modèle éphémère `int_actes_service`, que dbt
+inline — et publiée trois fois (KPI 2, 4 et 5). Le test `assert_actes_reconcilies` en est
+le garde-fou : la somme des actes de chaque table doit valoir exactement le nombre de
 lignes de `fact_acte`, ce qu'une jointure fait-à-fait ferait exploser.
 
 Quatre règles qualité s'ajoutent au rapport, qui passe à 22 lignes pour 20 règles : Q9
@@ -678,47 +678,113 @@ hors des bornes de son séjour — sont des contrôles attendus à zéro, et val
 
 ### 9.4 Les cinq indicateurs
 
-| # | Indicateur | Grain | Table gold | Résultat |
+**Une table gold par indicateur, dans l'ordre de la consigne, aux colonnes de la question
+posée.** Chaque table porte un `rang` — sa clé de tri physique — et se lit donc dans l'ordre
+du classement sans `ORDER BY` ; le tableau de bord de pilotage les affiche telles quelles,
+sans renommage ni recalcul. Les valeurs ci-dessous sont celles de l'entrepôt, local et Azure ;
+la suite d'intégration les vérifie ligne à ligne, dans cet ordre.
+
+| # | Indicateur | Grain | Table gold | Classement |
 |---|---|---|---|---|
-| 1 | Activité et DMS par catégorie | catégorie | `kpi_activite_categorie` | 6 catégories ; médecine 2 652 séjours, DMS 5,71 j ; « non renseigne » 1 208 séjours, 7,06 j |
-| 2 | Actes par service, actes par séjour | service | `kpi_actes_service` | 1 935 en cardiologie → 241 en oncologie ; 1,14 à 1,22 acte par séjour |
-| 3 | Actes par type | code CCAM | `kpi_actes_type` | 8 types, de 12,1 % à 12,9 % chacun |
-| 4 | Densité d'actes par lit | service | `kpi_actes_service` | 86,6 aux urgences → 6,9 en oncologie ; **vide en neurologie** |
-| 5 | Montant facturé (T2A) | service | `kpi_actes_service` | **2 199 450 €**, de 521 655 € (cardiologie) à 64 265 € (oncologie) |
+| 1 | Activité et DMS par catégorie de service | catégorie | `kpi_activite_categorie` | séjours clos décroissants |
+| 2 | Nombre d'actes par service | service | `kpi_actes_service` | actes décroissants |
+| 3 | Nombre d'actes par type d'acte | code CCAM | `kpi_actes_type` | actes décroissants |
+| 4 | Densité d'actes par lit | service | `kpi_densite_lits` | densité décroissante, capacité inconnue en dernier |
+| 5 | Montant facturé par service (T2A) | service | `kpi_facturation_service` | montant décroissant |
 
-Les indicateurs 2, 4 et 5 partagent le grain du service : une seule table les porte. Les
-publier séparément recopierait trois fois la même agrégation, qui finirait par diverger.
+**KPI 1 — Activité et DMS par catégorie de service** (séjours clos, comme la DMS par service)
 
-| Service | Catégorie | Lits | Séjours | Actes | Actes / séjour | Actes / lit | Facturé |
-|---|---|---:|---:|---:|---:|---:|---:|
-| Cardiologie | medecine | 30 | 1 601 | 1 935 | 1,21 | 64,5 | 521 655 € |
-| Urgences | urgences | 20 | 1 423 | 1 731 | 1,22 | 86,6 | 478 585 € |
-| Neurologie | **non renseigne** | — | 1 208 | 1 471 | 1,22 | — | 393 850 € |
-| Pneumologie | medecine | 28 | 840 | 1 009 | 1,20 | 36,0 | 268 045 € |
-| Pédiatrie | pediatrie | 22 | 503 | 598 | 1,19 | 27,2 | 171 165 € |
-| Réanimation | reanimation | 16 | 467 | 563 | 1,21 | 35,2 | 154 740 € |
-| Chirurgie | chirurgie | 40 | 476 | 564 | 1,18 | 14,1 | 147 145 € |
-| Oncologie | medecine | 35 | 211 | 241 | 1,14 | 6,9 | 64 265 € |
+| categorie | nb_sejours | dms_jours |
+|---|---:|---:|
+| medecine | 2 397 | 5,71 |
+| urgences | 1 277 | 2,15 |
+| (non decrit) | 1 077 | 7,06 |
+| pediatrie | 448 | 3,19 |
+| chirurgie | 424 | 4,39 |
+| reanimation | 423 | 9,05 |
 
-La bande s'ouvre sur les deux totaux — 8 112 actes, 2 199 450 € — repris de
-`kpi_synthese` comme les tuiles de tête, puis les détaille par catégorie, par service
-et par type.
+La catégorie « medecine » regroupe cardiologie, pneumologie et oncologie ; « (non decrit) »
+est la neurologie, absente du référentiel de description. Les six lignes totalisent les
+6 046 séjours terminés (6 729 valides moins 683 en cours).
 
-![Actes médicaux et facturation sur le tableau de bord de pilotage](img/pilotage-actes.jpg)
+**KPI 2 — Nombre d'actes par service** (le service est celui du séjour, porté par le fait)
+
+| service_code | service_label | nb_actes | nb_sejours_avec_acte | actes_par_sejour |
+|---|---|---:|---:|---:|
+| CARDIO | Cardiologie | 1 935 | 1 213 | 1,60 |
+| URGENCES | Urgences | 1 731 | 1 090 | 1,59 |
+| NEURO | Neurologie | 1 471 | 918 | 1,60 |
+| PNEUMO | Pneumologie | 1 009 | 642 | 1,57 |
+| PEDIA | Pediatrie | 598 | 379 | 1,58 |
+| CHIR | Chirurgie | 564 | 344 | 1,64 |
+| REA | Reanimation | 563 | 355 | 1,59 |
+| ONCO | Oncologie | 241 | 155 | 1,55 |
+
+**KPI 3 — Nombre d'actes par type d'acte**
+
+| code_ccam | libelle_ccam | nb_actes |
+|---|---|---:|
+| ZBQK001 | Radiographie du thorax | 1 043 |
+| YYYY010 | Consultation de suivi | 1 039 |
+| DZEA001 | Coronarographie | 1 030 |
+| EBLA003 | Pose de catheter central | 1 025 |
+| HGQD001 | Coloscopie totale | 1 015 |
+| GLLD001 | Ventilation mecanique assistee | 1 000 |
+| NEJA001 | IRM cerebrale | 982 |
+| HHFA001 | Appendicectomie | 978 |
+
+**KPI 4 — Densité d'actes par lit** (nb_actes / capacite_lits)
+
+| service_code | service_label | capacite_lits | nb_actes | actes_par_lit |
+|---|---|---:|---:|---:|
+| URGENCES | Urgences | 20 | 1 731 | 86,6 |
+| CARDIO | Cardiologie | 30 | 1 935 | 64,5 |
+| PNEUMO | Pneumologie | 28 | 1 009 | 36,0 |
+| REA | Reanimation | 16 | 563 | 35,2 |
+| PEDIA | Pediatrie | 22 | 598 | 27,2 |
+| CHIR | Chirurgie | 40 | 564 | 14,1 |
+| ONCO | Oncologie | 35 | 241 | 6,9 |
+| NEURO | Neurologie | — | 1 471 | — |
+
+La neurologie garde sa ligne et ses actes, sans densité : sa capacité n'est pas connue, et
+l'on ne divise pas par un nombre de lits inventé. Une précision d'arrondi : 1 731 / 20 vaut
+86,55 exactement ; ClickHouse arrondit la demi-unité vers le haut (86,6), un outil qui
+arrondit le flottant binaire 86,549 999… affiche 86,5. Les sept autres densités ne
+présentent aucun cas limite.
+
+**KPI 5 — Montant facturé par service** (T2A : somme des tarifs des actes)
+
+| service_code | service_label | nb_actes | montant_facture_euros |
+|---|---|---:|---:|
+| CARDIO | Cardiologie | 1 935 | 521 655 |
+| URGENCES | Urgences | 1 731 | 478 585 |
+| NEURO | Neurologie | 1 471 | 393 850 |
+| PNEUMO | Pneumologie | 1 009 | 268 045 |
+| PEDIA | Pediatrie | 598 | 171 165 |
+| REA | Reanimation | 563 | 154 740 |
+| CHIR | Chirurgie | 564 | 147 145 |
+| ONCO | Oncologie | 241 | 64 265 |
+| **Total** | | **8 112** | **2 199 450** |
+
+Le total est repris tel quel dans `kpi_synthese`, d'où les deux tuiles qui ouvrent la bande
+du tableau de bord — 8 112 actes, 2 199 450 € — avant les cinq tables, dans cet ordre.
+
+![Les cinq indicateurs de l'évolution sur le tableau de bord de pilotage](img/pilotage-actes.jpg)
 
 Chaque chiffre a été recalculé par un chemin indépendant — une jointure directe entre
 `bronze.actes` et `bronze.ccam` rend 8 112 actes et 2 199 450 € — puis ancré dans la suite
-d'intégration : les trois vues, la dimension complétée, le fait, les quatre règles qualité
-et le tuple de non-régression y sont littéraux.
+d'intégration : les cinq tables ligne à ligne et dans l'ordre, la dimension complétée, le
+fait, les quatre règles qualité et le tuple de non-régression y sont littéraux.
 
 ### 9.5 Limites propres à l'évolution
 
 - **Le dépôt d'actes est un rattrapage** : vingt-neuf jours d'actes dans un seul fichier.
   L'incrémentalité est démontrée sur ce fichier ; un flux réellement quotidien produirait
   une partition par jour, par le même mécanisme, sans rien changer au code.
-- **Deux dénominateurs coexistent** dans « actes par séjour » : les actes comptent ceux des
-  82 séjours écartés, les séjours ne comptent que les valides. L'écart est de l'ordre du
-  pour cent et la colonne `nb_sejours_avec_acte` permet la lecture alternative.
+- **« Actes par séjour » rapporte les actes aux séjours qui en ont au moins un** (5 096) :
+  c'est l'intensité d'un séjour traité, pas une moyenne sur l'activité. Rapportés aux
+  6 729 séjours valides, les 8 112 actes donnent 1,21 acte par séjour — une autre question,
+  que `kpi_synthese` et `kpi_dms_service` permettent de poser.
 - **Le tarif est celui du référentiel courant.** Un changement de tarif recalculerait tout
   l'historique facturé. Facturer par période exigerait d'historiser `dim_ccam` (§8).
 - **Le pôle n'est pas modélisé au grain de la catégorie**, faute de hiérarchie stricte dans
@@ -726,6 +792,6 @@ et le tuple de non-régression y sont littéraux.
 
 ---
 
-*Énoncé de l'épreuve : [`FICHE-SUJET.md`](FICHE-SUJET.md) · Consigne d'évolution :
-[`SUJET-EVOLUTION-nouvelles-kpi.md`](SUJET-EVOLUTION-nouvelles-kpi.md) · Mise en service et exploitation :
+*Énoncé de l'épreuve : [`sujets/FICHE-SUJET.md`](sujets/FICHE-SUJET.md) · Consigne d'évolution :
+[`sujets/SUJET-EVOLUTION-nouvelles-kpi.md`](sujets/SUJET-EVOLUTION-nouvelles-kpi.md) · Mise en service et exploitation :
 [`README`](../README.md) · Déploiement Azure : [`RAPPORT-CLOUD.md`](RAPPORT-CLOUD.md) et [`terraform/README.md`](../terraform/README.md)*

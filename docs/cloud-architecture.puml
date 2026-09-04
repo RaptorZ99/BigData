@@ -79,7 +79,7 @@ Deployment_Node(azure, "Azure for Students", "swedencentral · policy de région
         Deployment_Node(cae, "cae-eds-chu-prod", "environnement Container Apps · profil Consommation · journaux vers Log Analytics", $tags="jobs", $sprite="AzureContainerApp") {
           Deployment_Node(job_pipeline, "job-eds-pipeline", "cron 5 1 * * * (01 h 05 UTC) · 0,5 vCPU · 1 Gio", $tags="job") {
             Container(eds, "eds run", "Python 3.13", "collecte · pseudonymisation HMAC · chargement bronze", $sprite="python")
-            Container(dbt, "dbt build", "dbt-core 1.11 · dbt-clickhouse 1.10", "34 modèles : silver, gold, ops · 117 tests", $sprite="dbt-icon")
+            Container(dbt, "dbt build", "dbt-core 1.11 · dbt-clickhouse 1.10", "37 modèles : silver, gold, ops · 135 tests", $sprite="dbt-icon")
           }
           Container(job_provision, "job-eds-provision", "manuel", "entrepôt · comptes · Metabase · documentation dbt")
           Container(job_controle, "job-eds-controle", "manuel", "check-cloisonnement : 9 scénarios")

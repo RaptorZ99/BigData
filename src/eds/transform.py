@@ -92,10 +92,12 @@ EXPECTED_TABLES: dict[str, tuple[str, ...]] = {
         "kpi_synthese",
         "kpi_qualite_pipeline",
         "kpi_ingestion",
-        # Évolution du 29 août 2026.
+        # Évolution du 29 août 2026 : les cinq KPI, dans l'ordre de la consigne.
         "kpi_activite_categorie",
         "kpi_actes_service",
         "kpi_actes_type",
+        "kpi_densite_lits",
+        "kpi_facturation_service",
     ),
     "eds_gold_recherche": (
         "prevalence_pathologie",
@@ -214,7 +216,7 @@ def build(run_id: str, target: str = "local", *, select: str | None = None) -> N
     ⚠ On ne passe **jamais** `--full-refresh` à dbt. `eds run --full-refresh`
     signifie « ré-ingérer tous les jours depuis la source » ; côté dbt, la même
     option détruirait l'historique de `ops.quality_report`, seul modèle
-    incrémental du projet. Les 29 modèles en `table` sont reconstruits de toute
+    incrémental du projet. Les 31 modèles en `table` sont reconstruits de toute
     façon.
     """
     # Import local : dbt est un extra (`uv sync --extra dbt`). Le socle de
