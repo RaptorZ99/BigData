@@ -43,3 +43,6 @@ source-filestorage-corrigé/
 # Jeu initial de l'épreuve (3 jours), remplacé par le jeu corrigé le 2 septembre 2026 :
 # conservé pour mémoire, jamais chargé, jamais versionné.
 source-filestorage-initial/
+
+# Feuilles de réponses du professeur (« ne pas distribuer ») : jamais dans un dépôt public.
+REPONSES-KPI*.pdf
