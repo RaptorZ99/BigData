@@ -6,11 +6,13 @@ pseudonymisation dès l'entrée de la zone de travail.
 
 `ClickHouse` · `dbt` · `Python` · `Metabase` · `Docker` · `Terraform` · `Azure`
 
-📄 **[Le dossier de conception est dans `docs/RAPPORT.md`](docs/RAPPORT.md)** — besoin,
-architecture, indicateurs, RGPD, limites.
+📄 **[Le rapport est dans `docs/RAPPORT.md`](docs/RAPPORT.md)**, en trois parties : l'entrepôt
+(besoin, architecture, indicateurs, RGPD, limites), le déploiement Azure, et l'exploitation
+des résultats (ce que les indicateurs disent du CHU, et les préconisations).
 
-Les six indicateurs du sujet sont **vérifiés valeur par valeur** contre la feuille de
-réponses du jeu de données corrigé : 319 valeurs comparées, aucun écart.
+Les six indicateurs du sujet et les cinq de l'évolution sont **vérifiés valeur par valeur**
+contre les feuilles de réponses du jeu de données corrigé : 473 valeurs comparées, un seul
+écart d'arrondi (86,6 contre 86,5, expliqué en §9.4 du rapport).
 
 ![Tableau de bord de pilotage](docs/img/dashboard-pilotage.jpg)
 
@@ -184,10 +186,10 @@ make cloud-stop         # met en pause : 33 €/mois → 8 €/mois
 IAM** sur le conteneur contenant les noms et les NIR. Ce n'est plus une règle de code, c'est
 une propriété de l'infrastructure.
 
-📄 **[Le rapport cloud est dans `docs/RAPPORT-CLOUD.md`](docs/RAPPORT-CLOUD.md)** — le
-diagramme d'architecture, les choix et leurs alternatives, le fonctionnement au quotidien,
-la sécurité, le coût, les limites. Le détail opérationnel de l'infrastructure est dans
-[`terraform/README.md`](terraform/README.md).
+📄 **[La partie 2 du rapport](docs/RAPPORT.md#partie-2--le-déploiement-azure)** décrit le
+déploiement — le diagramme d'architecture, les choix et leurs alternatives, le
+fonctionnement au quotidien, la sécurité, le coût, les limites. Le détail opérationnel de
+l'infrastructure est dans [`terraform/README.md`](terraform/README.md).
 
 [![Architecture du déploiement Azure](docs/img/eds-cloud-architecture.png)](docs/img/eds-cloud-architecture.svg)
 
@@ -202,7 +204,7 @@ dbt/                  Transformation silver et gold — 37 modèles, 135 tests
 sql/                  Initialisation de l'entrepôt, schémas bronze, chargements par jour
 terraform/            Infrastructure Azure
 tests/                275 tests (186 unitaires, 89 d'intégration)
-docs/                 RAPPORT.md (dossier de conception), RAPPORT-CLOUD.md (déploiement Azure), modèles PlantUML, captures, énoncé
+docs/                 RAPPORT.md (trois parties : entrepôt, déploiement Azure, exploitation des résultats), modèles PlantUML, captures, énoncés
 benchmarks/           Banc d'essai : 20 M de relevés par le chemin réel du pipeline
 ```
 

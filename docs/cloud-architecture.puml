@@ -3,7 +3,7 @@
 ' Vue de déploiement au sens du modèle C4 (niveau 4 : où tourne chaque brique
 ' logicielle), dessinée avec les icônes officielles Azure. Chaque boîte porte le
 ' nom réel de la ressource ; les paramètres détaillés sont dans le rapport cloud
-' (docs/RAPPORT-CLOUD.md §2), pas ici — un diagramme se lit, il ne se déchiffre pas.
+' (docs/RAPPORT.md §11), pas ici — un diagramme se lit, il ne se déchiffre pas.
 ' Ressources et paramètres relevés sur l'abonnement le 3 septembre 2026. Un test
 ' (tests/test_cloud_diagram.py) échoue si une ressource Terraform disparaît d'ici.
 

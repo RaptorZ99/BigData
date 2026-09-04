@@ -1,13 +1,22 @@
-# Entrepôt de Données de Santé du CHU — dossier de conception
+# Entrepôt de Données de Santé du CHU — rapport
 
 **M2 Big Data · épreuve E05** — de dépôts quotidiens de fichiers hétérogènes à deux
-tableaux de bord cloisonnés, avec pseudonymisation dès l'entrée de la zone de travail.
+tableaux de bord cloisonnés, avec pseudonymisation dès l'entrée de la zone de travail ; la
+même chaîne déployée sur Azure ; et ce que ses indicateurs permettent de dire du CHU.
 
-> Tous les chiffres de ce dossier sont ceux de la dernière exécution, et chacun est
-> reproductible en une commande (§5.4). Les six indicateurs du sujet sont en outre
-> **vérifiés valeur par valeur contre la feuille de réponses** du jeu de données
-> corrigé (§5.2). La mise en service et l'exploitation sont dans le
+> Tous les chiffres de ce rapport sont ceux de la dernière exécution, identiques sur le poste
+> et sur Azure, et chacun est reproductible en une commande (§5.4). Les six indicateurs du
+> sujet et les cinq de l'évolution sont **vérifiés valeur par valeur** contre les feuilles de
+> réponses du jeu de données corrigé (§5.2). La mise en service et l'exploitation sont dans le
 > [README](../README.md).
+
+Trois parties, à lire dans l'ordre ou séparément :
+
+| Partie | Ce qu'elle répond |
+|---|---|
+| [1 — L'entrepôt sur le poste](#partie-1--lentrepôt-sur-le-poste) | Comment les chiffres sont produits : besoin, données, architecture, qualité, indicateurs, restitution, RGPD, évolution |
+| [2 — Le déploiement Azure](#partie-2--le-déploiement-azure) | Où et comment la même chaîne tourne dans le cloud : architecture, fonctionnement, sécurité, coût |
+| [3 — Exploitation des résultats](#partie-3--exploitation-des-résultats) | Ce que les indicateurs disent du CHU, et ce qu'on en recommande |
 
 | § | Question |
 |---|---|
@@ -20,8 +29,23 @@ tableaux de bord cloisonnés, avec pseudonymisation dès l'entrée de la zone de
 | [7](#7-gouvernance-rgpd) | Comment tient la conformité ? |
 | [8](#8-limites-et-recommandations) | Ce qu'il ne faut pas conclure de ces données |
 | [9](#9-évolution-du-29-août--actes-médicaux-et-description-des-services) | Que change le nouveau dépôt du CHU, et que reste-t-il inchangé ? |
+| [10](#10-pourquoi-un-cloud-et-lequel) | Pourquoi un cloud, et lequel ? |
+| [11](#11-larchitecture-en-un-diagramme) | À quoi ressemble l'architecture ? |
+| [12](#12-pourquoi-ces-briques-et-pas-dautres) | Pourquoi ces briques, et pas d'autres ? |
+| [13](#13-comment-ça-fonctionne) | Comment ça fonctionne, une nuit ordinaire ? |
+| [14](#14-qui-peut-lire-quoi--sécurité-et-rgpd) | Qui peut lire quoi ? |
+| [15](#15-combien-ça-coûte) | Combien ça coûte ? |
+| [16](#16-limites-et-ce-quon-ferait-pour-un-vrai-chu) | Ce qui manque, et ce qu'on ferait pour un vrai CHU |
+| [17](#17-comment-lire-ces-chiffres) | Comment lire ces chiffres ? |
+| [18](#18-activité-et-capacité--où-sont-les-patients-et-combien-de-lits-il-faudrait) | Où sont les patients, et combien de lits il faudrait ? |
+| [19](#19-qualité-et-sécurité-des-soins--mortalité-réadmissions-alertes) | Que disent la mortalité, les réadmissions et les alertes ? |
+| [20](#20-population-et-pathologies--qui-sont-les-patients-et-de-quoi-souffrent-ils) | Qui sont les patients, et de quoi souffrent-ils ? |
+| [21](#21-actes-et-facturation--ce-que-produit-le-plateau-technique-et-ce-que-ça-rapporte) | Que produit le plateau technique, et que rapporte-t-il ? |
+| [22](#22-synthèse-et-préconisations) | Que retenir, et que recommander ? |
 
 ---
+
+# Partie 1 — L'entrepôt sur le poste
 
 ## 1. Le besoin
 
@@ -158,9 +182,9 @@ vide pour qu'elle le demeure.
 
 Coût relevé sur la facture : ~33 €/mois allumé, ~8 € en pause.
 
-Le déploiement a son propre dossier, avec le diagramme d'architecture, les choix et leurs
-alternatives, le fonctionnement au quotidien et les limites :
-[`RAPPORT-CLOUD.md`](RAPPORT-CLOUD.md). Le détail opérationnel est dans
+Le déploiement est décrit dans la [partie 2](#partie-2--le-déploiement-azure) de ce rapport
+(§10 à §16) : diagramme d'architecture, choix et alternatives, fonctionnement au quotidien,
+sécurité, coût, limites. Le détail opérationnel est dans
 [`terraform/README.md`](../terraform/README.md).
 
 ### 3.4 Automatisation : planification, erreurs, traçabilité
@@ -183,7 +207,7 @@ Le contrôle du cloisonnement est à la demande sur les deux cibles :
 `uv run eds check-cloisonnement` en local, `make cloud-check` sur Azure. Lancement,
 supervision et reprise sur incident
 sont dans le [README](../README.md#exploitation) ; le déroulé d'une nuit sur Azure, flèche par
-flèche, dans le [rapport cloud, §4](RAPPORT-CLOUD.md#4-comment-ça-fonctionne).
+flèche, en [§13](#13-comment-ça-fonctionne).
 
 ---
 
@@ -302,10 +326,11 @@ Quelques définitions qui méritent d'être explicitées :
 ### 5.2 Les chiffres sont vérifiés, pas seulement reproductibles
 
 Un indicateur reproductible peut être faux : il suffit qu'il le soit à chaque exécution. Le
-jeu de données corrigé est accompagné d'une **feuille de réponses** de l'intervenant, qui
-donne les valeurs attendues pour les six KPI et pour les trois points de contrôle
-bronze → silver. Elle n'est pas distribuée avec ce dépôt ; ses valeurs sont reprises,
-littéralement, dans `tests/test_e2e.py`.
+jeu de données corrigé est accompagné de deux **feuilles de réponses** de l'intervenant :
+l'une donne les valeurs attendues pour les six KPI et pour les trois points de contrôle
+bronze → silver, l'autre celles des cinq KPI de l'évolution (§9.4). Elles ne sont pas
+distribuées avec ce dépôt ; leurs valeurs sont reprises, littéralement, dans
+`tests/test_e2e.py`.
 
 La suite d'intégration les ancre **valeur par valeur** :
 
@@ -318,6 +343,10 @@ La suite d'intégration les ancre **valeur par valeur** :
 | KPI 4 — Alertes par jour (30 jours × 3 mesures) | 90 |
 | KPI 5 — Prévalence par pathologie, masquages compris | 13 |
 | KPI 6 — Cohorte pathologie × tranche × sexe | 102 |
+| Évolution, KPI 1 à 5 — les cinq tables, ligne à ligne et dans l'ordre | 154 |
+
+Soit 473 valeurs, pour un seul écart : un arrondi de densité, 86,6 contre 86,5, expliqué en
+§9.4.
 
 Ces vérifications ont trouvé trois défauts réels, tous corrigés :
 
@@ -792,6 +821,812 @@ fait, les quatre règles qualité et le tuple de non-régression y sont littéra
 
 ---
 
+# Partie 2 — Le déploiement Azure
+
+La chaîne du poste (dépôt du CHU → lake pseudonymisé → ClickHouse → dbt → Metabase) portée
+sur Azure, décrite intégralement en Terraform, exploitée sans se connecter à une machine.
+**Les chiffres publiés y sont identiques à ceux du déploiement local** : c'était le critère
+d'acceptation du portage, et il est tenu.
+
+> Tout ce que cette partie affirme a été **relevé sur l'abonnement le 3 septembre 2026**
+> (`az`, `terraform state`, journaux des jobs, facture) ou lu dans [`terraform/`](../terraform/).
+> Le diagramme est généré depuis [`cloud-architecture.puml`](cloud-architecture.puml) ; un
+> test (`tests/test_cloud_diagram.py`) échoue s'il oublie une ressource ou un paramètre.
+
+---
+
+## 10. Pourquoi un cloud, et lequel
+
+Le déploiement local répond déjà au sujet. Le cloud n'apporte que ce qu'un poste **ne peut
+pas** offrir — et rien de décoratif :
+
+| Ce que le poste ne peut pas offrir | Ce que le déploiement Azure apporte |
+|---|---|
+| Un dépôt réaliste | Le CHU dépose dans un **conteneur de stockage objet**, versionné, à suppression réversible — c'est ainsi qu'un hôpital dépose réellement |
+| Une planification **sans machine à garder allumée** | Un **job serverless** déclenché chaque nuit par Azure, journalisé, avec réessai et déclenchement manuel pour la reprise. En local, le même cron tourne dans un conteneur de la pile — tant que le poste est allumé |
+| Des secrets hors des fichiers | Le `.env` devient un **coffre Key Vault**, lu par identité gérée : aucun mot de passe sur disque, ni dans Git, ni dans un manifeste |
+| Un cloisonnement que le code ne peut pas contourner | Les droits de lecture sont attribués **par conteneur de stockage** : la machine de l'entrepôt n'a *aucun droit* sur l'identité en clair |
+| Une infrastructure reproductible | `terraform apply` construit les 14 ressources ; `terraform destroy` ne laisse rien. 29 variables, **une seule obligatoire** |
+
+**L'abonnement commande l'architecture.** C'est une offre *Azure for Students*, et ses
+contraintes ont été relevées, pas supposées :
+
+| Contrainte relevée | Conséquence |
+|---|---|
+| Une policy n'autorise que 5 régions (`uaenorth`, `spaincentral`, `italynorth`, `swedencentral`, `germanywestcentral`) — la France est exclue | Parmi elles, seules la Suède et l'Espagne proposent des petites VM. **`swedencentral`** : dans l'Union européenne, donc dans le champ du RGPD, et la moins chère |
+| Quota de **6 vCPU** par région | Une seule VM de 2 vCPU. Ni cluster, ni haute disponibilité |
+| Crédit de 100 $, limite de dépense activée | ≈ 33 €/mois allumée, 8 en pause (§15) ; budget avec alertes ; `make cloud-stop` entre deux démonstrations |
+| Marketplace interdit au crédit | Uniquement Ubuntu et des images de conteneurs publiques |
+
+**Ce qui ne change pas — les invariants.** Un seul code, deux cibles (`local`, `azure`) :
+même orchestrateur Python, même SQL bronze, mêmes 37 modèles dbt, mêmes tableaux de bord
+provisionnés par code. Vérifié sur les deux déploiements : 92 fichiers sur 29 jours, 20 tables
+gold, 28 cartes Metabase sans erreur, **27 résultats de carte sur 28 identiques au bit près**
+(la 28ᵉ, le journal d'ingestion, diffère par son horodatage de traitement).
+
+> **Deux écarts trouvés en rédigeant cette partie, corrigés le jour même.** Relire
+> l'infrastructure pour la décrire a montré (1) que le droit du job sur le site de
+> documentation portait sur le **compte** de stockage entier, et non sur son seul conteneur —
+> ramené au conteneur `$web` (§14.2) ; (2) que l'environnement Container Apps n'est pas gratuit :
+> il crée une IP publique facturée ~3 €/mois, absente de toutes les estimations (§15).
+
+---
+
+## 11. L'architecture en un diagramme
+
+Vue de **déploiement** au sens du modèle C4 (niveau 4 : *où* tourne chaque brique), avec les
+icônes officielles Azure. Elle se lit **de gauche à droite** — la livraison (GitHub, Docker Hub),
+puis le traitement (les jobs), puis le stockage — et l'entrepôt en bas, entre les utilisateurs
+et le stockage. Chaque boîte porte le nom réel de la ressource ; les paramètres détaillés sont
+dans le tableau qui suit. Les flèches numérotées **1 → 7** se lisent dans l'ordre d'une nuit
+ordinaire (§13). dbt y figure comme brique à part entière du job nocturne : `eds run` (Python)
+collecte, pseudonymise et charge bronze ; `dbt build` construit silver et gold dans ClickHouse.
+
+[![Architecture du déploiement Azure](img/eds-cloud-architecture.png)](img/eds-cloud-architecture.svg)
+
+*Cliquer pour la version vectorielle. Source : [`cloud-architecture.puml`](cloud-architecture.puml), régénérée par `make diagram`.*
+
+| Ce qu'on voit | Signification |
+|---|---|
+| Cadre **bleu** | Le réseau virtuel et ses deux sous-réseaux : ce qui est dedans se parle par adresse privée |
+| Cadre **vert** | L'environnement Container Apps : des jobs sans serveur, zéro réplique entre deux exécutions |
+| Cadre **jaune** | La machine virtuelle : trois conteneurs Docker Compose |
+| Cadre **violet** | Le compte de stockage et ses trois conteneurs |
+| Cadre **gris** | Secrets, identités, journaux — un regroupement de lecture, pas une ressource |
+| Boîte **rouge** | Identité en clair. Un seul composant peut la lire : le job de collecte |
+| Boîte **verte** | Données pseudonymisées ou agrégées |
+| Boîte **gris foncé** | Joignable depuis Internet : l'IP publique, Caddy, le site de documentation |
+| Flèches **bleues** | Flux de données du traitement nocturne (1 → 6) |
+| Flèches **vertes** | Restitution aux utilisateurs (7) |
+| Flèches **violettes**, tiretées | Lecture des secrets par identité gérée |
+| Flèches **grises**, pointillées | Exploitation, livraison, provisionnement |
+
+Les 14 ressources du groupe, plus deux hors du groupe :
+
+| Ressource | Nom | Rôle |
+|---|---|---|
+| Groupe de ressources | `rg-eds-chu-prod` | Tout y vit ; le détruire ne laisse rien |
+| Réseau virtuel | `vnet-eds-chu-prod` · `10.20.0.0/16` | Deux sous-réseaux : `snet-warehouse` (`/24`, la VM) et `snet-jobs` (`/27`, délégué à Container Apps) |
+| Groupe de sécurité | `nsg-warehouse-eds-chu-prod` | Ce qui peut entrer, et d'où (§14.1) |
+| IP publique + carte réseau | `pip-eds-chu-prod` · `nic-warehouse-eds-chu-prod` | `4.223.135.71`, statique, avec un nom DNS Azure ; IP privée **statique** `10.20.1.10` — celle que les jobs appellent |
+| Machine virtuelle + disque | `vm-warehouse-eds-chu-prod` | `Standard_B2als_v2` (2 vCPU, 4 Gio), Ubuntu 24.04, disque 32 Gio. Porte **ClickHouse 26.3**, **Metabase 0.58**, **Caddy 2** en Docker Compose |
+| Environnement Container Apps | `cae-eds-chu-prod` | Dans le réseau, profil Consommation : zéro réplique entre deux exécutions |
+| Trois jobs | `job-eds-pipeline` · `job-eds-provision` · `job-eds-controle` | Le traitement nocturne (cron `5 1 * * *`, 01 h 05 UTC) ; la mise en service ; la preuve du cloisonnement |
+| Identité gérée | `id-pipeline-eds-chu-prod` | Ce que les trois jobs *sont* pour Azure — c'est à elle que sont attribués les droits |
+| Compte de stockage | `steds4152c908` | Trois conteneurs : `filestorage` (dépôt du CHU, **identité en clair**, versionné), `lake` (pseudonymisé), `$web` (documentation dbt, public) |
+| Coffre | `kv-eds-4152c908` | 8 secrets : le sel HMAC, six mots de passe, l'URL SAS du lake |
+| Journaux | `log-eds-chu-prod` | Log Analytics, 30 jours, plafond 0,5 Go/jour |
+| *Hors du groupe* : budget | `budget-eds-chu-prod` | 60 €/mois, alertes à 50, 80 et 100 % |
+| *Hors du groupe* : état Terraform | `rg-eds-tfstate` | Conteneur privé versionné, authentification Entra ID. Il contient les mots de passe générés : jamais dans Git |
+
+---
+
+## 12. Pourquoi ces briques, et pas d'autres
+
+Chaque ligne est un choix **contraint par un fait vérifié**, pas une préférence.
+
+| Brique | Choix | Alternative écartée | Raison |
+|---|---|---|---|
+| **Entrepôt** | ClickHouse sur une VM, disque local | Container Apps + Azure Files | ClickHouse exige des renommages atomiques et des liens durs ; un partage réseau les casse ([ClickHouse #74572](https://github.com/ClickHouse/ClickHouse/issues/74572)). Même raison que le volume Docker nommé en local |
+| | | ClickHouse Cloud, AKS | ≥ 50 $/mois ; quota de 6 vCPU |
+| **Taille de VM** | `Standard_B2als_v2`, 4 Gio, 24,38 €/mois | `B2ts_v2` (1 Gio, 6,77 €) | Trop juste pour trois conteneurs dont une JVM |
+| | | Variante Arm (21,56 €) | Imposerait des images arm64 pour ClickHouse, Metabase et Caddy : trois variables de plus pour 2,80 €/mois |
+| **Dépôt et lake** | Compte de blobs **versionné**, sans espace de noms hiérarchique | ADLS Gen2 | Azure interdit le versioning sur un compte hiérarchique — et le dépôt du CHU est la seule chose non reconstructible du système |
+| **Lecture du lake par ClickHouse** | `azureBlobStorage()` avec un **jeton SAS** lecture seule, limité au conteneur, daté | Identité gérée de la VM | ClickHouse 26.3 ne sait pas l'utiliser hors Kubernetes (`WorkloadIdentityCredential`), vérifié |
+| | | blobfuse | Une couche FUSE masquerait justement ce qu'on veut montrer : le moteur lit le stockage objet lui-même, comme `file()` en local |
+| **Planification** | Job Container Apps `Schedule` | cron sur la VM | Serverless, **dans le réseau**, journalisé en KQL, déclenchable à la main avec le même code — et l'exécution coûte 0,5 % de l'offre gratuite |
+| | | Data Factory, Logic Apps | Surdimensionnés pour lancer une commande |
+| **Restitution** | Metabase sur la VM, base H2 | Metabase en Container App | ≈ 10 €/mois même au repos, une minute de démarrage à froid |
+| **TLS** | Caddy, certificat interne | Let's Encrypt | Inutilisable sur `*.cloudapp.azure.com` : quota d'émission partagé entre tous les clients Azure. Une variable (`acme_hostname`) bascule dès qu'un nom propre existe |
+| **Secrets** | Key Vault + identités gérées, RBAC | `.env` sur la VM | La VM lit ses secrets au démarrage par l'adresse de métadonnées (IMDS), sans `azure-cli`, et ne les écrit qu'en `0600` root |
+| **Image du pipeline** | Docker Hub, dépôt **public**, `linux/amd64` | Azure Container Registry | 4,35 €/mois pour aucun gain : l'image ne contient que du code — `.dockerignore` exclut données et `.env`. Aucun secret de registre à gérer |
+| **Infrastructure** | Terraform, état distant authentifié par Entra ID | Portail, scripts `az` | Reproductible, relu en CI (`fmt`, `validate`), et `terraform plan` vide prouve que le code décrit ce qui tourne |
+| **Budget mémoire** | Calculé dans `locals.tf` depuis la taille de VM | Valeurs fixes | Sans limites, ClickHouse dimensionne ses caches sur la RAM visible (5 Gio de cache de marques par défaut) et se fait tuer par le noyau |
+
+---
+
+## 13. Comment ça fonctionne
+
+### 13.1 Une nuit ordinaire — les sept flèches du diagramme
+
+| # | Qui | Quoi | Comment, et pourquoi c'est sûr |
+|---|---|---|---|
+| **1** | Le CHU — aujourd'hui l'exploitant, par `make cloud-seed` | Dépose ses fichiers dans `filestorage` | `az storage blob upload-batch`, authentifié par Entra ID. Le conteneur est versionné : un fichier écrasé se retrouve |
+| **2** | Azure, à 01 h 05 UTC | Démarre `job-eds-pipeline` | Tire l'image publique, injecte les 7 secrets depuis le coffre par l'identité gérée. Zéro réplique le reste du temps |
+| **3** | Le job | Lit le dépôt | `Storage Blob Data Reader`, sur ce seul conteneur. Empreinte SHA-256 par fichier : un fichier déjà chargé est ignoré |
+| **4** | Le job | Écrit le lake pseudonymisé | `Storage Blob Data Contributor`, sur ce seul conteneur. La pseudonymisation (HMAC-SHA256, sel du coffre) se fait **en flux**, ligne à ligne : l'identité en clair n'est jamais un fichier intermédiaire |
+| **5** | Le job, en deux temps | Pilote ClickHouse | HTTP 8123 sur l'IP privée `10.20.1.10`, via le réseau virtuel — le port n'est pas ouvert sur Internet. `eds run` charge bronze par jour (`DROP PARTITION` + `INSERT`) ; `dbt build` construit silver, gold et le rapport qualité, et exécute 135 tests. Aucune donnée ne remonte dans le job : tout est SQL exécuté par le moteur |
+| **6** | ClickHouse | Lit lui-même le lake | `azureBlobStorage(lake, …)` : une collection nommée porte l'URL SAS côté serveur. Le jeton n'apparaît ni dans le SQL, ni dans `system.query_log` (règle de masquage), ni dans les journaux du pipeline |
+| **7** | Direction, chercheurs | Consultent | HTTPS 443 → Caddy → Metabase → ClickHouse avec `chu_pilotage` ou `chu_recherche`, chacun `SELECT` sur sa seule base gold |
+
+La sortie du job part dans Log Analytics avec le `run_id` — le même que dans
+`ops.pipeline_runs` et le rapport qualité du tableau de bord.
+
+**La planification tourne, et le prouve.** Trois exécutions planifiées consécutives — les
+2, 3 et 4 septembre, à 01:05:00 UTC précises — toutes `Succeeded` en une trentaine de
+secondes. Sans nouveau dépôt, une nuit se résume à : « 92 fichier(s) déjà ingéré(s),
+ignoré(s) · Aucun nouveau fichier : les couches silver et gold sont à jour », et une ligne
+`success` de plus dans `ops.pipeline_runs`. Le jour où un fichier arrive dans `filestorage`,
+la même exécution le charge. `make cloud-status` affiche ces passages ; la requête KQL des
+sorties Terraform en donne le détail. En local, le conteneur `scheduler` de la pile Docker
+Compose fait la même chose, depuis la même image et sur le même cron
+([§3.4](#34-automatisation--planification-erreurs-traçabilité)).
+
+### 13.2 Ce qui se passe quand la VM démarre
+
+La pile est un service systemd (`eds-stack`). À chaque démarrage, avant Docker Compose, un
+script de 50 lignes demande un jeton à l'adresse de métadonnées locale (IMDS), lit dans le
+coffre le mot de passe ETL et l'URL SAS, écrit le premier dans `/opt/eds/.env` (`0600`, root)
+et la seconde dans la configuration de ClickHouse. Conséquence : **changer un secret ou
+renouveler le jeton = redémarrer la VM.** Rien n'est écrit dans `custom_data`, qui finirait
+dans l'état Terraform et serait lisible de quiconque a un droit de lecture sur la VM.
+
+### 13.3 Mise en service, de zéro
+
+| Étape | Commande | Ce qu'elle fait |
+|---|---|---|
+| 1 | `make cloud-bootstrap` | Une fois : enregistre les fournisseurs Azure, crée le stockage de l'état Terraform — le socle ne peut pas être géré par l'état qu'il héberge |
+| 2 | `make image-push` | Construit l'image en `linux/amd64` (un Mac produirait de l'arm64, que Container Apps refuse) et la publie |
+| 3 | `make cloud-apply` | ≈ 10 min : réseau, stockage, coffre, VM, jobs, budget |
+| 4 | `make cloud-seed` | Dépose les 92 fichiers du CHU |
+| 5 | `make cloud-provision` | `job-eds-provision` : bases, tables, comptes cloisonnés, connexions, groupes, tableaux de bord Metabase, documentation dbt. Idempotent |
+| 6 | `make cloud-run` | Premier traitement. Ensuite, chaque nuit, tout seul |
+| 7 | `make cloud-check` | `job-eds-controle` : se connecte réellement avec chaque compte et exige un refus explicite hors périmètre |
+
+Les identifiants n'existent que dans le coffre : `az keyvault secret show --vault-name
+kv-eds-4152c908 -n mb-pilotage-password`.
+
+### 13.4 Exploitation et reprise
+
+**Le geste normal : aucun.** `make cloud-status` montre la VM et les trois derniers passages
+de chaque job ; `make cloud-logs` la dernière exécution.
+
+| Situation | Geste |
+|---|---|
+| Rejouer un jour | `az containerapp job start -n job-eds-pipeline … --args 'run,--date,2026-08-27'` — même code que la nuit, `DROP PARTITION` garantit l'absence de doublon |
+| Modèle dbt modifié | `git push` reconstruit l'image ; `make cloud-run` la tire à l'exécution suivante |
+| Pause entre deux démonstrations | `make cloud-stop` désalloue la VM ; `make cloud-start` la remonte, pile comprise, en deux minutes |
+| Tableaux de bord perdus, VM recréée | `make cloud-provision` — tout est défini en code |
+| Vérifier que le code décrit ce qui tourne | `make cloud-plan` doit être vide |
+
+**Livraison.** Chaque poussée sur `main` déclenche la CI (style, tests unitaires, compilation
+dbt, validation Terraform, puis la démonstration complète depuis un clone nu) et la
+reconstruction de l'image, étiquetée `latest` et par commit. Les jobs tirent `latest` ; épingler
+un commit dans `terraform.tfvars` fige une version avant une démonstration.
+
+---
+
+## 14. Qui peut lire quoi — sécurité et RGPD
+
+### 14.1 Réseau : ce qui entre, et d'où
+
+| Port | Ouvert à | Pour | Vérifié le 3 septembre |
+|---|---|---|---|
+| 443 | Internet | Tableaux de bord, derrière Caddy | Répond ; HSTS, redirection 80 → 443 |
+| 80 | Internet | Redirection vers HTTPS | `308 Permanent Redirect` |
+| 8123 (ClickHouse) | `snet-jobs` seulement | Le pipeline | **Délai d'attente depuis Internet** : l'entrepôt n'écoute pas dehors |
+| 3000 (Metabase) | `snet-jobs` seulement | Le provisionnement par API | Idem |
+| 22 | L'adresse du poste au dernier `apply` | Administration, tunnel SSH vers la console SQL | Non utilisé par le projet : tout passe par `az` |
+| Tout le reste | Personne | — | Refus explicite, priorité 4096 |
+
+Le cloisonnement des tableaux de bord ne repose **pas** sur le réseau (443 est ouvert à tous,
+c'est une démonstration) mais sur l'authentification Metabase et les `GRANT` ClickHouse.
+
+### 14.2 Identités et droits — relevés, pas déclarés
+
+| Identité | `filestorage` (clair) | `lake` | `$web` | Coffre |
+|---|---|---|---|---|
+| **Jobs** (`id-pipeline-eds-chu-prod`) | Lecture | Lecture, écriture | Écriture (documentation) | Lecture des secrets |
+| **VM** (ClickHouse, Metabase) | **aucun droit** | Lecture seule, par jeton SAS daté | — | Lecture des secrets |
+| Comptes SQL `chu_pilotage`, `chu_recherche` | aucun | aucun | — | aucun |
+| Exploitant (compte Entra ID du poste) | Écriture (dépôt) | Écriture | Écriture | Écriture des secrets |
+
+> **La machine qui héberge l'entrepôt ne peut pas lire les noms et les NIR.** Pas « ne le fait
+> pas » : *ne le peut pas*. Aucun rôle ne lui est attribué sur le compte de stockage
+> (`az role assignment list` ne lui connaît que la lecture du coffre), et le jeton confié à
+> ClickHouse ne vise que `lake`, en lecture, pour 180 jours. C'est le **quatrième niveau** du
+> cloisonnement décrit en [§6](#6-restitution-et-cloisonnement) — le seul
+> que le code ne peut pas contourner.
+
+Les droits des identités de la plateforme sont attribués **au conteneur**, jamais au compte.
+Celui du job sur `$web` faisait exception jusqu'à ce jour : il portait sur le compte entier,
+donc aussi sur `filestorage` en écriture. Ramené au conteneur, appliqué, et vérifié par une
+exécution de `job-eds-provision` qui a republié la documentation. Seul l'exploitant garde un
+droit d'écriture sur le compte entier, pour `make cloud-seed` — attribué à la main, hors
+Terraform, comme le droit sur le stockage de l'état : c'est le geste d'amorçage, pas la
+plateforme.
+
+### 14.3 Secrets : où ils vivent, qui les lit
+
+| Secret | Où | Lu par | Jamais dans |
+|---|---|---|---|
+| Sel de pseudonymisation | Coffre — **irremplaçable** : le perdre rompt toutes les jointures | Le job, en variable d'environnement | Git, journaux, SQL |
+| Six mots de passe (ClickHouse × 3, Metabase × 3) | Coffre, générés par Terraform (28 caractères) | Les jobs ; la VM ne lit que celui de l'ETL | Git, `custom_data`, manifestes ARM — les jobs ne portent que des *références* |
+| URL SAS du lake | Coffre, renouvelée par `terraform apply` 15 jours avant son terme | La VM, au démarrage → configuration ClickHouse | Le SQL envoyé, `system.query_log` (masquage `sig=…`) |
+| État Terraform | Conteneur privé, versionné, Entra ID | L'exploitant | Git, le poste |
+
+Le coffre est en suppression réversible 7 jours, **sans** protection contre la purge : un
+projet pédagogique doit rester destructible. Pour un CHU, la protection serait activée.
+
+### 14.4 Données de santé : où sont-elles ?
+
+| Zone | Contenu | Identifiant |
+|---|---|---|
+| `filestorage` | Les exports du CHU tels que déposés | **Oui** — NIR, nom, prénom, date de naissance |
+| `lake` | Copie de travail | Non — `patient_pseudo` (HMAC), année de naissance ; NIR, nom et prénom n'y sont jamais copiés |
+| ClickHouse (VM) | bronze, silver, gold, ops | Non — construit uniquement depuis `lake` |
+| Metabase, `$web` | Agrégats, métadonnées | Non |
+| Journaux, état Terraform | Exploitation | Non |
+
+La région est `swedencentral` : Union européenne, donc RGPD. Un CHU réel exigerait un
+hébergeur certifié HDS en France — possible sur un abonnement payant en changeant la seule
+variable `location` (§16).
+
+---
+
+## 15. Combien ça coûte
+
+Tarifs Linux relevés à l'API tarifaire Azure pour `swedencentral` le 3 septembre 2026, base
+730 h/mois. **Puis la facture réelle**, qui a révélé un poste oublié.
+
+| Poste | Détail | €/mois |
+|---|---|---:|
+| VM `Standard_B2als_v2` | 2 vCPU, 4 Gio · 0,0334 €/h | **24,38** |
+| Disque OS | Standard SSD E4, 32 Gio, LRS | **2,06** |
+| IP publique de la VM | Standard, statique · 0,0043 €/h | **3,14** |
+| IP publique de l'environnement Container Apps | Créée par Azure dans son groupe géré `ME_cae-…`, **facturée même quand aucun job ne tourne** | **3,14** |
+| Stockage | ≈ 11 Mo, versionné | 0,01 |
+| Key Vault, Log Analytics, exécution des jobs | Sous les offres gratuites | ≈ 0 |
+| Registre d'images | Docker Hub, public | 0 |
+| | **Allumée en permanence** | **≈ 32,7** |
+
+**Facture relevée** depuis le 1ᵉʳ septembre (deux jours pleins) : 2,19 €, dont 1,43 € de VM,
+0,37 € de disque et deux fois 0,19 € d'IP publique — le rythme de ≈ 33 €/mois est confirmé.
+L'IP de l'environnement n'était dans aucune estimation : « les jobs sont gratuits » était vrai
+pour l'exécution, faux pour l'infrastructure qui les porte.
+
+| Levier | Facture | Quand |
+|---|---:|---|
+| `make cloud-stop` (VM désallouée, disque et IP conservés) | **≈ 8,3 €/mois** | Entre deux démonstrations — le plus efficace |
+| Mode nuit, 22 h → 8 h (`auto_shutdown_time` + `auto_startup_cron`) | ≈ 22,6 €/mois | Préparé dans Terraform, **non activé** : les deux variables sont commentées dans `terraform.tfvars` |
+| `make cloud-destroy` | 0 € | Le dépôt local et l'état Terraform survivent |
+
+Un budget de 60 €/mois avec alertes à 50, 80 et 100 % est en place ; la limite de dépense de
+l'offre étudiante désactive les ressources à crédit épuisé — la facturation ne peut pas
+devenir négative.
+
+---
+
+## 16. Limites, et ce qu'on ferait pour un vrai CHU
+
+| Limite | Pourquoi ici | Pour un CHU |
+|---|---|---|
+| **Point unique de défaillance** | Quota de 6 vCPU : une seule VM | Cluster ClickHouse à 3 nœuds, Metabase répliqué derrière un Application Gateway |
+| **Pas de sauvegarde de l'entrepôt** | Tout se reconstruit en dix minutes depuis `filestorage` (versionné) et le sel (coffre) — la VM est du bétail, pas un animal de compagnie | Instantanés de disque, `BACKUP` ClickHouse vers un conteneur froid, protection contre la purge du coffre |
+| **Certificat auto-signé** | Let's Encrypt saturé sur `cloudapp.azure.com` ; le navigateur avertit une fois, le trafic est chiffré | Nom de domaine de l'hôpital, certificat de confiance — une variable Terraform |
+| **Stockage joignable par le réseau public** | Un point de terminaison privé exige un profil Container Apps dédié, facturé | Points de terminaison privés sur le stockage et le coffre, accès public bloqué |
+| **Jeton SAS plutôt qu'identité gérée** pour ClickHouse | Limite de ClickHouse 26.3 sur une VM | À rebasculer dès que le moteur le permettra ; seul `lake.xml` change |
+| **Suède, pas France** | Policy de l'offre étudiante | Abonnement payant, région française, hébergeur certifié HDS : la variable `location` |
+| **Metabase à ~78 % de sa limite mémoire** | 4 Gio partagés par trois conteneurs ; budget JVM redécoupé et vérifié sous charge | VM à 8 Gio (`Standard_B2s_v2`, 65,82 €/mois) |
+| **Metabase sur H2** | Deux comptes, reconstructible par code | PostgreSQL managé |
+| **Règle SSH liée à une adresse** | Elle suit l'adresse du poste au dernier `apply` ; `terraform plan` la signale dès que l'adresse change | Bastion, ou suppression de la règle — SSH n'est pas utilisé |
+| **Contrôle du cloisonnement à la demande seulement** | `job-eds-controle` est en déclenchement manuel, comme son jumeau local | Le passer en déclencheur planifié (hebdomadaire) sur les deux cibles — il resterait lançable à la main |
+| **Mode nuit non activé** | Deux variables suffisent ; laissé éteint pour que la plateforme réponde à toute heure pendant l'évaluation | L'activer : 22,6 €/mois |
+| **Une seule région, réplication locale (LRS)** | Coût | Réplication géo-redondante du dépôt, plan de reprise |
+| **Supervision limitée aux alertes de budget** | Aucun test de disponibilité | Alerte Azure Monitor sur `job-eds-pipeline` en échec et sur la VM arrêtée |
+
+**Trois recommandations de gouvernance**, qui relèvent de l'organisation et non du code :
+
+1. Le sel de pseudonymisation est le seul élément **non reconstructible** de la plateforme :
+   activer la protection contre la purge du coffre, et documenter qui a le droit de le lire.
+2. Faire délivrer au CHU un jeton d'écriture sur `filestorage`, et rien d'autre : le dépôt
+   devient son geste, pas celui de l'exploitant.
+3. Exiger que `terraform plan` soit vide avant toute démonstration : c'est la preuve que le
+   code décrit ce qui tourne, et donc que cette partie est encore vraie.
+
+---
+
+# Partie 3 — Exploitation des résultats
+
+Les deux premières parties disent comment les chiffres sont produits, et où. Celle-ci les lit
+comme le feraient une direction d'hôpital, un cadre de santé, le département d'information
+médicale (DIM) ou un chercheur : que disent ces indicateurs de l'établissement, quelles
+décisions éclairent-ils, et — le jeu étant synthétique — lesquels de ces signaux décrivent un
+hôpital plutôt que le générateur qui a produit les fichiers. Tout chiffre ci-dessous est calculé
+dans l'entrepôt, sur silver et gold, à la date du dernier traitement ; les tables d'origine sont
+nommées sous chaque tableau.
+
+---
+
+## 17. Comment lire ces chiffres
+
+**Le jeu est synthétique : la méthode compte plus que les conclusions.** Cette partie montre
+comment on exploite un EDS — quels croisements, quels dénominateurs, quelles précautions — et
+elle tire des conclusions *comme si* les chiffres étaient ceux du CHU. Quand un chiffre est
+cliniquement invraisemblable, il est dit tel, et c'est un résultat utile : sur des données
+réelles, ce serait le signal qu'une source est cassée. Chaque constat porte donc une étiquette :
+
+| Étiquette | Sens |
+|---|---|
+| **Exploitable** | Le signal a une structure cohérente ; sur des données réelles, on agirait dessus |
+| **Artefact probable** | Le signal ressemble à un tirage aléatoire du générateur ; on retient la méthode, pas la valeur |
+| **Défaut de source** | Le signal révèle une donnée manquante ou incohérente à corriger en amont |
+
+Les dix chiffres à garder en tête :
+
+| Chiffre | Valeur | Lecture |
+|---|---:|---|
+| Séjours valides, 28 jours d'admissions | 6 729 | 240 admissions par jour |
+| Patients distincts | 5 949 (6 000 déposés) | 1,13 séjour par patient ; 754 patients revenus au moins une fois |
+| Patients présents un jour donné | ≈ 1 240 | admissions par jour × DMS (loi de Little) ; 1 246 observés en moyenne |
+| Durée moyenne de séjour | 5,15 j | de 2,15 j aux urgences à 9,05 j en réanimation |
+| Admissions en mode urgence | 49 % | 26 % par mutation, 24 % programmées |
+| Sorties | 50 % domicile, 17 % transfert, 17 % mutation, **16,5 % décès** | la mortalité est le premier chiffre à ne pas publier tel quel (§19.1) |
+| Réadmission à 30 jours | 11,59 % | borne basse ; 133 de ces « réadmissions » suivent un décès enregistré |
+| Relevés en alerte | 8,1 % | stable sur la période, identique en cardiologie et en réanimation |
+| Actes et facturation | 8 112 actes · 2 199 450 € | 76 % des séjours ont au moins un acte ; 270 € par acte |
+| Lits déclarés | 191 (7 services) | pour ≈ 1 240 patients présents : l'incohérence à traiter en premier (§18.3) |
+
+*Sources : `kpi_synthese`, `fact_sejour`, `kpi_readmissions_30j`, `kpi_alertes_jour`, `kpi_facturation_service`, `dim_service`.*
+
+---
+
+## 18. Activité et capacité : où sont les patients, et combien de lits il faudrait
+
+### 18.1 Où sont les patients
+
+| Service | Séjours | Part | Adm./jour | DMS (j) | Médiane (j) | Présents en moyenne | Pathologie principale dominante |
+|---|---:|---:|---:|---:|---:|---:|---|
+| Cardiologie | 1 601 | 23,8 % | 57 | 5,31 | 4,71 | 306 | diabète 47 %, insuffisance cardiaque 34 %, infarctus 19 % |
+| Urgences | 1 423 | 21,1 % | 51 | 2,15 | 2,04 | 141 | infection urinaire 57 %, puis neuf autres |
+| Neurologie | 1 208 | 18,0 % | 43 | 7,06 | 5,83 | 288 | épisode dépressif 62 %, AVC 38 % |
+| Pneumologie | 840 | 12,5 % | 30 | 6,20 | 5,71 | 183 | pneumopathie 69 %, BPCO 31 % |
+| Pédiatrie | 503 | 7,5 % | 18 | 3,19 | 2,58 | 67 | appendicite 72 % |
+| Chirurgie | 476 | 7,1 % | 17 | 4,39 | 3,67 | 79 | appendicite 100 % |
+| Réanimation | 467 | 6,9 % | 17 | 9,05 | 8,21 | 131 | pneumopathie 28 %, insuffisance cardiaque 27 %, AVC 26 % |
+| Oncologie | 211 | 3,1 % | 7,5 | 6,87 | 5,67 | 50 | cancer bronchique 100 % |
+| **Total** | **6 729** | 100 % | **240** | **5,15** | | **1 246** | |
+
+*Sources : `fact_sejour`, `kpi_dms_service`, `kpi_activite_service` (moyenne du 1er au 28 août), `fact_diagnostic` (diagnostic principal).*
+
+- **Trois services font 63 % de l'activité** — cardiologie, urgences, neurologie — et 59 %
+  des patients présents. Toute action sur la charge de l'hôpital commence par eux.
+  *Exploitable.*
+- **La DMS est du case-mix, pas une performance.** Chaque service porte une pathologie
+  dominante et sa durée : la réanimation (9 j) traite des pneumopathies, des insuffisances
+  cardiaques et des AVC ; les urgences (2,2 j) des infections urinaires. La correspondance
+  service ↔ pathologie est cliniquement cohérente — chirurgie = appendicites, oncologie =
+  cancers bronchiques, pneumologie = pneumopathies et BPCO. Comparer les DMS entre services
+  n'a donc pas de sens ; comparer la DMS d'un service à lui-même dans le temps, ou entre
+  établissements à case-mix égal, en a. *Exploitable.*
+- **La médiane est partout sous la moyenne** (réanimation 8,2 contre 9,1 j ; neurologie 5,8
+  contre 7,1). Les distributions sont asymétriques : quelques séjours longs tirent la moyenne.
+  Pour dimensionner des lits, c'est la moyenne qui compte (elle porte les journées) ; pour
+  repérer les séjours à examiner, c'est l'écart à la médiane. *Exploitable.*
+- **Les urgences hébergent.** 2,15 j — 52 heures — de durée moyenne, c'est le comportement
+  d'une unité d'hospitalisation de courte durée, pas d'un service d'accueil. Et 146 séjours y
+  sont « en cours » à la fin du dépôt, âgés de 8,5 jours en moyenne : quatre fois la DMS du
+  service. Ce ne sont pas des patients toujours présents, ce sont des **sorties non
+  transmises**. Même lecture pour les 683 séjours en cours de l'hôpital, âgés de 7,8 à 8,7 j
+  selon le service. *Défaut de source.*
+
+### 18.2 Le rythme : une activité qui monte, sans saisonnalité hebdomadaire
+
+| Semaine complète | Admissions | Par jour | Dont urgences (mode) |
+|---|---:|---:|---:|
+| 3 → 9 août | 1 671 | 239 | 816 |
+| 10 → 16 août | 1 814 | 259 | 903 |
+| 17 → 23 août | 2 036 | 291 | 1 019 |
+
+*Sources : `fact_sejour`, `kpi_urgences_jour`.*
+
+- **+22 % en deux semaines**, portés par tous les modes d'admission (urgence +25 %), avec un
+  pic le 21 août : 307 admissions, dont 82 passages aux urgences. Les passages aux urgences
+  passent de 49 à 52 par jour d'une quinzaine à l'autre. Sur des données réelles, ce serait
+  une tension d'été à anticiper en effectifs. *Exploitable.*
+- **Aucune saisonnalité hebdomadaire** : de 247 à 274 admissions par jour selon le jour de
+  la semaine, une fois écartés les jours incomplets. Un hôpital réel admet moins le week-end
+  (pas de programmé) ; ici, les modes sont tirés indépendamment du jour. *Artefact probable.*
+- **Les trois derniers jours sont partiels** : 40, 50 et 62 admissions les 26, 27 et 28 août,
+  contre 300 la veille ; 9, 11 et 16 passages aux urgences contre une soixantaine. Rien n'a
+  baissé : le dépôt s'arrête. Toute lecture de tendance s'arrête donc au 25 août, et la courbe
+  de charge après le 28 (sorties seules) ne décrit rien. Un contrôle « jour déposé à moins de
+  la moitié de la médiane » l'aurait signalé (§22.2). *Défaut de source.*
+
+### 18.3 Les lits : combien il en faudrait, et ce que dit le référentiel
+
+Le nombre de lits nécessaires se déduit des deux mesures publiées, par la **loi de Little** :
+patients présents = admissions par jour × durée moyenne de séjour. L'entrepôt permet de
+vérifier la formule contre la charge observée jour par jour, et les deux coïncident.
+
+| Service | Lits déclarés | Présents en moyenne | Lits requis (Little) | Présents par lit déclaré | Part des lits déclarés | Part du besoin |
+|---|---:|---:|---:|---:|---:|---:|
+| Cardiologie | 30 | 306 | 304 | 10,2 | 15,7 % | 24,5 % |
+| Neurologie | — | 288 | 305 | — | — | 24,6 % |
+| Pneumologie | 28 | 183 | 186 | 6,5 | 14,7 % | 15,0 % |
+| Urgences | 20 | 141 | 109 | 7,1 | 10,5 % | 8,8 % |
+| Réanimation | 16 | 131 | 151 | 8,2 | 8,4 % | 12,2 % |
+| Chirurgie | 40 | 79 | 75 | 2,0 | 20,9 % | 6,1 % |
+| Pédiatrie | 22 | 67 | 57 | 3,0 | 11,5 % | 4,6 % |
+| Oncologie | 35 | 50 | 52 | 1,4 | 18,3 % | 4,2 % |
+| **Total** | **191** | **1 246** | **1 239** | **6,5** | 100 % | 100 % |
+
+*Sources : `dim_service`, `kpi_activite_service`, `kpi_dms_service`, `fact_sejour`. Lits requis = admissions par jour × DMS ; part du besoin sur les 1 239 lits requis.*
+
+- **191 lits ne peuvent pas héberger 1 240 patients.** Le facteur est de 6,5 ; même en
+  retirant la neurologie, non décrite, il reste de 5. Soit le référentiel de capacité est faux
+  — des lits par unité et non par service, une colonne mal renseignée — soit les volumes sont
+  ceux de six CHU. Dans les deux cas, **le KPI « densité d'actes par lit » ne se lit qu'en
+  relatif**, et la première décision n'est pas une décision de lits : c'est de faire valider
+  `description_service` par le DIM. *Défaut de source.*
+- **En relatif, le signal est net et robuste** : si toutes les capacités sont sous-déclarées
+  du même facteur, les proportions tiennent. La chirurgie détient 21 % des lits pour 6 % du
+  besoin, l'oncologie 18 % pour 4 %, la pédiatrie 11,5 % pour 4,6 % ; la cardiologie 16 % pour
+  24,5 %, la réanimation 8 % pour 12 %. Autrement dit : **trop de lits en chirurgie, en
+  oncologie et en pédiatrie ; pas assez en cardiologie et en réanimation** ; pneumologie et
+  urgences à l'équilibre. C'est la lecture qu'attend une direction, et elle survit à
+  l'incohérence du référentiel. *Exploitable, sous réserve du référentiel.*
+- **Le levier n'est pas que le lit, c'est la durée.** Réduire d'une journée la DMS libère
+  autant de lits qu'il y a d'admissions par jour : 57 en cardiologie, 43 en neurologie, 30 en
+  pneumologie. Les séjours au-delà de la médiane sont l'endroit où chercher. *Exploitable.*
+
+### 18.4 Les flux : d'où viennent les patients, où vont-ils
+
+| | Global | Écart entre services |
+|---|---|---|
+| Admission en urgence | 49 % | de 45 % (oncologie) à 52 % (urgences) |
+| Admission par mutation | 26 % | de 24 % à 28 % |
+| Admission programmée | 24 % | de 23 % à 31 % |
+| Sortie à domicile | 50 % | de 44 % à 55 % |
+| Sortie par transfert · mutation | 17 % · 17 % | de 13 % à 20 % |
+| Décès | 16,5 % | de 15 % à 20 % |
+
+*Sources : `fact_sejour`, `kpi_flux`.*
+
+Un hôpital réel a des profils de flux très différents d'un service à l'autre : la chirurgie
+et l'oncologie sont très majoritairement programmées, les urgences ne le sont jamais, la
+réanimation sort par mutation. Ici, **chaque service reçoit et libère ses patients dans les
+mêmes proportions que les autres** : les modes sont tirés indépendamment du service.
+*Artefact probable.* La méthode reste : sur des données réelles, la part de programmé par
+service pilote les blocs, et la destination des sorties décrit l'aval (soins de suite,
+transferts) — deux vues que `kpi_flux` publie déjà au grain du jour.
+
+---
+
+## 19. Qualité et sécurité des soins : mortalité, réadmissions, alertes
+
+### 19.1 Mortalité : le chiffre qu'il ne faut pas publier tel quel
+
+| Catégorie | Séjours clos | Décès | Taux |
+|---|---:|---:|---:|
+| Pédiatrie | 448 | 88 | 19,6 % |
+| Réanimation | 423 | 77 | 18,2 % |
+| Médecine (cardiologie, pneumologie, oncologie) | 2 397 | 391 | 16,3 % |
+| Urgences | 1 277 | 206 | 16,1 % |
+| Neurologie (non décrite) | 1 077 | 168 | 15,6 % |
+| Chirurgie | 424 | 65 | 15,3 % |
+| **Hôpital** | **6 046** | **995** | **16,5 %** |
+
+*Sources : `fact_sejour` (`is_deces`), `dim_service`.*
+
+Un décès sur six séjours, **partout** : de 15 à 20 % selon le service, de 13,7 % à 18,1 % selon
+la pathologie principale, et la pédiatrie en tête. Les séjours qui se terminent par un décès
+durent autant que les autres (réanimation 9,7 contre 8,9 j, urgences 2,2 contre 2,1). Un
+établissement réel est autour de 2 à 4 %, concentré en réanimation et en oncologie, presque
+nul en pédiatrie et en chirurgie programmée. Ici, le décès est un mode de sortie tiré au sort.
+*Artefact probable.*
+
+Deux faits vont plus loin que l'artefact, parce qu'ils sont **impossibles** et non seulement
+improbables : 136 admissions surviennent après un décès antérieur du même patient (règle Q7,
+§4), et 133 des 780 réadmissions comptées suivent un séjour terminé par un décès. Sur des
+données réelles, cela désignerait soit une fusion d'identités (deux personnes sous un même
+IPP), soit un codage de sortie erroné. *Défaut de source.*
+
+Ce qu'on garde : la mécanique — mortalité par service et par pathologie, durée des séjours
+des décédés — et une décision à prendre avec le DIM sur le dénominateur des réadmissions
+(§7.4, hypothèse 2) : hors décès, le taux vaudrait 647 / 6 729 = 9,6 %, ou 11,3 % sur les
+seuls séjours dont le patient est sorti vivant.
+
+### 19.2 Réadmissions : un problème de parcours, pas de service
+
+| Service du séjour initial | Séjours | Réadmis sous 30 j | Taux |
+|---|---:|---:|---:|
+| Chirurgie | 476 | 70 | 14,7 % |
+| Pédiatrie | 503 | 74 | 14,7 % |
+| Urgences | 1 423 | 192 | 13,5 % |
+| Oncologie | 211 | 25 | 11,9 % |
+| Cardiologie | 1 601 | 187 | 11,7 % |
+| Neurologie | 1 208 | 123 | 10,2 % |
+| Pneumologie | 840 | 78 | 9,3 % |
+| Réanimation | 467 | 31 | 6,6 % |
+
+| Trajectoire (séjour initial → réadmission) | Paires |
+|---|---:|
+| Pédiatrie → Pédiatrie | 75 |
+| Cardiologie → Cardiologie | 69 |
+| Urgences → Urgences | 66 |
+| **Urgences → Cardiologie** | 49 |
+| Cardiologie → Urgences | 40 |
+| **Urgences → Neurologie** | 40 |
+| Chirurgie → Chirurgie | 36 |
+| Neurologie → Urgences | 34 |
+| Neurologie → Cardiologie | 32 |
+| Cardiologie → Pneumologie | 32 |
+
+*Sources : `kpi_readmissions_service`, `fact_sejour` (paires séjour → admission du même patient sous 30 jours ; 806 paires pour 780 séjours réadmis).*
+
+- **63 % des réadmissions arrivent dans un autre service** que celui du séjour initial (505
+  paires sur 806), avec un délai médian de **7 jours**. La réadmission n'est donc pas le
+  problème d'un service, c'est celui d'un **parcours** : le patient passé aux urgences revient
+  une semaine plus tard en cardiologie ou en neurologie. Une consultation de suivi à J+7 après
+  un passage aux urgences pour motif cardiaque ou neurologique est la mesure que ces chiffres
+  désignent. *Exploitable.*
+- **Chirurgie et pédiatrie sont en tête (14,7 %)** avec, après les urgences, les DMS les plus
+  courtes de l'hôpital : le schéma classique de la sortie précoce. À surveiller en premier si
+  ces chiffres étaient réels. *Exploitable.*
+- **La réanimation est la plus basse (6,6 %)** parce que ses patients en sortent par mutation
+  vers un autre service : le séjour suivant n'est pas une réadmission, et le service « initial »
+  auquel l'indicateur attribue la réadmission est rarement elle. Lire ce classement sans cette
+  précaution pénaliserait les services d'aval. *Exploitable.*
+- Le taux est identique quel que soit le mode de sortie — domicile 12,9 %, transfert 12,0 %,
+  mutation 13,4 %, décès 13,4 % — ce qui, pour le dernier, est impossible (§19.1). *Artefact
+  probable.* Et le 11,59 % global reste une **borne basse** : aucun séjour n'a 30 jours
+  d'observation (§5.3).
+
+### 19.3 Surveillance des constantes
+
+| | Cardiologie | Réanimation |
+|---|---:|---:|
+| Séjours monitorés / séjours du service | 677 / 1 601 (42 %) | 195 / 467 (42 %) |
+| Relevés | 31 745 | 9 175 |
+| Relevés par séjour monitoré | 47 | 47 |
+| Relevés en alerte | 2 582 (8,1 %) | 732 (8,0 %) |
+| dont fréquence cardiaque · saturation · température | 875 · 862 · 845 | 230 · 265 · 237 |
+
+*Sources : `kpi_alertes_service`, `kpi_alertes_jour`, `fact_monitoring`.*
+
+- **8 % d'alertes, stables** (8,0 % la première quinzaine, 8,2 % la seconde), identiques dans
+  les deux services et réparties à parts égales entre les trois constantes. Les alertes de
+  fréquence cardiaque se partagent entre bradycardies (566, autour de 45 bpm) et tachycardies
+  (539, autour de 120) ; les désaturations sont à 88,5 % en moyenne, les fièvres à 39,3 °C.
+  C'est le bruit de fond d'une unité monitorée, et le seuil de vigilance est bien placé : il
+  détecte, il ne sature pas. *Exploitable.*
+- **Aucun relevé ne porte deux constantes hors seuil** — zéro sur 3 314. Cliniquement, une
+  fièvre accélère le cœur et une désaturation aussi ; ici les trois constantes sont tirées
+  indépendamment. Sur des données réelles, la co-occurrence est précisément le signal
+  d'escalade à construire. *Artefact probable.*
+- **42 % de couverture dans les deux services** : plus d'un séjour de cardiologie sur deux
+  n'a aucun relevé. Quels lits sont équipés, et pourquoi ceux-là ? C'est la question à poser
+  avant d'étendre la surveillance à la pneumologie et à la neurologie (AVC). *Exploitable.*
+- **2 % de relevés de capteurs en panne** (858 sur 41 778), écartés par la règle Q4, avec une
+  signature nette — fréquence cardiaque et saturation aberrantes sur la même ligne. Un suivi
+  de ce taux par service est un indicateur de maintenance biomédicale gratuit, déjà calculé.
+  *Exploitable.*
+
+---
+
+## 20. Population et pathologies : qui sont les patients, et de quoi souffrent-ils
+
+### 20.1 Qui sont les patients
+
+| | Valeur |
+|---|---|
+| Patients déposés | 6 000 — 2 985 femmes, 3 015 hommes |
+| Âge moyen | 57,3 ans ; 45 % ont 65 ans ou plus, 8 % moins de 18 ans |
+| Tranches les plus peuplées | 60-69 ans (1 185) et 70-79 ans (999) : 36 % de la population |
+| Résidence | huit départements d'Île-de-France, de 12,4 % à 13,2 % chacun |
+| Pathologies distinctes par patient | une : 34 % · deux : 35 % · trois : 27 % · quatre et plus : 4 % |
+| Diagnostics par séjour | 1,87 (un principal, 0,87 secondaire en moyenne) |
+
+*Sources : `dim_patient`, `cohorte_demographie_globale`, `fact_diagnostic`.*
+
+- **Une population âgée et polypathologique** : deux patients sur trois cumulent au moins
+  deux pathologies, et les quatre affections les plus fréquentes — infection urinaire,
+  diabète, insuffisance cardiaque, BPCO — touchent chacune 30 à 37 % des patients. C'est le
+  profil d'un CHU de recours, et c'est la cohorte que la recherche devrait regarder en
+  premier : les patients qui portent à la fois insuffisance cardiaque, diabète et BPCO
+  (§22.2). *Exploitable.*
+- **Le recrutement territorial est plat** : huit départements à un huitième chacun. Un
+  établissement réel recrute selon la distance ; le grain départemental a été retiré des vues
+  de recherche (§7.2), et ces chiffres montrent qu'il n'aurait rien appris. *Artefact
+  probable.*
+
+### 20.2 Pathologies : prévalence, profil, durée
+
+| Code | Pathologie | Patients (tous rangs) | Prévalence | Séjours clos (diag. principal) | Tranche dominante | Femmes | DMS (j) |
+|---|---|---:|---:|---:|---|---:|---:|
+| N39 | Infection des voies urinaires | 2 234 | 37,2 % | 798 | 60-69 | 96 % | 2,18 |
+| E11 | Diabète de type 2 | 2 177 | 36,3 % | 776 | 40-49 | 54 % | 4,95 |
+| I50 | Insuffisance cardiaque | 2 156 | 35,9 % | 678 | 60-69 | 60 % | 5,52 |
+| J44 | BPCO | 1 775 | 29,6 % | 262 | 60-69 | 0 % | 5,84 |
+| J18 | Pneumopathie | 850 | 14,2 % | 773 | 60-69 | 56 % | 5,92 |
+| F32 | Épisode dépressif | 827 | 13,8 % | 752 | 40-49 | 45 % | 6,61 |
+| K35 | Appendicite aiguë | 806 | 13,4 % | 801 | 10-19 | 41 % | 3,79 |
+| I63 | AVC ischémique | 643 | 10,7 % | 575 | 60-69 | 54 % | 6,93 |
+| I21 | Infarctus du myocarde | 421 | 7,0 % | 404 | 50-59 | 0 % | 5,75 |
+| C34 | Cancer bronchique | 239 | 4,0 % | 214 | 70-79 | 0 % | 6,25 |
+| G12 | Amyotrophie spinale | 8 | 0,13 % | 6 | masqué | masqué | — |
+| E84 · Q90 | Mucoviscidose · Trisomie 21 | masqué (< 5) | — | — | — | — | — |
+
+*Sources : `prevalence_pathologie`, `cohorte_demographie` (diagnostic principal, cellules diffusables), `fact_diagnostic` ⋈ `fact_sejour`. Les cellules masquées le sont ici comme au tableau de bord.*
+
+- **Les quatre grandes pathologies sont des comorbidités plus que des motifs.** Le diabète
+  concerne 2 177 patients, mais n'est le diagnostic principal que de 776 séjours ; l'infection
+  urinaire, 2 234 patients pour 798 séjours. Deux questions, deux comptes — c'est la raison
+  pour laquelle la prévalence et la description de cohorte ne lisent pas le même rang de
+  diagnostic (§5.1). *Exploitable.*
+- **Les durées par pathologie sont cohérentes** : l'AVC et l'épisode dépressif sont les plus
+  longs (6,6 à 6,9 j), l'appendicite est courte (3,8 j), l'infection urinaire très courte
+  (2,2 j, traitée aux urgences). C'est ce case-mix qui fabrique les DMS par service de §18.1.
+  *Exploitable.*
+- **Trois pathologies n'ont aucune femme** en diagnostic principal — infarctus, BPCO, cancer
+  bronchique — là où la réalité est autour de 60 à 70 % d'hommes ; à l'inverse 96 % de femmes
+  pour l'infection urinaire est plausible mais extrême. Les sex-ratios de ce jeu ne doivent
+  pas être exploités. *Artefact probable.*
+- **Quinze patients portent une maladie rare** (8, 4 et 3) : deux effectifs sur trois sont
+  masqués, et la tranche d'âge de la troisième aussi. La recherche sur ces cohortes ne passe
+  pas par le tableau de bord ; elle passe par un accès sur convention, à définir avec le
+  délégué à la protection des données (§8). *Exploitable.*
+
+---
+
+## 21. Actes et facturation : ce que produit le plateau technique, et ce que ça rapporte
+
+### 21.1 Ce que produit le plateau technique
+
+| Service | Actes | Séjours avec acte | Part des séjours | Actes par séjour traité | Délai admission → acte |
+|---|---:|---:|---:|---:|---|
+| Cardiologie | 1 935 | 1 213 | 76 % | 1,60 | |
+| Urgences | 1 731 | 1 090 | 77 % | 1,59 | |
+| Neurologie | 1 471 | 918 | 76 % | 1,60 | |
+| Pneumologie | 1 009 | 642 | 76 % | 1,57 | médiane 1,9 j |
+| Pédiatrie | 598 | 379 | 75 % | 1,58 | 13 % le jour de l'admission |
+| Chirurgie | 564 | 344 | 72 % | 1,64 | |
+| Réanimation | 563 | 355 | 76 % | 1,59 | |
+| Oncologie | 241 | 155 | 73 % | 1,55 | |
+
+*Sources : `kpi_actes_service`, `fact_acte` ⋈ `fact_sejour`.*
+
+- **Le volume d'actes est une fonction du nombre de séjours, et de rien d'autre** : trois
+  séjours sur quatre ont un acte, 1,6 acte par séjour traité, dans chaque service, quel que
+  soit le mode d'admission (74 à 76 %). Un plateau technique réel est trois à cinq fois plus
+  sollicité en réanimation ou en chirurgie qu'aux urgences. *Artefact probable.*
+- **Les types d'actes sont distribués au hasard entre les services** : la cardiologie compte
+  231 appendicectomies pour 237 coronarographies, la chirurgie 81 coronarographies, la
+  pédiatrie 71 ventilations mécaniques. C'est cliniquement impossible, et c'est précieux :
+  la **matrice service × type d'acte** est le premier contrôle de cohérence à écrire sur des
+  données réelles — un signalement « acte incompatible avec le service », sur une table de
+  compatibilité tenue par le DIM (§22.2). Le générateur a une structure clinique pour les
+  diagnostics (§18.1), pas pour les actes. *Artefact probable → futur contrôle.*
+- Le rythme suit les admissions : 239 actes par jour la première semaine complète, 306 la
+  troisième. Un acte survient en médiane 1,9 jour après l'admission ; 13 % le jour même.
+
+### 21.2 Ce que ça rapporte
+
+| Type d'acte | Tarif | Actes | Montant | Part des recettes |
+|---|---:|---:|---:|---:|
+| Appendicectomie | 800 € | 978 | 782 400 € | 35,6 % |
+| Coronarographie | 450 € | 1 030 | 463 500 € | 21,1 % |
+| IRM cérébrale | 300 € | 982 | 294 600 € | 13,4 % |
+| Coloscopie totale | 260 € | 1 015 | 263 900 € | 12,0 % |
+| Ventilation mécanique assistée | 220 € | 1 000 | 220 000 € | 10,0 % |
+| Pose de cathéter central | 120 € | 1 025 | 123 000 € | 5,6 % |
+| Radiographie du thorax | 25 € | 1 043 | 26 075 € | 1,2 % |
+| Consultation de suivi | 25 € | 1 039 | 25 975 € | 1,2 % |
+| **Total** | | **8 112** | **2 199 450 €** | 100 % |
+
+| Service | Montant | Par acte | Par séjour traité | Par lit déclaré |
+|---|---:|---:|---:|---:|
+| Cardiologie | 521 655 € | 270 € | 430 € | 17 388 € |
+| Urgences | 478 585 € | 276 € | 439 € | 23 929 € |
+| Neurologie | 393 850 € | 268 € | 429 € | — |
+| Pneumologie | 268 045 € | 266 € | 418 € | 9 573 € |
+| Pédiatrie | 171 165 € | 286 € | 452 € | 7 780 € |
+| Réanimation | 154 740 € | 275 € | 436 € | 9 671 € |
+| Chirurgie | 147 145 € | 261 € | 428 € | 3 679 € |
+| Oncologie | 64 265 € | 267 € | 415 € | 1 836 € |
+
+*Sources : `kpi_actes_type` ⋈ `dim_ccam`, `kpi_facturation_service`, `kpi_densite_lits`.*
+
+- **Trois actes font 70 % des recettes** — appendicectomie, coronarographie, IRM — et les
+  deux actes à 25 € font un quart des actes pour 2,4 % du montant. Sur un mois, 2,2 M€ d'actes,
+  soit un ordre de grandeur de 28 M€ par an à activité constante. Une direction financière
+  suivrait la structure de ces recettes mois par mois, et un changement de tarif de
+  l'appendicectomie pèserait plus que tout le reste : c'est l'argument pour historiser
+  `dim_ccam` (§9.5). *Exploitable.*
+- **Le classement des services par montant est le classement par activité.** 270 € par acte
+  à ± 5 % près, 430 € par séjour traité partout : le KPI 5 ne dit rien de la valorisation d'un
+  service, seulement de son volume — conséquence directe de la distribution aléatoire des
+  actes (§21.1). Sur des données réelles, la réanimation et la chirurgie domineraient en
+  montant par séjour ; ici, l'oncologie et les urgences se valent. *Artefact probable.*
+- **Par lit déclaré, l'écart est de 1 à 13** — 23 929 € aux urgences, 1 836 € en oncologie —
+  avec la réserve de §18.3 sur les capacités. En relatif, c'est la même image que les lits :
+  un plateau saturé aux urgences et en cardiologie, sous-employé en oncologie et en chirurgie.
+  *Exploitable, sous réserve du référentiel.*
+
+---
+
+## 22. Synthèse et préconisations
+
+### 22.1 Ce que les chiffres disent du CHU, si on prend le jeu au mot
+
+- Un établissement d'environ **1 240 patients présents**, 240 admissions par jour dont la
+  moitié en urgence, en **croissance de 22 % en deux semaines**.
+- **Trois services font 63 % de l'activité** ; cardiologie et neurologie, à elles deux, la
+  moitié du besoin en lits. Les durées de séjour sont dictées par les pathologies, pas par les
+  services.
+- **Les lits ne sont pas là où sont les patients** : chirurgie, oncologie et pédiatrie sont
+  dotées trois à quatre fois au-delà de leur besoin relatif, cardiologie et réanimation en
+  dessous — sous réserve d'un référentiel de capacité à faire valider, qui ne peut pas
+  décrire ces volumes.
+- **La réadmission est un problème de parcours** : deux sur trois reviennent dans un autre
+  service, une semaine après, le plus souvent des urgences vers la cardiologie et la
+  neurologie.
+- **La surveillance fonctionne** — 8 % d'alertes, stables, seuils bien placés — mais ne couvre
+  que 42 % des séjours des deux services équipés, et 2 % des capteurs sont en panne.
+- **Les patients sont âgés et polypathologiques** : deux sur trois cumulent au moins deux
+  affections chroniques parmi infection urinaire, diabète, insuffisance cardiaque et BPCO.
+- **Les recettes d'actes suivent le volume**, et trois actes en font 70 %.
+
+### 22.2 Préconisations
+
+| # | Préconisation | Pour qui | Fondée sur |
+|---|---|---|---|
+| 1 | **Faire valider le référentiel de capacité** (191 lits pour 1 240 présents) avant toute décision sur les lits ; en attendant, ne lire la densité d'actes par lit qu'en relatif | DIM, direction | §18.3 |
+| 2 | **Rééquilibrer les lits** vers la cardiologie et la réanimation, depuis la chirurgie, l'oncologie et la pédiatrie — cible : un nombre de présents par lit homogène entre services | Direction | §18.3 |
+| 3 | **Agir sur la durée en neurologie et en cardiologie** : un jour de DMS en moins libère 43 et 57 lits ; commencer par les séjours au-delà de la médiane | Cadres de santé | §18.1, §18.3 |
+| 4 | **Organiser le parcours post-urgences** : consultation à J+7 en cardiologie et en neurologie après un passage aux urgences ; suivi post-opératoire en chirurgie et en pédiatrie | Soins | §19.2 |
+| 5 | **Publier la réadmission à 60 jours d'historique**, et trancher avec le DIM le sort des séjours terminés par un décès au dénominateur | DIM | §19.1, §19.2, §7.4 |
+| 6 | **Récupérer les sorties manquantes** : 683 séjours « en cours » âgés de 8 jours en moyenne, quatre fois la DMS aux urgences | DIM, DSI | §18.1 |
+| 7 | **Corriger les identités** : 136 admissions et 133 réadmissions après un décès enregistré désignent des IPP fusionnés ou un codage de sortie erroné | DIM | §19.1 |
+| 8 | **Étendre la surveillance** aux séjours non couverts (58 %) puis à la pneumologie et à la neurologie ; suivre le taux de capteurs en panne par service ; construire l'escalade sur deux constantes | Soins, biomédical | §19.3 |
+| 9 | **Ajouter trois contrôles au pipeline** : jour déposé sous la moitié de la médiane (Q11), acte incompatible avec le service (Q12), réadmission après décès (extension de Q7) | Équipe données | §18.2, §21.1, §19.1 |
+| 10 | **Recherche** : constituer la cohorte polypathologique (insuffisance cardiaque × diabète × BPCO) ; ne pas exploiter les sex-ratios de l'infarctus, de la BPCO et du cancer bronchique ; accès sur convention pour les maladies rares | Chercheurs, DPO | §20 |
+| 11 | **Facturation** : suivre mensuellement la structure des recettes (trois actes = 70 %) et historiser les tarifs avant tout changement de T2A | Direction financière | §21.2, §9.5 |
+
+### 22.3 Ce qu'il faudrait vérifier en premier sur des données réelles
+
+Six signaux de ce jeu ont la signature d'un tirage aléatoire ; sur des données réelles, chacun
+est une question à poser à la source avant de publier — et plusieurs sont devenus, ou peuvent
+devenir, une règle du rapport qualité (§4) :
+
+| Signal | Ce qu'un CHU réel montrerait | Contrôle |
+|---|---|---|
+| Mortalité à 16,5 %, uniforme, pédiatrie en tête | 2 à 4 %, concentrée en réanimation et oncologie | Q7 existe ; extension à la réadmission après décès |
+| Actes distribués au hasard entre services | Une matrice service × acte creuse | Q12, table de compatibilité |
+| Modes d'admission et de sortie identiques partout | Programmé en chirurgie, mutation en sortie de réanimation | Vue existante (`kpi_flux`) : à lire par service |
+| Aucune femme pour trois pathologies | 60 à 70 % d'hommes | Contrôle de vraisemblance des sex-ratios |
+| Recrutement égal entre huit départements | Un gradient de distance | Sans objet : grain retiré des vues |
+| Jamais deux constantes en alerte à la fois | Co-occurrence fièvre / tachycardie | Signal d'escalade à construire |
+
+Le reste — l'activité et sa croissance, le case-mix par service, le besoin relatif en lits,
+les trajectoires de réadmission, le bruit de fond des alertes, le profil de la population, la
+structure des recettes — se lit comme on lirait un vrai établissement. C'est pour cela que
+l'entrepôt existe : chacun de ces chiffres se retrouve en une requête sur une table nommée,
+et le prochain dépôt du CHU les mettra à jour sans qu'on y touche.
+
+---
+
 *Énoncé de l'épreuve : [`sujets/FICHE-SUJET.md`](sujets/FICHE-SUJET.md) · Consigne d'évolution :
 [`sujets/SUJET-EVOLUTION-nouvelles-kpi.md`](sujets/SUJET-EVOLUTION-nouvelles-kpi.md) · Mise en service et exploitation :
-[`README`](../README.md) · Déploiement Azure : [`RAPPORT-CLOUD.md`](RAPPORT-CLOUD.md) et [`terraform/README.md`](../terraform/README.md)*
+[`README`](../README.md) · Infrastructure Azure : [`terraform/README.md`](../terraform/README.md)*

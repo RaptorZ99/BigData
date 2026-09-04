@@ -4,7 +4,7 @@ Toute l'infrastructure du déploiement Azure. Rien ne se crée à la main ;
 `terraform destroy` ne laisse rien derrière.
 
 Les choix d'architecture, leur justification et le diagramme de déploiement sont dans le
-[rapport cloud](../docs/RAPPORT-CLOUD.md) ; le détail opérationnel est ci-dessous.
+[rapport, partie 2](../docs/RAPPORT.md#partie-2--le-déploiement-azure) ; le détail opérationnel est ci-dessous.
 
 ## Démarrage
 
