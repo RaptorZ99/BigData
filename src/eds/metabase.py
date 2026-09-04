@@ -578,8 +578,8 @@ def provision(config: Config) -> None:
         )
 
     # Les comptes sont rappelés, les mots de passe non : cette sortie finit dans
-    # `logs/cron.log` en exécution planifiée, et un secret n'a rien à faire dans
-    # un journal. Ils restent lisibles dans `.env`, leur seule source de vérité.
+    # les journaux du planificateur en exécution planifiée, et un secret n'a rien à
+    # faire dans un journal. Ils restent lisibles dans `.env`, leur seule source de vérité.
     console.print("[green]✓[/] Metabase provisionné.")
     console.print(f"  [bold]{config.metabase_url}[/]")
     console.print(f"  pilotage   {config.pilotage_email}")

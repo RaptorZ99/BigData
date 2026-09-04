@@ -166,20 +166,22 @@ alternatives, le fonctionnement au quotidien et les limites :
 ### 3.4 Automatisation : planification, erreurs, traçabilité
 
 Le sujet demande une collecte et une transformation **planifiées**, avec gestion des erreurs
-et journalisation. Le pipeline est un seul geste, `eds run`, incrémental et rejouable ; ce
-qui change entre les deux cibles, c'est **qui le déclenche**.
+et journalisation. Le pipeline est un seul geste, `eds run`, incrémental et rejouable, et il
+est **déclenché de la même façon sur les deux cibles** : un conteneur planifié, construit
+depuis le même `Dockerfile`, sur le même cron UTC, avec le même réessai.
 
 | | Sur le poste | Sur Azure |
 |---|---|---|
-| Déclencheur | `cron`, à installer depuis [`scheduling/crontab.example`](../scheduling/crontab.example) — pas actif par défaut | `job-eds-pipeline`, planifié par Azure : cron `5 1 * * *`, 01 h 05 UTC, après le dépôt nocturne |
+| Déclencheur | Le conteneur `scheduler` de la pile Docker Compose, démarré par `make demo` — rien à installer. Cron `5 1 * * *`, 01 h 05 UTC | `job-eds-pipeline`, planifié par Azure : cron `5 1 * * *`, 01 h 05 UTC, après le dépôt nocturne |
 | Ce qu'une nuit fait | Ne charge que les jours absents de `ops.ingest_log` ; sans nouveau fichier, ne reconstruit rien | Identique — même image, même code |
-| Erreurs | Code de retour non nul et courriel (`MAILTO`) ; le run est marqué `failed` avec son message | Un réessai, journaux dans Log Analytics, `make cloud-status` montre les trois derniers passages |
-| Reprise | `uv run eds run --date AAAA-MM-JJ` : `DROP PARTITION` puis rechargement, jamais de doublon | `az containerapp job start … --args 'run,--date,…'` — le même job, à la main |
+| Erreurs | Un réessai après 60 s ; le run est marqué `failed` avec son message ; le planificateur survit à une nuit ratée | Un réessai, journaux dans Log Analytics, `make cloud-status` montre les trois derniers passages |
+| Reprise | `uv run eds run --date AAAA-MM-JJ` : `DROP PARTITION` puis rechargement, jamais de doublon. Ou `docker compose run --rm scheduler run`, dans l'image du cloud | `az containerapp job start … --args 'run,--date,…'` — le même job, à la main |
 | Traçabilité | `ops.pipeline_runs` (un enregistrement par run, statut, message) · `ops.ingest_log` (fichier, empreinte, run) · rapport qualité chiffré par run | Idem, plus le `run_id` sur chaque ligne de journal |
-| Preuve | `make status` : derniers runs et jours ingérés | Trois exécutions planifiées consécutives, `Succeeded`, les 2, 3 et 4 septembre à 01:05:00 |
+| Preuve | `make schedule` : le prochain passage annoncé ; `make status` : derniers runs et jours ingérés. La CI vérifie sur un clone nu que le conteneur tourne et que son image exécute le pipeline | Trois exécutions planifiées consécutives, `Succeeded`, les 2, 3 et 4 septembre à 01:05:00 |
 
-Le contrôle du cloisonnement suit la même logique : hebdomadaire dans l'exemple `cron`,
-à la demande sur Azure (`make cloud-check`). Lancement, supervision et reprise sur incident
+Le contrôle du cloisonnement est à la demande sur les deux cibles :
+`uv run eds check-cloisonnement` en local, `make cloud-check` sur Azure. Lancement,
+supervision et reprise sur incident
 sont dans le [README](../README.md#exploitation) ; le déroulé d'une nuit sur Azure, flèche par
 flèche, dans le [rapport cloud, §4](RAPPORT-CLOUD.md#4-comment-ça-fonctionne).
 

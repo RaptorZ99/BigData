@@ -6,6 +6,7 @@ rapport qualité. Toutes les commandes sont rejouables sans effet de bord.
 
 from __future__ import annotations
 
+import signal
 import sys
 from typing import Annotated
 
@@ -71,18 +72,30 @@ def run_command(
 ) -> None:
     """Exécute le pipeline (incrémental par défaut)."""
     config = _bootstrap(verbose)
-    client = connect(config)
+    if not _executer_run(config, only_date=date, full_refresh=full_refresh, rebuild=rebuild):
+        raise typer.Exit(code=1)
 
+
+def _executer_run(
+    config, *, only_date: str | None = None, full_refresh: bool = False, rebuild: bool = False
+) -> bool:
+    """Un run complet et son compte rendu. Rend vrai s'il a réussi.
+
+    Partagé par `eds run` (à la main) et `eds schedule` (chaque nuit) : les deux
+    chemins exécutent strictement le même code. C'est ce qui autorise à dire que
+    la planification locale et le job Azure font la même chose.
+    """
     try:
+        client = connect(config)
         report = pipeline.run(
-            client, config, only_date=date, full_refresh=full_refresh, force_rebuild=rebuild
+            client, config, only_date=only_date, full_refresh=full_refresh, force_rebuild=rebuild
         )
     except Exception as exc:
         # L'erreur est déjà journalisée avec sa pile complète ; en sortie
         # console, une trace Python n'aide personne à décider quoi faire.
         console.print(f"[bold red]✗ Le pipeline s'est arrêté :[/] {exc}")
         console.print(f"[dim]Détails et pile d'appels : {log_file_path()}[/]")
-        raise typer.Exit(code=1) from exc
+        return False
 
     if report.files_ok:
         console.print(
@@ -96,9 +109,57 @@ def run_command(
         for error in report.errors:
             console.print(f"  • {error}")
         console.print(f"[dim]Détails : {log_file_path()}[/]")
-        raise typer.Exit(code=1)
+        return False
 
     console.print(f"[green]Run {report.run_id} terminé ({report.status}).[/]")
+    return True
+
+
+@app.command("schedule")
+def schedule_command(
+    cron: Annotated[
+        str,
+        typer.Option(
+            "--cron",
+            envvar="EDS_SCHEDULE",
+            help="Expression cron à cinq champs, en UTC. Par défaut, celle du job Azure.",
+        ),
+    ] = "5 1 * * *",
+    once: Annotated[
+        bool, typer.Option("--once", help="Un passage tout de suite, puis s'arrête.")
+    ] = False,
+) -> None:
+    """Exécute le pipeline à heure fixe, comme le job planifié sur Azure. Ne rend pas la main.
+
+    C'est la commande du conteneur `scheduler` de la pile Docker Compose. Même
+    image que les jobs Azure, même `eds run`, même cron UTC, même réessai : la
+    planification locale n'est pas un exemple à installer, c'est un service.
+    """
+    from eds import schedule as planification
+
+    config = _bootstrap()
+    try:
+        spec = planification.parse(cron.strip().strip('"'))
+    except planification.CronError as exc:
+        console.print(f"[bold red]Planification invalide[/] : {exc}")
+        raise typer.Exit(code=2) from exc
+
+    if once:
+        raise typer.Exit(code=0 if _executer_run(config) else 1)
+
+    # `docker stop` envoie SIGTERM : on s'arrête proprement, code 0, sans trace.
+    signal.signal(signal.SIGTERM, _arret_demande)
+    log.info(
+        "Planificateur démarré · cron « %s » (UTC) · docker stop pour arrêter", spec.expression
+    )
+    try:
+        planification.boucle(spec, lambda: _executer_run(config))
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Planificateur arrêté.[/]")
+
+
+def _arret_demande(signum, frame) -> None:
+    raise KeyboardInterrupt
 
 
 @app.command("status")

@@ -30,9 +30,10 @@ fichiers, dont l'évolution du 29 août) est versionné. C'est le jeu de donnée
 déploiement réel, il ne serait jamais dans Git — il contient l'identité (fictive ici) des
 patients, et c'est précisément ce que la chaîne détruit à l'entrée.
 
-Environ deux minutes au premier lancement. La commande crée `.env`, y tire au hasard le
-sel de pseudonymisation et les six mots de passe, démarre ClickHouse et Metabase, ingère
-les vingt-neuf jours de dépôt, construit les indicateurs et crée les tableaux de bord.
+Deux à trois minutes au premier lancement. La commande crée `.env`, y tire au hasard le
+sel de pseudonymisation et les six mots de passe, construit l'image du pipeline — la même
+que celle des jobs Azure —, démarre ClickHouse, Metabase et le planificateur, ingère les
+vingt-neuf jours de dépôt, construit les indicateurs et crée les tableaux de bord.
 Elle affiche à la fin les accès de **votre** installation :
 
 | Interface | URL | Compte |
@@ -49,8 +50,8 @@ make acces      # affiche les URL et les mots de passe de votre installation
 Les mots de passe sont tirés au hasard à la création de `.env` et n'existent que là :
 ils ne sont ni dans le dépôt, ni les mêmes que chez quelqu'un d'autre. `make acces` est une
 cible à part, et non la fin de `make demo`, parce que la sortie du provisionnement part dans
-`logs/cron.log` quand le pipeline est planifié — un mot de passe n'a rien à faire dans un
-journal.
+les journaux du planificateur quand le pipeline est planifié — un mot de passe n'a rien à
+faire dans un journal.
 
 ---
 
@@ -101,9 +102,10 @@ make demo         Démonstration complète depuis zéro
 make acces        URL et identifiants de votre installation
 make pipeline     Ingestion incrémentale (jours non encore traités)
 make status       État de l'ingestion et volumétrie par couche
+make schedule     Planificateur local : prochain passage, derniers journaux
 make quality      Rapport qualité du dernier traitement (22 lignes, 20 règles)
 make provision    (Re)crée connexions, permissions et tableaux de bord Metabase
-make test         155 tests unitaires        ·  make test-e2e   86 tests d'intégration
+make test         184 tests unitaires        ·  make test-e2e   87 tests d'intégration
 make dbt-test     117 tests dbt              ·  make dbt-docs   graphe des 34 modèles
 make lint         Style (ruff)               ·  make logs       Logs des conteneurs
 make down         Arrête (données gardées)   ·  make reset      ⚠ Détruit tout
@@ -114,6 +116,7 @@ uv run eds run --date 2026-08-27   # rejoue un jour précis (reprise sur inciden
 uv run eds run --rebuild           # reconstruit silver et gold après un changement de modèle
 uv run eds check-cloisonnement     # prouve le cloisonnement aux deux niveaux
 uv run eds --help
+docker compose run --rm scheduler run   # le même pipeline, dans l'image du cloud — l'équivalent de `az containerapp job start`
 ```
 
 ---
@@ -121,8 +124,12 @@ uv run eds --help
 ## Exploitation
 
 **Automatisation.** Le pipeline est incrémental : il ne traite que les jours absents de
-`ops.ingest_log` et ne duplique jamais une ligne. En local, `scheduling/` donne l'exemple
-cron ; sur Azure, un job planifié le déclenche chaque nuit.
+`ops.ingest_log` et ne duplique jamais une ligne. Il est **planifié de la même façon sur les
+deux cibles** : en local, le conteneur `scheduler` de la pile — construit depuis le même
+`Dockerfile` que l'image des jobs Azure — exécute `eds run` chaque nuit à 01 h 05 UTC, sur le
+cron du job Azure, avec un réessai ; `make schedule` montre son prochain passage et ses
+derniers journaux. Rien à installer : il démarre avec `make demo`. Sur Azure,
+`job-eds-pipeline` fait exactement la même chose.
 
 **Supervision.** Trois points de contrôle, du plus rapide au plus complet :
 
@@ -130,7 +137,7 @@ cron ; sur Azure, un job planifié le déclenche chaque nuit.
 |---|---|
 | `make status` | Jours ingérés, volumétrie par couche, dernier run et son statut |
 | `make quality` | Les 22 lignes du dernier traitement : lues / conservées / écartées / signalées |
-| `make test-e2e` | Les 86 invariants de l'entrepôt, dont les six KPI ancrés sur la feuille de réponses et les cinq de l'évolution |
+| `make test-e2e` | Les 86 invariants de l'entrepôt, dont les six KPI ancrés sur la feuille de réponses et les cinq de l'évolution, et le planificateur |
 
 Le bas du tableau de bord de pilotage porte le rapport qualité et le journal d'ingestion :
 un utilisateur qui doute d'un chiffre voit sans quitter l'interface combien de lignes ont
@@ -152,7 +159,7 @@ message d'erreur, `ops.ingest_log` le checksum de chaque fichier déjà chargé.
 toujours sûr.
 
 **Intégration continue.** À chaque poussée, la CI rejoue exactement le parcours d'un
-correcteur sur une machine vierge — clone, `make demo`, les 241 tests, la preuve du
+correcteur sur une machine vierge — clone, `make demo`, les 271 tests, la preuve du
 cloisonnement — en plus du style, de la compilation dbt et de la validation Terraform.
 
 ---
@@ -193,7 +200,7 @@ src/eds/              Orchestrateur Python — pseudonymisation, collecte, charg
 dbt/                  Transformation silver et gold — 34 modèles, 117 tests
 sql/                  Initialisation de l'entrepôt, schémas bronze, chargements par jour
 terraform/            Infrastructure Azure
-tests/                241 tests (155 unitaires, 86 d'intégration)
+tests/                271 tests (184 unitaires, 87 d'intégration)
 docs/                 RAPPORT.md (dossier de conception), RAPPORT-CLOUD.md (déploiement Azure), modèles PlantUML, captures, énoncé
 benchmarks/           Banc d'essai : 20 M de relevés par le chemin réel du pipeline
 ```

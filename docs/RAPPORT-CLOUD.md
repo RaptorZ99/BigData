@@ -30,7 +30,7 @@ pas** offrir — et rien de décoratif :
 | Ce que le poste ne peut pas offrir | Ce que le déploiement Azure apporte |
 |---|---|
 | Un dépôt réaliste | Le CHU dépose dans un **conteneur de stockage objet**, versionné, à suppression réversible — c'est ainsi qu'un hôpital dépose réellement |
-| Une planification managée | Un **job serverless** déclenché chaque nuit par Azure, journalisé, avec réessai et déclenchement manuel pour la reprise |
+| Une planification **sans machine à garder allumée** | Un **job serverless** déclenché chaque nuit par Azure, journalisé, avec réessai et déclenchement manuel pour la reprise. En local, le même cron tourne dans un conteneur de la pile — tant que le poste est allumé |
 | Des secrets hors des fichiers | Le `.env` devient un **coffre Key Vault**, lu par identité gérée : aucun mot de passe sur disque, ni dans Git, ni dans un manifeste |
 | Un cloisonnement que le code ne peut pas contourner | Les droits de lecture sont attribués **par conteneur de stockage** : la machine de l'entrepôt n'a *aucun droit* sur l'identité en clair |
 | Une infrastructure reproductible | `terraform apply` construit les 14 ressources ; `terraform destroy` ne laisse rien. 29 variables, **une seule obligatoire** |
@@ -155,7 +155,9 @@ secondes. Sans nouveau dépôt, une nuit se résume à : « 92 fichier(s) déjà
 ignoré(s) · Aucun nouveau fichier : les couches silver et gold sont à jour », et une ligne
 `success` de plus dans `ops.pipeline_runs`. Le jour où un fichier arrive dans `filestorage`,
 la même exécution le charge. `make cloud-status` affiche ces passages ; la requête KQL des
-sorties Terraform en donne le détail.
+sorties Terraform en donne le détail. En local, le conteneur `scheduler` de la pile Docker
+Compose fait la même chose, depuis la même image et sur le même cron
+([rapport principal, §3.4](RAPPORT.md#34-automatisation--planification-erreurs-traçabilité)).
 
 ### 4.2 Ce qui se passe quand la VM démarre
 
@@ -315,7 +317,7 @@ devenir négative.
 | **Metabase à ~78 % de sa limite mémoire** | 4 Gio partagés par trois conteneurs ; budget JVM redécoupé et vérifié sous charge | VM à 8 Gio (`Standard_B2s_v2`, 65,82 €/mois) |
 | **Metabase sur H2** | Deux comptes, reconstructible par code | PostgreSQL managé |
 | **Règle SSH liée à une adresse** | Elle suit l'adresse du poste au dernier `apply` ; `terraform plan` la signale dès que l'adresse change | Bastion, ou suppression de la règle — SSH n'est pas utilisé |
-| **Contrôle du cloisonnement à la demande seulement** | `job-eds-controle` est en déclenchement manuel ; l'exemple `cron` local, lui, le rejoue chaque lundi | Le passer en déclencheur planifié (hebdomadaire) — il resterait lançable à la main |
+| **Contrôle du cloisonnement à la demande seulement** | `job-eds-controle` est en déclenchement manuel, comme son jumeau local | Le passer en déclencheur planifié (hebdomadaire) sur les deux cibles — il resterait lançable à la main |
 | **Mode nuit non activé** | Deux variables suffisent ; laissé éteint pour que la plateforme réponde à toute heure pendant l'évaluation | L'activer : 22,6 €/mois |
 | **Une seule région, réplication locale (LRS)** | Coût | Réplication géo-redondante du dépôt, plan de reprise |
 | **Supervision limitée aux alertes de budget** | Aucun test de disponibilité | Alerte Azure Monitor sur `job-eds-pipeline` en échec et sur la VM arrêtée |

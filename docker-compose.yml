@@ -70,6 +70,39 @@ services:
       start_period: 60s
     restart: unless-stopped
 
+  # ── Le planificateur : jumeau local du job Azure ─────────────────────────
+  # Même Dockerfile que l'image des jobs Container Apps, même commande (`eds run`),
+  # même cron UTC (`5 1 * * *`), même réessai. Il vit dans le réseau de la pile et
+  # joint ClickHouse par son nom de service, comme le job Azure joint la VM par son
+  # adresse privée. Il écrit le lake et les journaux là où le CLI du poste les
+  # écrit : les deux chemins d'exécution partagent tout, y compris `ops.ingest_log`.
+  scheduler:
+    build: .
+    image: eds-chu:local
+    container_name: eds-scheduler
+    command: ["schedule"]
+    env_file: .env
+    environment:
+      # Dans le réseau Docker, ClickHouse et Metabase se joignent par leur nom de
+      # service : ces deux valeurs remplacent le `localhost` du .env, écrit pour le CLI.
+      CLICKHOUSE_HOST: clickhouse
+      MB_URL: http://metabase:3000
+      # dbt écrit un fichier d'usage sous $HOME ; l'utilisateur ci-dessous n'en a pas.
+      HOME: /tmp
+      DBT_SEND_ANONYMOUS_USAGE_STATS: "false"
+    # Le lake et les journaux sont des dossiers du poste : le conteneur prend
+    # l'identité de son utilisateur (écrite par `make env`), sinon ces fichiers
+    # appartiendraient à root et `make reset` ne pourrait plus les effacer sur Linux.
+    user: "${EDS_UID:-1000}:${EDS_GID:-1000}"
+    volumes:
+      - ./source-filestorage:/app/source-filestorage:ro
+      - ./data/lake:/app/data/lake
+      - ./logs:/app/logs
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   clickhouse-data:
   metabase-data:

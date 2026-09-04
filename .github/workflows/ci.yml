@@ -116,6 +116,26 @@ jobs:
           uv run pytest -q
           uv run eds check-cloisonnement
 
+      - name: Le planificateur local tourne et annonce son prochain passage
+        run: |
+          docker compose ps --status running --services | grep -qx scheduler
+          docker compose logs --no-log-prefix scheduler | grep "Prochain passage"
+
+      - name: Le même pipeline, depuis l'image du cloud, sur un entrepôt vide
+        # Ce que fait le planificateur chaque nuit, joué tout de suite : l'image
+        # construite depuis le Dockerfile ingère les 92 fichiers, écrit le lake et les
+        # journaux sur le poste sous l'identité de l'utilisateur, et les 86 invariants
+        # doivent valoir exactement pareil que par le CLI. Le `make reset` final prouve
+        # que ces fichiers restent effaçables sans droits root.
+        run: |
+          echo y | make reset
+          make up
+          docker compose run --rm scheduler run
+          make provision
+          uv run pytest -m integration -q
+          uv run eds run | grep "déjà ingéré"
+          echo y | make reset
+
       - name: Journaux en cas d'échec
         if: failure()
         run: |

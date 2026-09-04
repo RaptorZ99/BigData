@@ -7,7 +7,7 @@ SHELL := /bin/bash
 # Toutes les commandes lisent .env ; on le crée à partir de l'exemple si besoin.
 ENV_FILE := .env
 
-.PHONY: help env acces up down pipeline provision demo test test-e2e lint fmt reset logs status quality diagram \
+.PHONY: help env acces up down pipeline provision demo schedule test test-e2e lint fmt reset logs status quality diagram \
         dbt-build dbt-test dbt-docs image image-push \
         cloud-bootstrap cloud-plan cloud-apply cloud-seed cloud-provision cloud-run \
         cloud-check cloud-status cloud-logs cloud-stop cloud-start cloud-destroy
@@ -56,15 +56,24 @@ env: ## Crée .env si besoin, avec sel et mots de passe tirés au hasard
 	    echo '  ⚠ Des mots de passe d'"'"'exemple subsistent dans .env (marque « change_me »).'; \
 	    echo '    Remplacez-les, ou supprimez .env et relancez `make env`.'; \
 	 fi
+	@# Le planificateur écrit le lake et les journaux sur le poste : il prend
+	@# l'identité de l'utilisateur, sinon root posséderait ces fichiers (Linux).
+	@if ! grep -q '^EDS_UID=' $(ENV_FILE); then \
+	    printf 'EDS_UID=%s\nEDS_GID=%s\n' "$$(id -u)" "$$(id -g)" >> $(ENV_FILE); \
+	 fi
 
 up: env ## Démarre ClickHouse + Metabase, puis provisionne l'entrepôt
 	@# Le lake doit exister avant le démarrage : Docker le monte dans ClickHouse,
 	@# et un montage créé sur un dossier absent devient invalide s'il est recréé.
-	@mkdir -p data/lake data/clickhouse data/metabase
+	@# `logs/` avant Docker : monté dans le planificateur, il serait sinon créé
+	@# par le démon, propriété de root, et le CLI du poste ne pourrait plus y écrire.
+	@mkdir -p data/lake data/clickhouse data/metabase logs
 	@# En cas d'échec au démarrage, Docker se contente de « dependency failed to
 	@# start » : le journal du conteneur, lui, dit pourquoi. Sans cette ligne, un
 	@# échec en intégration continue n'est pas diagnosticable a posteriori.
-	@docker compose up -d || { echo "── journal de ClickHouse ──"; docker compose logs --tail 60 clickhouse; exit 1; }
+	@# `--build` : le planificateur exécute le code du clone, pas une image d'hier.
+	@# Coûteux la première fois (dépendances), quelques secondes ensuite.
+	@docker compose up -d --build || { echo "── journal de ClickHouse ──"; docker compose logs --tail 60 clickhouse; exit 1; }
 	@echo "→ Attente de ClickHouse…"
 	@until docker compose exec -T clickhouse wget -q --spider http://localhost:8123/ping 2>/dev/null; do sleep 2; done
 	@echo "→ ClickHouse prêt."
@@ -90,6 +99,7 @@ demo: up pipeline provision ## Démo complète : démarrage + ingestion + dashbo
 	@echo "  Dashboards   http://localhost:3000"
 	@echo "               (identifiants affichés ci-dessus, définis dans .env)"
 	@echo "  Console SQL  http://localhost:8123/play"
+	@echo "  Planifié     chaque nuit à 01 h 05 UTC, conteneur eds-scheduler (make schedule)"
 	@echo ""
 	@echo "  Accès :      make acces   (URL et identifiants de votre installation)"
 	@echo "  Vérifier :   make status · make quality · make test-e2e"
@@ -98,7 +108,7 @@ demo: up pipeline provision ## Démo complète : démarrage + ingestion + dashbo
 
 acces: env ## Affiche les URL et identifiants de VOTRE installation
 	@# Volontairement une cible à part, et non la fin de `make demo` : la sortie du
-	@# provisionnement part dans logs/cron.log quand le pipeline est planifié, et un
+	@# provisionnement part dans des journaux quand le pipeline est planifié, et un
 	@# mot de passe n'a rien à faire dans un journal. Ici, c'est un humain qui demande.
 	@#
 	@# Les libellés sont écrits en toutes lettres plutôt que passés à `%-14s` :
@@ -114,6 +124,12 @@ acces: env ## Affiche les URL et identifiants de VOTRE installation
 
 status: ## État de l'ingestion et comptages par couche
 	uv run eds status
+
+schedule: ## Planificateur local : prochain passage et derniers journaux
+	@docker compose ps --status running --services 2>/dev/null | grep -qx scheduler \
+	   && echo "→ eds-scheduler tourne (même image et même cron que le job Azure)." \
+	   || echo "⚠ eds-scheduler ne tourne pas : make up"
+	@docker compose logs --no-log-prefix --tail 15 scheduler 2>/dev/null
 
 quality: ## Rapport qualité du dernier run
 	uv run eds quality
