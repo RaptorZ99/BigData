@@ -40,3 +40,6 @@ terraform/backend.hcl
 # source-filestorage/, qui seul fait foi et est versionné.
 source-evolution/
 source-filestorage-corrigé/
+# Jeu initial de l'épreuve (3 jours), remplacé par le jeu corrigé le 2 septembre 2026 :
+# conservé pour mémoire, jamais chargé, jamais versionné.
+source-filestorage-initial/
