@@ -1,10 +1,16 @@
 # EDS CHU — entrepôt (ClickHouse) + restitution (Metabase).
-name: eds-chu
+#
+# Pas de `name:` ni de `container_name:` : le nom du projet Compose dérive du dossier.
+# Deux copies du dépôt sur une même machine (un clone et une archive dézippée, par
+# exemple) ont ainsi chacune leurs conteneurs et leurs volumes. Avec un nom figé, la
+# seconde copie s'attachait en silence à la pile de la première — et à son Metabase,
+# dont le mot de passe n'était pas celui de son `.env`. Les ports restent fixes : une
+# seule pile tourne à la fois, et la seconde échoue clairement sur « port already
+# allocated » plutôt que d'emprunter les données de l'autre.
 
 services:
   clickhouse:
     image: clickhouse/clickhouse-server:26.3
-    container_name: eds-clickhouse
     environment:
       CLICKHOUSE_USER: ${CLICKHOUSE_ETL_USER:-chu_etl}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_ETL_PASSWORD:?CLICKHOUSE_ETL_PASSWORD manquant (cp .env.example .env)}
@@ -43,7 +49,6 @@ services:
 
   metabase:
     image: metabase/metabase:v0.58.31
-    container_name: eds-metabase
     ports:
       - "3000:3000"
     environment:
@@ -79,7 +84,6 @@ services:
   scheduler:
     build: .
     image: eds-chu:local
-    container_name: eds-scheduler
     command: ["schedule"]
     env_file: .env
     environment:

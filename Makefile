@@ -99,7 +99,7 @@ demo: up pipeline provision ## Démo complète : démarrage + ingestion + dashbo
 	@echo "  Dashboards   http://localhost:3000"
 	@echo "               (identifiants affichés ci-dessus, définis dans .env)"
 	@echo "  Console SQL  http://localhost:8123/play"
-	@echo "  Planifié     chaque nuit à 01 h 05 UTC, conteneur eds-scheduler (make schedule)"
+	@echo "  Planifié     chaque nuit à 01 h 05 UTC, service scheduler de la pile (make schedule)"
 	@echo ""
 	@echo "  Accès :      make acces   (URL et identifiants de votre installation)"
 	@echo "  Vérifier :   make status · make quality · make test-e2e"
@@ -127,8 +127,8 @@ status: ## État de l'ingestion et comptages par couche
 
 schedule: ## Planificateur local : prochain passage et derniers journaux
 	@docker compose ps --status running --services 2>/dev/null | grep -qx scheduler \
-	   && echo "→ eds-scheduler tourne (même image et même cron que le job Azure)." \
-	   || echo "⚠ eds-scheduler ne tourne pas : make up"
+	   && echo "→ Le planificateur tourne (même image et même cron que le job Azure)." \
+	   || echo "⚠ Le planificateur ne tourne pas : make up"
 	@docker compose logs --no-log-prefix --tail 15 scheduler 2>/dev/null
 
 quality: ## Rapport qualité du dernier run
