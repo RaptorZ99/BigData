@@ -254,7 +254,9 @@ est **refusée au démarrage du conteneur, avec un message qui la cite** — `jo
 « MON » n'est pas un nombre`, ou `« @daily » : cinq champs attendus …, 1 trouvé(s)` — jamais
 interprétée de travers ni ignorée en silence. Et il n'y a **pas de délai maximal d'exécution**
 en local, là où le job Azure est interrompu à 1 800 s : un `eds run` qui se figerait
-bloquerait les passages suivants sans rien signaler (§8).
+bloquerait les passages suivants sans rien signaler. Rien n'interdit non plus de lancer un
+`make pipeline` à la main pendant le passage nocturne. Ces deux limites sont assumées et
+inscrites au tableau du §8 plutôt que corrigées à la hâte.
 
 Le contrôle du cloisonnement est à la demande sur les deux cibles :
 `uv run eds check-cloisonnement` en local, `make cloud-check` sur Azure. Lancement,
@@ -669,6 +671,7 @@ aucune population. Les cohortes valident la chaîne de traitement, **pas** une c
 | Seuils d'alerte non validés cliniquement | Le nombre d'alertes en dépend directement | Faire arbitrer par les équipes soignantes avant tout usage |
 | Metabase tourne à ~78 % de sa limite mémoire sur la VM cloud | Marge étroite : un métaspace borné trop bas a déjà arrêté la JVM en cours de provisionnement | Budget JVM redécoupé (tas 524 Mo, métaspace 498 Mo, marge native 289 Mo) et vérifié sous charge ; une VM à 8 Gio le rendrait confortable |
 | La neurologie n'est pas décrite par le CHU | Sa densité d'actes par lit reste vide, sa catégorie est « (non decrit) » (§9) | Obtenir la ligne manquante du référentiel — le pipeline la prendra au prochain dépôt sans autre changement |
+| Rien n'empêche deux exécutions simultanées du pipeline | Un `make pipeline` lancé pendant le passage nocturne lit le même `ops.ingest_log` : selon l'entrelacement, un fichier peut être chargé deux fois. La fenêtre est étroite (un passage par nuit) mais réelle | Poser un verrou en début de run dans `ops` — la table existe déjà et porte le `run_id` |
 | Le planificateur local n'a pas de délai maximal d'exécution | Un `eds run` figé bloquerait les passages suivants sans alerte ; le job Azure, lui, est interrompu à 1 800 s (§3.4) | Borner l'exécution dans `schedule.py` et aligner la valeur sur `replica_timeout_in_seconds` |
 | Le tarif d'un acte est celui du référentiel courant | Un changement de tarif recalculerait tout l'historique facturé (§9.5) | Historiser `dim_ccam` (dimension à évolution lente) le jour où la T2A change |
 
