@@ -48,7 +48,7 @@ contraintes ont été relevées, pas supposées :
 **Ce qui ne change pas — les invariants.** Un seul code, deux cibles (`local`, `azure`) :
 même orchestrateur Python, même SQL bronze, mêmes 37 modèles dbt, mêmes tableaux de bord
 provisionnés par code. Vérifié sur les deux déploiements : 92 fichiers sur 29 jours, 20 tables
-gold, 27 cartes Metabase sans erreur, **26 résultats de carte sur 27 identiques au bit près**
+gold, 28 cartes Metabase sans erreur, **27 résultats de carte sur 28 identiques au bit près**
 (la 27ᵉ, le journal d'ingestion, diffère par son horodatage de traitement).
 
 > **Deux écarts trouvés en rédigeant ce rapport, corrigés le jour même.** Relire
